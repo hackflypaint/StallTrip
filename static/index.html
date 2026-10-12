@@ -101,6 +101,53 @@
             <button class="preset-tag" data-orig="Seattle, WA" data-dest="Portland, OR">Seattle → Portland</button>
           </div>
 
+          <!-- Routing Goal & Maximizer Selector -->
+          <div class="routing-goal-section">
+            <div class="input-header">
+              <label><i class="fa-solid fa-bullseye"></i> Route Strategy</label>
+            </div>
+            <div class="strategy-toggle">
+              <button type="button" class="strategy-btn active" id="btnModeMaximize" data-mode="MAXIMIZE" title="Stop at as many Superchargers as possible along the route">
+                <i class="fa-solid fa-bolt-lightning text-red"></i> Maximize Visits
+              </button>
+              <button type="button" class="strategy-btn" id="btnModeMinStops" data-mode="MIN_STOPS" title="Stop only when battery runs low for fastest trip">
+                <i class="fa-solid fa-gauge-high"></i> Min Stops
+              </button>
+            </div>
+            <div class="strategy-params" id="maximizeParams">
+              <div class="param-row">
+                <label for="maxStopsSelect">Max Corridor Stops:</label>
+                <select id="maxStopsSelect">
+                  <option value="6">6 stops</option>
+                  <option value="10">10 stops</option>
+                  <option value="15" selected>15 stops (Recommended)</option>
+                  <option value="20">20 stops</option>
+                  <option value="25">25 stops (Rally / Safari)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Area Selection & Force-Included Chargers -->
+          <div class="forced-section">
+            <div class="forced-header">
+              <label><i class="fa-solid fa-vector-square"></i> Force-Include Area / Stops</label>
+              <span class="forced-count-badge" id="forcedCountBadge">0 selected</span>
+            </div>
+            <p class="section-desc">Select an area on the map to guarantee those Superchargers are visited.</p>
+            <div class="forced-actions">
+              <button type="button" class="secondary-btn" id="btnSelectArea">
+                <i class="fa-solid fa-draw-polygon"></i> <span id="btnSelectAreaText">Select Area on Map</span>
+              </button>
+              <button type="button" class="secondary-btn text-danger" id="btnClearForced" style="display:none;">
+                <i class="fa-solid fa-xmark"></i> Clear All
+              </button>
+            </div>
+            <div class="forced-chips-list" id="forcedChipsList">
+              <div class="empty-forced-notice">No area selected. Click "Select Area on Map" to draw a box or click any station to force-include it.</div>
+            </div>
+          </div>
+
           <!-- Advanced EV Settings Accordion -->
           <details class="advanced-settings">
             <summary>
@@ -263,20 +310,33 @@
 
       <!-- Map Floating Controls & Overlays -->
       <div class="map-floating-bar">
+        <button class="map-btn" id="btnMapSelectArea" title="Select Area on Map to Force-Include Superchargers">
+          <i class="fa-solid fa-vector-square"></i>
+        </button>
         <button class="map-btn" id="btnMapReset" title="Reset View">
           <i class="fa-solid fa-expand"></i>
         </button>
         <button class="map-btn" id="btnLocateMe" title="Find My Location">
           <i class="fa-solid fa-crosshairs"></i>
         </button>
-        <button class="map-btn" id="btnToggleLayers" title="Toggle Charger Clusters">
+        <button class="map-btn" id="btnToggleLayers" title="Toggle Nearby Stations">
           <i class="fa-solid fa-layer-group"></i>
+        </button>
+      </div>
+
+      <!-- Map Mode Notification Banner (Active during Area Selection) -->
+      <div class="map-mode-banner" id="mapModeBanner" style="display: none;">
+        <i class="fa-solid fa-vector-square pulse-icon"></i>
+        <span>Click and drag on the map to draw a selection box around Superchargers.</span>
+        <button type="button" class="cancel-banner-btn" id="btnCancelAreaSelect">
+          <i class="fa-solid fa-xmark"></i> Cancel
         </button>
       </div>
 
       <!-- Route Guidance Floating Legend -->
       <div class="map-legend">
         <div class="legend-item"><span class="legend-color orig"></span> Origin</div>
+        <div class="legend-item"><span class="legend-color forced"></span> Forced Area Stop</div>
         <div class="legend-item"><span class="legend-color stop"></span> Supercharger Stop</div>
         <div class="legend-item"><span class="legend-color corridor"></span> Nearby Station</div>
         <div class="legend-item"><span class="legend-color dest"></span> Destination</div>

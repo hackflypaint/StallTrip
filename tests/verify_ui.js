@@ -2,8 +2,10 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
+const MEDIA_DIR = '/tmp/tesla-planner-media';
+
 async function runVerification() {
-  console.log('Launching browser...');
+  console.log('Launching browser for comprehensive UI verification...');
   const browser = await chromium.launch({
     headless: true,
     executablePath: '/usr/local/bin/google-chrome',
@@ -15,77 +17,128 @@ async function runVerification() {
   });
 
   const page = await context.newPage();
-  const screenshotsDir = '/tmp/test_screenshots';
-  if (!fs.existsSync(screenshotsDir)) {
-    fs.mkdirSync(screenshotsDir, { recursive: true });
+  if (!fs.existsSync(MEDIA_DIR)) {
+    fs.mkdirSync(MEDIA_DIR, { recursive: true });
   }
 
+  // Catch console errors
+  page.on('console', msg => {
+    if (msg.type() === 'error') {
+      console.log('Browser console error:', msg.text());
+    }
+  });
+
   try {
-    console.log('Navigating to http://localhost:8080 ...');
+    console.log('1. Navigating to http://localhost:8080 ...');
     await page.goto('http://localhost:8080/', { waitUntil: 'networkidle', timeout: 15000 });
 
-    // 1. Check title & badge
     const badgeText = await page.locator('#totalChargersBadge').textContent();
-    console.log(`Chargers Badge: ${badgeText}`);
+    console.log(`Chargers in database: ${badgeText}`);
 
-    // Wait a brief moment for map tiles to render
     await page.waitForTimeout(2000);
-    await page.screenshot({ path: path.join(screenshotsDir, '01_initial_page.png') });
-    console.log('Saved 01_initial_page.png');
 
-    // 2. Click preset route button: "SF -> LA"
-    console.log('Clicking "SF -> LA" preset...');
+    // 2. Click preset route: "SF -> LA" in Visit Maximizer mode
+    console.log('2. Clicking "SF -> LA" preset in Visit Maximizer mode...');
     await page.locator('button.preset-tag:has-text("SF → LA")').click();
 
-    // Wait for route plan to finish computing & rendering
-    console.log('Waiting for route results...');
     await page.waitForSelector('#routeResults', { state: 'visible', timeout: 10000 });
-    await page.waitForTimeout(3000); // allow map animation and tiles to settle
+    await page.waitForTimeout(3000);
 
     const distance = await page.locator('#statDistance').textContent();
     const tripTime = await page.locator('#statTotalTime').textContent();
-    const stops = await page.locator('#statStops').textContent();
+    const stopsCount = await page.locator('#statStops').textContent();
     const corridorText = await page.locator('#corridorCountText').textContent();
 
-    console.log(`Route Computed:`);
+    console.log(`Route Computed (Visit Maximizer):`);
     console.log(`  Distance: ${distance}`);
     console.log(`  Trip Time: ${tripTime}`);
-    console.log(`  Stops: ${stops}`);
-    console.log(`  Corridor info: ${corridorText}`);
+    console.log(`  Supercharger Stops Visited: ${stopsCount}`);
+    console.log(`  Corridor details: ${corridorText}`);
 
-    await page.screenshot({ path: path.join(screenshotsDir, '02_route_calculated.png') });
-    console.log('Saved 02_route_calculated.png');
-
-    // 3. Click on a Supercharger timeline item to open drawer
-    console.log('Clicking on Supercharger stop in timeline...');
-    const firstStop = page.locator('.timeline-item.supercharger .timeline-content').first();
-    if (await firstStop.isVisible()) {
-      await firstStop.click();
-      await page.waitForSelector('#chargerDrawer', { state: 'visible', timeout: 5000 });
-      await page.waitForTimeout(1000);
-
-      const chargerTitle = await page.locator('#drawerTitle').textContent();
-      const chargerPower = await page.locator('#drawerPower').textContent();
-      const chargerStalls = await page.locator('#drawerStalls').textContent();
-      console.log(`Charger Drawer opened: ${chargerTitle} (${chargerPower}, ${chargerStalls} stalls)`);
-
-      await page.screenshot({ path: path.join(screenshotsDir, '03_charger_drawer.png') });
-      console.log('Saved 03_charger_drawer.png');
+    // Verify stopsCount > 1 (Visit Maximizer)
+    if (parseInt(stopsCount) <= 1) {
+      throw new Error(`Expected multiple stops in Visit Maximizer mode, but got ${stopsCount}`);
     }
 
-    // 4. Switch to Explore Chargers tab
-    console.log('Switching to Explore Chargers tab...');
-    await page.locator('#tabExplore').click();
-    await page.waitForSelector('#explore-tab', { state: 'visible' });
+    await page.screenshot({ path: path.join(MEDIA_DIR, '01_visit_maximizer_route.png') });
+    console.log('Saved 01_visit_maximizer_route.png');
+
+    // 3. Test Drawer and Force-Include toggle
+    console.log('3. Clicking first Supercharger stop in timeline to view details...');
+    const firstStop = page.locator('.timeline-item.supercharger .timeline-content').first();
+    await firstStop.click();
+    await page.waitForSelector('#chargerDrawer', { state: 'visible', timeout: 5000 });
+    await page.waitForTimeout(1000);
+
+    const drawerTitle = await page.locator('#drawerTitle').textContent();
+    console.log(`Opened drawer for: ${drawerTitle}`);
+
+    // Toggle Force Include
+    console.log('Toggling "Force-Include in Route" button in drawer...');
+    await page.locator('#btnAddStopToRoute').click();
     await page.waitForTimeout(2000);
 
-    const chargerCountText = await page.locator('#chargerListCount').textContent();
-    console.log(`Explore Chargers: ${chargerCountText}`);
+    const forcedBadge = await page.locator('#forcedCountBadge').textContent();
+    console.log(`Forced chargers count: ${forcedBadge}`);
 
-    await page.screenshot({ path: path.join(screenshotsDir, '04_explore_tab.png') });
+    await page.screenshot({ path: path.join(MEDIA_DIR, '02_drawer_force_include.png') });
+    console.log('Saved 02_drawer_force_include.png');
+
+    await page.locator('#btnCloseDrawer').click();
+    await page.waitForTimeout(500);
+
+    // 4. Test Area Selection Tool on Map
+    console.log('4. Activating Area Selection Tool...');
+    await page.locator('#btnSelectArea').click();
+    await page.waitForSelector('#mapModeBanner', { state: 'visible' });
+    console.log('Area select banner is visible.');
+
+    // Simulate drag bounding box in Central Valley / Southern California
+    const mapBox = await page.locator('#map').boundingBox();
+    if (mapBox) {
+      const startX = mapBox.x + mapBox.width * 0.45;
+      const startY = mapBox.y + mapBox.height * 0.45;
+      const endX = mapBox.x + mapBox.width * 0.65;
+      const endY = mapBox.y + mapBox.height * 0.65;
+
+      console.log(`Dragging selection box from (${startX}, ${startY}) to (${endX}, ${endY})...`);
+      await page.mouse.move(startX, startY);
+      await page.mouse.down();
+      await page.mouse.move(endX, endY, { steps: 10 });
+      await page.mouse.up();
+      await page.waitForTimeout(3000);
+    }
+
+    const updatedForcedBadge = await page.locator('#forcedCountBadge').textContent();
+    console.log(`Updated Forced Count after area select: ${updatedForcedBadge}`);
+
+    await page.screenshot({ path: path.join(MEDIA_DIR, '03_area_selected_route.png') });
+    console.log('Saved 03_area_selected_route.png');
+
+    // 5. Switch to Explore Tab and check filters
+    console.log('5. Testing Explore Chargers tab...');
+    await page.locator('#tabExplore').click();
+    await page.waitForSelector('#explore-tab', { state: 'visible' });
+    await page.waitForTimeout(1500);
+
+    const countText = await page.locator('#chargerListCount').textContent();
+    console.log(`Explore Chargers count: ${countText}`);
+
+    await page.screenshot({ path: path.join(MEDIA_DIR, '04_explore_tab.png') });
     console.log('Saved 04_explore_tab.png');
 
-    console.log('ALL VERIFICATION CHECKS PASSED SUCCESSFULLY!');
+    // 6. Test Mobile Viewport
+    console.log('6. Testing Mobile responsive viewport (390x844)...');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('#tabRoute').click();
+    await page.waitForTimeout(1500);
+
+    await page.screenshot({ path: path.join(MEDIA_DIR, '05_mobile_responsive.png') });
+    console.log('Saved 05_mobile_responsive.png');
+
+    console.log('\n=============================================');
+    console.log('ALL PLAYWRIGHT VERIFICATION CHECKS PASSED!');
+    console.log('=============================================\n');
   } catch (err) {
     console.error('Verification failed:', err);
     process.exit(1);

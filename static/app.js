@@ -1,5 +1,7 @@
 /**
  * Tesla Supercharger Route Planner - Client Application
+ * Includes Visit Maximizer routing, map area drag-selection for force-included chargers,
+ * and intelligent multi-stop itinerary generation.
  */
 
 // Application State
@@ -11,8 +13,14 @@ const state = {
   markersLayer: null,
   corridorLayer: null,
   routeLayer: null,
+  forcedMarkersLayer: null,
   allSuperchargers: [],
   selectedCharger: null,
+  routingMode: "MAXIMIZE", // "MAXIMIZE" (default) or "MIN_STOPS"
+  forcedChargers: new Map(), // Map<id, charger>
+  areaSelectMode: false,
+  dragStartLatLng: null,
+  selectionRect: null,
 };
 
 // Initialize Application
@@ -33,7 +41,7 @@ function initMap() {
 
   L.control.zoom({ position: "topright" }).addTo(state.map);
 
-  // High quality OpenStreetMap tiles (free, reliable, no API key required)
+  // High quality OpenStreetMap tiles
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     maxZoom: 19,
@@ -41,10 +49,13 @@ function initMap() {
 
   state.routeLayer = L.featureGroup().addTo(state.map);
   state.corridorLayer = L.featureGroup().addTo(state.map);
+  state.forcedMarkersLayer = L.featureGroup().addTo(state.map);
   state.markersLayer = L.featureGroup().addTo(state.map);
 
-  // Map click handler to set origin or destination
+  // Map click handler for origin/destination when not in area selection mode
   state.map.on("click", (e) => {
+    if (state.areaSelectMode) return;
+
     if (!state.origin) {
       setOrigin({
         name: `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`,
@@ -67,6 +78,9 @@ function initMap() {
       loadMapBoundsChargers();
     }
   });
+
+  // Setup Map Area Selection Drawing Handlers
+  setupMapAreaSelection();
 }
 
 function setupEventListeners() {
@@ -116,6 +130,21 @@ function setupEventListeners() {
   setupClearBtn("clearOrigin", "originInput", () => { state.origin = null; updateMapMarkers(); });
   setupClearBtn("clearDest", "destInput", () => { state.destination = null; updateMapMarkers(); });
 
+  // Strategy Mode Toggles
+  document.getElementById("btnModeMaximize").addEventListener("click", () => {
+    setRoutingMode("MAXIMIZE");
+  });
+  document.getElementById("btnModeMinStops").addEventListener("click", () => {
+    setRoutingMode("MIN_STOPS");
+  });
+
+  // Max stops dropdown
+  document.getElementById("maxStopsSelect").addEventListener("change", () => {
+    if (state.origin && state.destination && state.activePlan) {
+      planRoute();
+    }
+  });
+
   // Sliders display
   const initBatterySlider = document.getElementById("initialBattery");
   initBatterySlider.addEventListener("input", (e) => {
@@ -126,6 +155,12 @@ function setupEventListeners() {
   targetArrivalSlider.addEventListener("input", (e) => {
     document.getElementById("targetArrivalVal").innerText = `${e.target.value}%`;
   });
+
+  // Area Selection Buttons
+  document.getElementById("btnSelectArea").addEventListener("click", toggleAreaSelectMode);
+  document.getElementById("btnMapSelectArea").addEventListener("click", toggleAreaSelectMode);
+  document.getElementById("btnCancelAreaSelect").addEventListener("click", deactivateAreaSelectMode);
+  document.getElementById("btnClearForced").addEventListener("click", clearForcedChargers);
 
   // Plan Route button
   document.getElementById("btnPlanRoute").addEventListener("click", () => {
@@ -177,11 +212,14 @@ function setupEventListeners() {
     document.getElementById("chargerDrawer").style.display = "none";
   });
 
-  // Add stop to route from drawer
+  // Add / Force-Include stop to route from drawer
   document.getElementById("btnAddStopToRoute").addEventListener("click", () => {
     if (!state.selectedCharger) return;
-    alert(`Selected ${state.selectedCharger.name}. Re-calculating with custom charger.`);
-    document.getElementById("chargerDrawer").style.display = "none";
+    toggleForcedCharger(state.selectedCharger);
+    updateDrawerButton(state.selectedCharger);
+    if (state.origin && state.destination) {
+      planRoute();
+    }
   });
 
   // Explore search & filters
@@ -198,6 +236,201 @@ function setupEventListeners() {
   document.getElementById("filterMinPower").addEventListener("change", loadMapBoundsChargers);
   document.getElementById("filterMinStalls").addEventListener("change", loadMapBoundsChargers);
   document.getElementById("btnFilterMapArea").addEventListener("click", loadMapBoundsChargers);
+
+  // Global ESC key to cancel area select
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.areaSelectMode) {
+      deactivateAreaSelectMode();
+    }
+  });
+}
+
+function setRoutingMode(mode) {
+  state.routingMode = mode;
+  document.getElementById("btnModeMaximize").classList.toggle("active", mode === "MAXIMIZE");
+  document.getElementById("btnModeMinStops").classList.toggle("active", mode === "MIN_STOPS");
+  document.getElementById("maximizeParams").style.display = mode === "MAXIMIZE" ? "flex" : "none";
+
+  if (state.origin && state.destination && state.activePlan) {
+    planRoute();
+  }
+}
+
+// Map Area Drag-Selection Implementation
+function setupMapAreaSelection() {
+  const mapContainer = document.getElementById("map");
+
+  state.map.on("mousedown", (e) => {
+    if (!state.areaSelectMode) return;
+    if (e.originalEvent.button !== 0) return; // Left click only
+
+    state.dragStartLatLng = e.latlng;
+    if (state.selectionRect) {
+      state.map.removeLayer(state.selectionRect);
+      state.selectionRect = null;
+    }
+
+    state.selectionRect = L.rectangle([e.latlng, e.latlng], {
+      color: "#00b4d8",
+      weight: 2,
+      dashArray: "6, 6",
+      fillColor: "#00b4d8",
+      fillOpacity: 0.18,
+    }).addTo(state.map);
+  });
+
+  state.map.on("mousemove", (e) => {
+    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionRect) return;
+    const bounds = L.latLngBounds(state.dragStartLatLng, e.latlng);
+    state.selectionRect.setBounds(bounds);
+  });
+
+  state.map.on("mouseup", async (e) => {
+    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionRect) return;
+
+    const bounds = state.selectionRect.getBounds();
+    const minLat = Math.min(bounds.getSouth(), bounds.getNorth());
+    const maxLat = Math.max(bounds.getSouth(), bounds.getNorth());
+    const minLng = Math.min(bounds.getWest(), bounds.getEast());
+    const maxLng = Math.max(bounds.getWest(), bounds.getEast());
+
+    // Small click without drag: cancel or ignore
+    if (Math.abs(maxLat - minLat) < 0.005 && Math.abs(maxLng - minLng) < 0.005) {
+      if (state.selectionRect) {
+        state.map.removeLayer(state.selectionRect);
+        state.selectionRect = null;
+      }
+      state.dragStartLatLng = null;
+      return;
+    }
+
+    // Query chargers in this bounding box
+    try {
+      const resp = await fetch(`/api/superchargers?min_lat=${minLat}&max_lat=${maxLat}&min_lng=${minLng}&max_lng=${maxLng}&status=OPEN&limit=500`);
+      const data = await resp.json();
+      const chargers = data.superchargers || [];
+
+      if (chargers.length === 0) {
+        alert("No open Superchargers found inside the selected rectangle. Try selecting a wider area.");
+      } else {
+        chargers.forEach((c) => {
+          state.forcedChargers.set(c.id, c);
+        });
+        updateForcedChargersUI();
+      }
+    } catch (err) {
+      console.error("Area selection query error:", err);
+    } finally {
+      deactivateAreaSelectMode();
+      if (state.origin && state.destination) {
+        planRoute();
+      }
+    }
+  });
+}
+
+function toggleAreaSelectMode() {
+  if (state.areaSelectMode) {
+    deactivateAreaSelectMode();
+  } else {
+    activateAreaSelectMode();
+  }
+}
+
+function activateAreaSelectMode() {
+  state.areaSelectMode = true;
+  state.map.dragging.disable();
+  document.getElementById("map").style.cursor = "crosshair";
+  document.getElementById("mapModeBanner").style.display = "flex";
+  document.getElementById("btnSelectAreaText").innerText = "Drawing Box...";
+  document.getElementById("btnMapSelectArea").style.background = "#00b4d8";
+  document.getElementById("btnMapSelectArea").style.color = "#fff";
+}
+
+function deactivateAreaSelectMode() {
+  state.areaSelectMode = false;
+  state.map.dragging.enable();
+  state.dragStartLatLng = null;
+  document.getElementById("map").style.cursor = "";
+  document.getElementById("mapModeBanner").style.display = "none";
+  document.getElementById("btnSelectAreaText").innerText = "Select Area on Map";
+  document.getElementById("btnMapSelectArea").style.background = "";
+  document.getElementById("btnMapSelectArea").style.color = "";
+}
+
+function toggleForcedCharger(charger) {
+  if (state.forcedChargers.has(charger.id)) {
+    state.forcedChargers.delete(charger.id);
+  } else {
+    state.forcedChargers.set(charger.id, charger);
+  }
+  updateForcedChargersUI();
+}
+
+function clearForcedChargers() {
+  state.forcedChargers.clear();
+  if (state.selectionRect) {
+    state.map.removeLayer(state.selectionRect);
+    state.selectionRect = null;
+  }
+  updateForcedChargersUI();
+  if (state.origin && state.destination && state.activePlan) {
+    planRoute();
+  }
+}
+
+function updateForcedChargersUI() {
+  const count = state.forcedChargers.size;
+  document.getElementById("forcedCountBadge").innerText = `${count} selected`;
+  document.getElementById("btnClearForced").style.display = count > 0 ? "inline-flex" : "none";
+
+  const chipsList = document.getElementById("forcedChipsList");
+  chipsList.innerHTML = "";
+
+  if (count === 0) {
+    chipsList.innerHTML = `<div class="empty-forced-notice">No area selected. Click "Select Area on Map" to draw a box or click any station to force-include it.</div>`;
+  } else {
+    state.forcedChargers.forEach((c) => {
+      const chip = document.createElement("div");
+      chip.className = "forced-chip";
+      chip.innerHTML = `
+        <i class="fa-solid fa-star text-cyan" style="font-size:10px;"></i>
+        <span>${c.name}</span>
+        <button type="button" class="forced-chip-remove" title="Remove stop"><i class="fa-solid fa-xmark"></i></button>
+      `;
+      chip.querySelector(".forced-chip-remove").addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleForcedCharger(c);
+        if (state.origin && state.destination && state.activePlan) {
+          planRoute();
+        }
+      });
+      chip.addEventListener("click", () => {
+        state.map.setView([c.lat, c.lng], 15);
+        showChargerDrawer(c);
+      });
+      chipsList.appendChild(chip);
+    });
+  }
+
+  // Render visual forced markers on the map
+  state.forcedMarkersLayer.clearLayers();
+  state.forcedChargers.forEach((c) => {
+    const forcedMarker = L.circleMarker([c.lat, c.lng], {
+      radius: 9,
+      fillColor: "#00b4d8",
+      color: "#ffffff",
+      weight: 2.5,
+      opacity: 1.0,
+      fillOpacity: 0.9,
+    });
+    forcedMarker.bindTooltip(`⭐ <b>FORCE-INCLUDED:</b> ${c.name}<br>${c.power || 250} kW • ${c.stalls || 8} stalls`, {
+      direction: "top",
+      offset: [0, -8],
+    });
+    forcedMarker.on("click", () => showChargerDrawer(c));
+    state.forcedMarkersLayer.addLayer(forcedMarker);
+  });
 }
 
 function switchTab(tabId) {
@@ -388,12 +621,15 @@ async function planRoute() {
 
   const btn = document.getElementById("btnPlanRoute");
   const origBtnText = btn.innerHTML;
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Calculating Best Superchargers...';
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Maximizing Superchargers...';
   btn.disabled = true;
 
   const payload = {
     origin: [state.origin.lat, state.origin.lng],
     destination: [state.destination.lat, state.destination.lng],
+    routing_mode: state.routingMode,
+    forced_chargers: Array.from(state.forcedChargers.values()),
+    max_stops: parseInt(document.getElementById("maxStopsSelect").value),
     initial_battery: parseFloat(document.getElementById("initialBattery").value),
     target_arrival: parseFloat(document.getElementById("targetArrival").value),
     max_range_km: parseFloat(document.getElementById("vehicleModel").value),
@@ -431,8 +667,13 @@ function renderRoutePlan(plan) {
   document.getElementById("statTotalTime").innerText = plan.summary.total_trip_duration_formatted;
   document.getElementById("statStops").innerText = `${plan.summary.supercharger_stops_count}`;
   document.getElementById("statChargeTime").innerText = `${plan.summary.charge_duration_minutes} min`;
+  
+  let forcedNotice = "";
+  if (plan.summary.forced_stops_count > 0) {
+    forcedNotice = ` (${plan.summary.forced_stops_count} from forced area/selection)`;
+  }
   document.getElementById("corridorCountText").innerText = 
-    `Found ${plan.summary.chargers_along_corridor_count} Tesla Superchargers along this corridor`;
+    `Visited ${plan.summary.supercharger_stops_count} Superchargers${forcedNotice} • ${plan.summary.chargers_along_corridor_count} stations along corridor`;
 
   // 2. Render Map Geometry
   state.routeLayer.clearLayers();
@@ -478,20 +719,24 @@ function renderRoutePlan(plan) {
   const stops = plan.stops || [];
   stops.forEach((stop) => {
     if (stop.type === "SUPERCHARGER") {
+      const isForced = stop.forced;
+      const markerColor = isForced ? "#00b4d8" : "#e82127";
+      const iconClass = isForced ? "fa-solid fa-star" : "fa-solid fa-bolt";
+
       const stopIcon = L.divIcon({
         className: "custom-div-icon",
-        html: `<div style="background:#ffffff; border:3px solid #e82127; color:#e82127; width:34px; height:34px; border-radius:50%; display:flex; flex-direction:column; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(232,33,39,0.5); font-weight:800; font-size:11px;">
-                 <i class="fa-solid fa-bolt" style="font-size:12px;"></i>
+        html: `<div style="background:#ffffff; border:3px solid ${markerColor}; color:${markerColor}; width:34px; height:34px; border-radius:50%; display:flex; flex-direction:column; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(0,0,0,0.5); font-weight:800; font-size:11px;">
+                 <i class="${iconClass}" style="font-size:11px;"></i>
                  <span style="font-size:9px; margin-top:-2px;">#${stop.stop_index}</span>
                </div>`,
         iconSize: [34, 34],
         iconAnchor: [17, 17],
       });
 
-      const marker = L.marker([stop.lat, stop.lng], { icon: stopIcon, zIndexOffset: 500 });
+      const marker = L.marker([stop.lat, stop.lng], { icon: stopIcon, zIndexOffset: isForced ? 600 : 500 });
       marker.bindPopup(`
         <div style="min-width:180px;">
-          <h4 style="margin:0 0 4px 0; color:#e82127;">Stop #${stop.stop_index}: ${stop.name}</h4>
+          <h4 style="margin:0 0 4px 0; color:${markerColor};">${isForced ? '⭐ [FORCED] ' : ''}Stop #${stop.stop_index}: ${stop.name}</h4>
           <p style="margin:2px 0; font-size:12px;"><b>Power:</b> ${stop.power} kW (${stop.stalls} stalls)</p>
           <p style="margin:2px 0; font-size:12px;"><b>Arrive:</b> ${stop.arrival_battery_pct}% &rarr; <b>Leave:</b> ${stop.departure_battery_pct}%</p>
           <p style="margin:2px 0; font-size:12px; color:#10b981;"><b>Charge time:</b> ${stop.charge_duration_min} min</p>
@@ -548,13 +793,16 @@ function renderTimeline(stops) {
         state.map.setView([s.lat, s.lng], 14);
       });
     } else if (s.type === "SUPERCHARGER") {
-      item.className = "timeline-item supercharger";
+      const isForced = s.forced;
+      item.className = `timeline-item supercharger ${isForced ? 'forced' : ''}`;
       item.innerHTML = `
-        <div class="timeline-marker">${s.stop_index}</div>
+        <div class="timeline-marker">${isForced ? '<i class="fa-solid fa-star"></i>' : s.stop_index}</div>
         <div class="timeline-content">
           <div class="item-top">
             <span class="item-name">${s.name}</span>
-            <span class="item-badge badge-charge"><i class="fa-solid fa-bolt"></i> +${s.charge_duration_min} min</span>
+            <span class="item-badge ${isForced ? 'badge-forced' : 'badge-charge'}">
+              ${isForced ? '⭐ FORCED STOP' : `<i class="fa-solid fa-bolt"></i> +${s.charge_duration_min} min`}
+            </span>
           </div>
           <div class="item-details">
             <span class="battery-tag"><i class="fa-solid fa-battery-quarter" style="color:var(--accent-orange)"></i> ${s.arrival_battery_pct}% &rarr; ${s.departure_battery_pct}%</span>
@@ -614,11 +862,26 @@ function showChargerDrawer(c) {
     amenitiesContainer.innerHTML += `<span class="chip red"><i class="fa-solid fa-bolt"></i> Open to Non-Tesla</span>`;
   }
 
+  // Update button text and state
+  updateDrawerButton(c);
+
   // Google Maps link
   const gmapsBtn = document.getElementById("btnOpenGoogleMaps");
   gmapsBtn.href = `https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}`;
 
   drawer.style.display = "flex";
+}
+
+function updateDrawerButton(c) {
+  const btn = document.getElementById("btnAddStopToRoute");
+  const isForced = state.forcedChargers.has(c.id);
+  if (isForced) {
+    btn.innerHTML = `<i class="fa-solid fa-check"></i> Force-Included (Click to Remove)`;
+    btn.style.background = "#00b4d8";
+  } else {
+    btn.innerHTML = `<i class="fa-solid fa-star"></i> Force-Include in Route`;
+    btn.style.background = "";
+  }
 }
 
 async function loadStats() {
@@ -676,11 +939,12 @@ function renderExploreList(chargers) {
   }
 
   chargers.forEach((c) => {
+    const isForced = state.forcedChargers.has(c.id);
     const card = document.createElement("div");
     card.className = "charger-list-item";
     card.innerHTML = `
       <div class="charger-list-title">
-        <span>${c.name}</span>
+        <span>${isForced ? '⭐ ' : ''}${c.name}</span>
         <span class="chip ${c.status === 'OPEN' ? 'green' : 'red'}">${c.status}</span>
       </div>
       <div class="charger-list-sub">
@@ -690,6 +954,7 @@ function renderExploreList(chargers) {
         <span class="chip red"><i class="fa-solid fa-bolt"></i> ${c.power || 150} kW</span>
         <span class="chip"><i class="fa-solid fa-charging-station"></i> ${c.stalls || 8} stalls</span>
         ${c.otherEVs ? '<span class="chip green">All EVs</span>' : ''}
+        ${isForced ? '<span class="chip" style="background:#00b4d8; color:#fff;">Force-Included</span>' : ''}
         ${c.distance_km !== undefined ? `<span class="chip">${c.distance_km} km away</span>` : ''}
       </div>
     `;

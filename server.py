@@ -66,7 +66,7 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         """Filter superchargers by bounds, search text, or radius."""
         try:
             status = query.get("status", ["OPEN"])[0]
-            limit = int(query.get("limit", [150])[0])
+            limit = int(query.get("limit", [250])[0])
             min_power = int(query.get("min_power", [0])[0]) if "min_power" in query else None
             min_stalls = int(query.get("min_stalls", [0])[0]) if "min_stalls" in query else None
             query_text = query.get("q", [None])[0]
@@ -148,11 +148,19 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             target_arrival = float(data.get("target_arrival", 15.0))
             max_range = float(data.get("max_range_km", 450.0))
             corridor_buffer = float(data.get("corridor_buffer_km", 30.0))
-            min_power = int(data.get("min_power", 150))
+            min_power = int(data.get("min_power", 0))
+            routing_mode = str(data.get("routing_mode", "MAXIMIZE"))
+            max_stops = int(data.get("max_stops", 20))
+            forced_chargers = data.get("forced_chargers", [])
+            forced_charger_ids = data.get("forced_charger_ids", [])
 
             plan = routing.plan_trip(
                 origin=(float(origin[0]), float(origin[1])),
                 destination=(float(destination[0]), float(destination[1])),
+                routing_mode=routing_mode,
+                forced_chargers=forced_chargers,
+                forced_charger_ids=forced_charger_ids,
+                max_stops=max_stops,
                 initial_battery_pct=initial_battery,
                 target_arrival_pct=target_arrival,
                 max_range_km=max_range,

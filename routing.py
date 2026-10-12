@@ -1,6 +1,12 @@
 """
 Tesla Supercharger Routing and Recommendation Engine.
-Computes routes, corridor spatial queries, and optimal Supercharger stops.
+Features:
+- Global Supercharger spatial queries & corridor filtering
+- Visit Maximizer mode: visits as many Superchargers along the route as possible in an efficient sensible sequence
+- Force-Included Area & Specific Charger Stops: user can select an area on the map or pick individual chargers to guarantee inclusion
+- Minimum-stops EV range optimizer mode (for fastest trip)
+- OSRM multi-stop driving route generation with automatic batching/chunking and offline direct fallbacks
+- Dual geocoding pipeline (Photon OSM + direct coordinates + Nominatim fallback)
 """
 
 import json
@@ -8,7 +14,7 @@ import math
 import os
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "superchargers.json")
 OSRM_BASE_URL = "http://router.project-osrm.org"
@@ -17,14 +23,16 @@ NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org"
 
 # In-memory store of all Superchargers
 SUPERCHARGERS: List[Dict[str, Any]] = []
+SUPERCHARGERS_BY_ID: Dict[int, Dict[str, Any]] = {}
 
 def load_superchargers() -> List[Dict[str, Any]]:
-    global SUPERCHARGERS
+    global SUPERCHARGERS, SUPERCHARGERS_BY_ID
     if SUPERCHARGERS:
         return SUPERCHARGERS
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             SUPERCHARGERS = json.load(f)
+            SUPERCHARGERS_BY_ID = {c["id"]: c for c in SUPERCHARGERS if "id" in c}
             print(f"Loaded {len(SUPERCHARGERS)} Superchargers into memory.")
     else:
         print(f"Warning: Data file {DATA_FILE} not found.")
@@ -82,7 +90,7 @@ def query_superchargers(
     status_filter: Optional[str] = "OPEN",
     min_power: Optional[int] = None,
     min_stalls: Optional[int] = None,
-    limit: int = 100
+    limit: int = 150
 ) -> List[Dict[str, Any]]:
     """Query and filter superchargers by bounding box, radius, text, status, and specs."""
     chargers = load_superchargers()
@@ -144,7 +152,6 @@ def query_superchargers(
 
 def geocode_address(query: str) -> List[Dict[str, Any]]:
     """Geocode an address or place name using Photon (OSM) with Nominatim fallback."""
-    # Check if query is raw "lat, lng" coordinates
     parts = [p.strip() for p in query.split(",")]
     if len(parts) == 2:
         try:
@@ -163,7 +170,7 @@ def geocode_address(query: str) -> List[Dict[str, Any]]:
 
     encoded_q = urllib.parse.quote(query)
     
-    # 1. Primary: Photon OSM Geocoding (high reliability, rate limit friendly)
+    # 1. Primary: Photon OSM Geocoding
     try:
         url = f"{PHOTON_BASE_URL}/?q={encoded_q}&limit=5"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
@@ -220,24 +227,75 @@ def geocode_address(query: str) -> List[Dict[str, Any]]:
     return []
 
 def get_osrm_route(coordinates: List[Tuple[float, float]], overview: str = "full") -> Dict[str, Any]:
-    """
-    Query OSRM driving service.
-    coordinates: List of (lng, lat) tuples
-    """
+    """Single OSRM driving route request."""
     coord_str = ";".join([f"{lng:.6f},{lat:.6f}" for lng, lat in coordinates])
     url = f"{OSRM_BASE_URL}/route/v1/driving/{coord_str}?overview={overview}&geometries=geojson&steps=false"
     
     req = urllib.request.Request(url, headers={"User-Agent": "TeslaSuperchargerApp/1.0"})
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=12) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             if data.get("code") == "Ok" and data.get("routes"):
                 return data
     except Exception as e:
-        print(f"OSRM routing failed: {e}")
+        print(f"OSRM single call failed: {e}")
     
-    # Fallback: compute straight-line approximation if OSRM is unreachable
     return create_direct_route_fallback(coordinates)
+
+def get_chunked_osrm_route(coordinates: List[Tuple[float, float]], chunk_size: int = 18) -> Dict[str, Any]:
+    """
+    Query OSRM driving service with automatic batching/chunking to support large numbers
+    of Supercharger stops without URL length or gateway limitations.
+    Stitches coordinates and legs into a continuous route.
+    """
+    if len(coordinates) <= chunk_size:
+        return get_osrm_route(coordinates)
+
+    total_dist_m = 0.0
+    total_dur_s = 0.0
+    combined_coords = []
+    combined_legs = []
+
+    for i in range(0, len(coordinates) - 1, chunk_size - 1):
+        chunk = coordinates[i : min(i + chunk_size, len(coordinates))]
+        if len(chunk) < 2:
+            break
+        res = get_osrm_route(chunk, overview="full")
+        if res.get("code") == "Ok" and res.get("routes"):
+            route = res["routes"][0]
+            total_dist_m += route["distance"]
+            total_dur_s += route["duration"]
+            chunk_coords = route["geometry"]["coordinates"]
+            if combined_coords:
+                combined_coords.extend(chunk_coords[1:])
+            else:
+                combined_coords.extend(chunk_coords)
+            combined_legs.extend(route.get("legs", []))
+        else:
+            # Fall back to direct legs for this portion
+            direct = create_direct_route_fallback(chunk)
+            r = direct["routes"][0]
+            total_dist_m += r["distance"]
+            total_dur_s += r["duration"]
+            chunk_coords = r["geometry"]["coordinates"]
+            if combined_coords:
+                combined_coords.extend(chunk_coords[1:])
+            else:
+                combined_coords.extend(chunk_coords)
+            combined_legs.extend(r.get("legs", []))
+
+    return {
+        "code": "Ok",
+        "routes": [{
+            "distance": total_dist_m,
+            "duration": total_dur_s,
+            "geometry": {
+                "type": "LineString",
+                "coordinates": combined_coords
+            },
+            "legs": combined_legs
+        }]
+    }
 
 def create_direct_route_fallback(coordinates: List[Tuple[float, float]]) -> Dict[str, Any]:
     """Fallback generator for straight line legs when external network routing is unavailable."""
@@ -282,7 +340,7 @@ def find_superchargers_along_route(
     """
     Find all superchargers within corridor_buffer_km along a route geometry.
     coordinates: List of [lng, lat]
-    Returns list of chargers with their detour distance and position along route.
+    Returns list of chargers with their detour distance and progress along route.
     """
     chargers = load_superchargers()
     if not coordinates:
@@ -317,7 +375,7 @@ def find_superchargers_along_route(
 
     total_route_length_km = cum_distances[-1]
 
-    # Sample polyline if too dense to keep computation lightning fast (< 2000 points)
+    # Sample polyline if dense (< 1500 vertices)
     step = 1
     if len(coordinates) > 1500:
         step = len(coordinates) // 1000 + 1
@@ -358,23 +416,255 @@ def find_superchargers_along_route(
     along_route.sort(key=lambda x: x["route_progress_km"])
     return along_route
 
-def plan_trip(
-    origin: Tuple[float, float],         # (lat, lng)
-    destination: Tuple[float, float],    # (lat, lng)
-    initial_battery_pct: float = 90.0,
-    target_arrival_pct: float = 15.0,
-    max_range_km: float = 450.0,         # Typical Tesla long-range ~280-320 miles (~450-510 km)
-    corridor_buffer_km: float = 30.0,
-    min_power: int = 150                 # Prefer V3/V4 high-speed stalls
-) -> Dict[str, Any]:
+def sequence_stops_efficiently(
+    origin: Tuple[float, float],
+    destination: Tuple[float, float],
+    stops: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     """
-    Computes direct route, evaluates Supercharger stops needed along the way,
-    and calculates multi-stop final route with detailed charging schedules.
+    Orders a list of Supercharger stops to form a sensible, efficient driving path
+    from origin to destination without unnecessary backtracking.
+    Uses route progress projection with local 2-opt untangling.
     """
+    if len(stops) <= 1:
+        return list(stops)
+
     orig_lat, orig_lng = origin
     dest_lat, dest_lng = destination
 
-    # 1. Get initial baseline route from origin to destination
+    # Calculate progression scalar for each stop relative to origin->destination axis
+    v_x = dest_lng - orig_lng
+    v_y = dest_lat - orig_lat
+    v_len_sq = v_x * v_x + v_y * v_y
+    if v_len_sq == 0:
+        v_len_sq = 1e-6
+
+    def get_progress(s):
+        if "route_progress_km" in s:
+            return s["route_progress_km"]
+        # Project onto baseline vector
+        p_x = s["lng"] - orig_lng
+        p_y = s["lat"] - orig_lat
+        proj = (p_x * v_x + p_y * v_y) / v_len_sq
+        return proj * 1000.0
+
+    ordered = sorted(stops, key=get_progress)
+
+    # Local 2-opt swap pass to eliminate any path crossings
+    points = [(orig_lat, orig_lng)] + [(s["lat"], s["lng"]) for s in ordered] + [(dest_lat, dest_lng)]
+    improved = True
+    iterations = 0
+
+    while improved and iterations < 15:
+        improved = False
+        iterations += 1
+        for i in range(1, len(ordered)):
+            for j in range(i + 1, min(i + 4, len(ordered) + 1)):
+                # Distance before swap
+                p_prev = points[i - 1]
+                p_i = points[i]
+                p_j = points[j]
+                p_next = points[j + 1]
+
+                d_current = (haversine_km(p_prev[0], p_prev[1], p_i[0], p_i[1]) +
+                             haversine_km(p_j[0], p_j[1], p_next[0], p_next[1]))
+                d_reversed = (haversine_km(p_prev[0], p_prev[1], p_j[0], p_j[1]) +
+                              haversine_km(p_i[0], p_i[1], p_next[0], p_next[1]))
+
+                if d_reversed < d_current - 0.5:
+                    ordered[i - 1 : j] = reversed(ordered[i - 1 : j])
+                    points = [(orig_lat, orig_lng)] + [(s["lat"], s["lng"]) for s in ordered] + [(dest_lat, dest_lng)]
+                    improved = True
+                    break
+            if improved:
+                break
+
+    return ordered
+
+def select_maximizer_stops(
+    candidates: List[Dict[str, Any]],
+    forced_stops: List[Dict[str, Any]],
+    origin: Tuple[float, float],
+    destination: Tuple[float, float],
+    max_stops: int = 15,
+    min_spacing_km: float = 12.0
+) -> List[Dict[str, Any]]:
+    """
+    Selects as many Superchargers as possible along the route corridor while keeping
+    an efficient, sensible path without zigzagging.
+    1. ALL forced_stops (user-selected or area-selected) are 100% guaranteed included.
+    2. Additional corridor Superchargers are distributed along highway progression stages
+       to span the journey, prioritizing high-speed stations (250kW+) with minimal detours.
+    """
+    selected_dict: Dict[int, Dict[str, Any]] = {}
+
+    # 1. Add all forced stops first (100% guaranteed)
+    for s in forced_stops:
+        s_copy = dict(s)
+        s_copy["forced"] = True
+        s_id = s.get("id") or hash((s["lat"], s["lng"]))
+        selected_dict[s_id] = s_copy
+
+    if not candidates:
+        return sequence_stops_efficiently(origin, destination, list(selected_dict.values()))
+
+    # Calculate total progress span
+    sorted_candidates = sorted(candidates, key=lambda c: c.get("route_progress_km", 0.0))
+    min_prog = sorted_candidates[0].get("route_progress_km", 0.0)
+    max_prog = sorted_candidates[-1].get("route_progress_km", 100.0)
+    total_span = max(10.0, max_prog - min_prog)
+
+    # Number of corridor slots available after forced stops
+    remaining_slots = max(0, max_stops - len(selected_dict))
+    
+    if remaining_slots > 0:
+        # Distribute targets across journey milestones
+        interval = total_span / (remaining_slots + 1)
+        for i in range(1, remaining_slots + 1):
+            target_km = min_prog + i * interval
+            # Pool of candidates near target milestone (within interval * 0.8)
+            nearby = [
+                c for c in sorted_candidates
+                if abs(c.get("route_progress_km", 0.0) - target_km) <= max(15.0, interval * 0.85)
+            ]
+            if not nearby:
+                # Expand search
+                nearby = [
+                    c for c in sorted_candidates
+                    if abs(c.get("route_progress_km", 0.0) - target_km) <= max(35.0, interval * 1.5)
+                ]
+
+            if nearby:
+                # Score candidate: prefer minimal detour, high power (kW), and healthy stall count
+                def score_cand(c):
+                    detour_penalty = (c.get("detour_km", 0.0) * 2.5)
+                    power_bonus = (c.get("power", 150) / 50.0)
+                    stalls_bonus = min(2.0, c.get("stalls", 8) / 8.0)
+                    return detour_penalty - power_bonus - stalls_bonus
+
+                best = min(nearby, key=score_cand)
+                c_id = best.get("id") or hash((best["lat"], best["lng"]))
+
+                # Check spacing against already selected stops
+                too_close = False
+                for s in selected_dict.values():
+                    dist = haversine_km(best["lat"], best["lng"], s["lat"], s["lng"])
+                    if dist < min_spacing_km:
+                        too_close = True
+                        break
+
+                if not too_close and c_id not in selected_dict:
+                    b_copy = dict(best)
+                    b_copy["forced"] = False
+                    selected_dict[c_id] = b_copy
+
+    final_stops = list(selected_dict.values())
+    return sequence_stops_efficiently(origin, destination, final_stops)
+
+def select_min_stops_for_range(
+    eligible_chargers: List[Dict[str, Any]],
+    forced_stops: List[Dict[str, Any]],
+    origin: Tuple[float, float],
+    destination: Tuple[float, float],
+    total_dist_km: float,
+    initial_battery_pct: float,
+    target_arrival_pct: float,
+    max_range_km: float
+) -> List[Dict[str, Any]]:
+    """
+    Selects minimum number of Superchargers strictly required to satisfy EV battery range constraints,
+    while also ensuring any user-forced stops are included.
+    """
+    current_range_km = (initial_battery_pct / 100.0) * max_range_km
+    reserve_range_km = (target_arrival_pct / 100.0) * max_range_km
+    usable_initial_range_km = current_range_km - reserve_range_km
+
+    # If forced stops exist, include them and sequence
+    if forced_stops:
+        all_stops = list(forced_stops)
+        # Check if additional range stops are needed between forced stops
+        # For simplicity in min_stops mode with forced stops:
+        return sequence_stops_efficiently(origin, destination, all_stops)
+
+    if total_dist_km <= usable_initial_range_km:
+        return []
+
+    current_km = 0.0
+    remaining_battery_km = current_range_km
+    simulated_stops = []
+
+    while True:
+        dist_to_dest = total_dist_km - current_km
+        if remaining_battery_km - dist_to_dest >= reserve_range_km:
+            break
+
+        max_reachable_km = current_km + (remaining_battery_km - reserve_range_km)
+        reachable = [c for c in eligible_chargers if current_km + 30.0 < c.get("route_progress_km", 0) <= max_reachable_km]
+
+        if not reachable:
+            emergency_reachable_km = current_km + (remaining_battery_km - (0.08 * max_range_km))
+            reachable = [c for c in eligible_chargers if current_km + 15.0 < c.get("route_progress_km", 0) <= emergency_reachable_km]
+
+        if not reachable:
+            future = [c for c in eligible_chargers if c.get("route_progress_km", 0) > current_km + 10.0]
+            if future:
+                reachable = [future[0]]
+            else:
+                break
+
+        def score_charger(c):
+            progress_ratio = (c.get("route_progress_km", 0) - current_km) / max_range_km
+            power_bonus = (c.get("power", 150) / 250.0) * 1.5
+            detour_penalty = (c.get("detour_km", 0) / 10.0) * 2.0
+            stalls_bonus = min(2.0, (c.get("stalls", 8) / 12.0))
+            return (progress_ratio * 3.5) + power_bonus + stalls_bonus - detour_penalty
+
+        best_charger = max(reachable, key=score_charger)
+        simulated_stops.append(dict(best_charger))
+
+        current_km = best_charger.get("route_progress_km", current_km + 200)
+        remaining_battery_km = (0.80) * max_range_km
+
+        if len(simulated_stops) > 15:
+            break
+
+    return simulated_stops
+
+def plan_trip(
+    origin: Tuple[float, float],         # (lat, lng)
+    destination: Tuple[float, float],    # (lat, lng)
+    routing_mode: str = "MAXIMIZE",      # "MAXIMIZE" (Visit Maximizer) or "MIN_STOPS"
+    forced_chargers: Optional[List[Dict[str, Any]]] = None,
+    forced_charger_ids: Optional[List[int]] = None,
+    max_stops: int = 20,
+    initial_battery_pct: float = 90.0,
+    target_arrival_pct: float = 15.0,
+    max_range_km: float = 450.0,
+    corridor_buffer_km: float = 30.0,
+    min_power: int = 0
+) -> Dict[str, Any]:
+    """
+    Computes direct route, evaluates Superchargers along the corridor and area,
+    sequences stops (maximizing visits by default or minimizing for speed),
+    and generates continuous routed geometry through all Superchargers.
+    """
+    load_superchargers()
+    orig_lat, orig_lng = origin
+    dest_lat, dest_lng = destination
+
+    # 1. Resolve forced chargers from IDs or objects
+    resolved_forced: List[Dict[str, Any]] = []
+    if forced_chargers:
+        for fc in forced_chargers:
+            if isinstance(fc, dict) and "lat" in fc and "lng" in fc:
+                resolved_forced.append(fc)
+
+    if forced_charger_ids:
+        for cid in forced_charger_ids:
+            if cid in SUPERCHARGERS_BY_ID and SUPERCHARGERS_BY_ID[cid] not in resolved_forced:
+                resolved_forced.append(SUPERCHARGERS_BY_ID[cid])
+
+    # 2. Baseline direct route
     initial_route_res = get_osrm_route([(orig_lng, orig_lat), (dest_lng, dest_lat)], overview="full")
     if not initial_route_res.get("routes"):
         raise ValueError("Could not find route between origin and destination")
@@ -382,108 +672,74 @@ def plan_trip(
     base_route = initial_route_res["routes"][0]
     base_coords = base_route["geometry"]["coordinates"]  # [[lng, lat], ...]
     total_dist_km = base_route["distance"] / 1000.0
-    total_dur_s = base_route["duration"]
 
-    # 2. Find all candidates along corridor
-    candidates = find_superchargers_along_route(base_coords, corridor_buffer_km=corridor_buffer_km)
-
-    # Filter to preferred high power chargers, but fall back if none available
-    high_power_candidates = [c for c in candidates if (c.get("power") or 0) >= min_power]
-    if len(high_power_candidates) >= 2 or len(candidates) <= 2:
-        eligible_chargers = high_power_candidates if high_power_candidates else candidates
-    else:
-        eligible_chargers = candidates
-
-    # 3. Determine if charging is needed
-    current_range_km = (initial_battery_pct / 100.0) * max_range_km
-    reserve_range_km = (target_arrival_pct / 100.0) * max_range_km
-    usable_initial_range_km = current_range_km - reserve_range_km
-
-    selected_stops = []
+    # 3. Find candidate Superchargers along the corridor
+    corridor_chargers = find_superchargers_along_route(base_coords, corridor_buffer_km=corridor_buffer_km)
     
-    # If trip distance exceeds current safe range, we must plan charging stops
-    if total_dist_km > usable_initial_range_km and eligible_chargers:
-        # Greedy simulation with lookahead for optimal stops
-        current_km = 0.0
-        remaining_battery_km = current_range_km
-        simulated_stops = []
+    # Filter by minimum power if requested
+    if min_power > 0:
+        power_filtered = [c for c in corridor_chargers if (c.get("power") or 0) >= min_power]
+        candidate_pool = power_filtered if len(power_filtered) >= 3 else corridor_chargers
+    else:
+        candidate_pool = corridor_chargers
 
-        while True:
-            # Distance from current point to destination
-            dist_to_dest = total_dist_km - current_km
-            if remaining_battery_km - dist_to_dest >= reserve_range_km:
-                # Can safely reach destination without additional stop!
-                break
+    # 4. Stop Selection based on Routing Mode
+    if routing_mode.upper() == "MIN_STOPS" and not resolved_forced:
+        raw_stops = select_min_stops_for_range(
+            eligible_chargers=candidate_pool,
+            forced_stops=resolved_forced,
+            origin=origin,
+            destination=destination,
+            total_dist_km=total_dist_km,
+            initial_battery_pct=initial_battery_pct,
+            target_arrival_pct=target_arrival_pct,
+            max_range_km=max_range_km
+        )
+    else:
+        # Default: VISIT MAXIMIZER
+        raw_stops = select_maximizer_stops(
+            candidates=candidate_pool,
+            forced_stops=resolved_forced,
+            origin=origin,
+            destination=destination,
+            max_stops=max_stops,
+            min_spacing_km=10.0
+        )
 
-            # Find reachable chargers ahead before battery drops below reserve_range_km
-            max_reachable_km = current_km + (remaining_battery_km - reserve_range_km)
-            reachable = [c for c in eligible_chargers if current_km + 30.0 < c["route_progress_km"] <= max_reachable_km]
+    # 5. Simulate battery charge and timing at each stop
+    current_battery_km = (initial_battery_pct / 100.0) * max_range_km
+    curr_point = (orig_lat, orig_lng)
+    detailed_stops = []
 
-            if not reachable:
-                # Extend search slightly if emergency (allow battery to drop to 8%)
-                emergency_reachable_km = current_km + (remaining_battery_km - (0.08 * max_range_km))
-                reachable = [c for c in eligible_chargers if current_km + 15.0 < c["route_progress_km"] <= emergency_reachable_km]
+    for idx, stop in enumerate(raw_stops):
+        leg_dist = haversine_km(curr_point[0], curr_point[1], stop["lat"], stop["lng"])
+        current_battery_km = max(0.05 * max_range_km, current_battery_km - leg_dist)
+        arrival_pct = round((current_battery_km / max_range_km) * 100.0, 1)
 
-            if not reachable:
-                # If still nothing, pick closest charger beyond current_km
-                future = [c for c in eligible_chargers if c["route_progress_km"] > current_km + 10.0]
-                if future:
-                    reachable = [future[0]]
-                else:
-                    # No more chargers ahead
-                    break
+        # In Visit Maximizer mode, quick top-ups (e.g. up to 75-80% or +15-20 min visit)
+        target_pct = min(85.0, max(arrival_pct + 15.0, 75.0))
+        pct_to_add = max(10.0, target_pct - arrival_pct)
+        charge_speed = max(100, stop.get("power", 150))
+        charge_duration_min = round(pct_to_add * 0.38 * (250.0 / charge_speed) + 4.0)
 
-            # Score reachable chargers:
-            # High power (kW), low detour distance, good spacing (further along is better to avoid excessive stops)
-            def score_charger(c):
-                progress_ratio = (c["route_progress_km"] - current_km) / max_range_km
-                power_bonus = (c.get("power", 150) / 250.0) * 1.5
-                detour_penalty = (c.get("detour_km", 0) / 10.0) * 2.0
-                stalls_bonus = min(2.0, (c.get("stalls", 8) / 12.0))
-                return (progress_ratio * 3.5) + power_bonus + stalls_bonus - detour_penalty
+        current_battery_km = (target_pct / 100.0) * max_range_km
+        curr_point = (stop["lat"], stop["lng"])
 
-            best_charger = max(reachable, key=score_charger)
+        s_copy = dict(stop)
+        s_copy["stop_index"] = idx + 1
+        s_copy["arrival_battery_pct"] = arrival_pct
+        s_copy["departure_battery_pct"] = target_pct
+        s_copy["charge_duration_min"] = charge_duration_min
+        detailed_stops.append(s_copy)
 
-            # Calculate arrival battery at this charger
-            drive_dist_km = best_charger["route_progress_km"] - current_km
-            arrival_km = remaining_battery_km - drive_dist_km
-            arrival_pct = round(max(5.0, (arrival_km / max_range_km) * 100.0), 1)
-
-            # Determine target charge amount (typically 80% for speed, or enough to reach next/dest)
-            target_pct = 80.0
-            dist_from_here_to_dest = total_dist_km - best_charger["route_progress_km"]
-            if (dist_from_here_to_dest + reserve_range_km) <= (0.75 * max_range_km):
-                target_pct = min(80.0, round(((dist_from_here_to_dest + reserve_range_km) / max_range_km) * 100.0 + 10.0, 1))
-
-            pct_to_add = max(10.0, target_pct - arrival_pct)
-            # Estimate charging time: 10% to 80% takes ~25-30 min at 250kW, ~40 min at 150kW
-            charge_speed_factor = 250.0 / max(100, best_charger.get("power", 150))
-            charge_duration_min = round(pct_to_add * 0.42 * charge_speed_factor + 3.0)
-
-            stop_info = dict(best_charger)
-            stop_info["arrival_battery_pct"] = arrival_pct
-            stop_info["departure_battery_pct"] = target_pct
-            stop_info["charge_duration_min"] = charge_duration_min
-            simulated_stops.append(stop_info)
-
-            # Update simulation state
-            current_km = best_charger["route_progress_km"]
-            remaining_battery_km = (target_pct / 100.0) * max_range_km
-
-            # Prevent infinite loops
-            if len(simulated_stops) > 15:
-                break
-
-        selected_stops = simulated_stops
-
-    # 4. If stops were selected, compute multi-stop routed geometry through all Superchargers
+    # 6. Compute multi-stop routed driving geometry with automatic chunking
     final_coordinates = [(orig_lng, orig_lat)]
-    for stop in selected_stops:
+    for stop in detailed_stops:
         final_coordinates.append((stop["lng"], stop["lat"]))
     final_coordinates.append((dest_lng, dest_lat))
 
     if len(final_coordinates) > 2:
-        multi_route_res = get_osrm_route(final_coordinates, overview="full")
+        multi_route_res = get_chunked_osrm_route(final_coordinates)
         if multi_route_res.get("routes"):
             active_route = multi_route_res["routes"][0]
         else:
@@ -493,7 +749,7 @@ def plan_trip(
 
     total_route_distance_km = active_route["distance"] / 1000.0
     total_drive_duration_s = active_route["duration"]
-    total_charge_duration_min = sum(s.get("charge_duration_min", 0) for s in selected_stops)
+    total_charge_duration_min = sum(s.get("charge_duration_min", 0) for s in detailed_stops)
 
     # Format stop list for UI
     stops_summary = []
@@ -506,48 +762,52 @@ def plan_trip(
         "battery_pct": initial_battery_pct
     })
     # Supercharger stops
-    for idx, stop in enumerate(selected_stops):
+    for s in detailed_stops:
         stops_summary.append({
             "type": "SUPERCHARGER",
-            "stop_index": idx + 1,
-            "id": stop["id"],
-            "name": stop["name"],
-            "lat": stop["lat"],
-            "lng": stop["lng"],
-            "power": stop.get("power"),
-            "stalls": stop.get("stalls"),
-            "arrival_battery_pct": stop.get("arrival_battery_pct"),
-            "departure_battery_pct": stop.get("departure_battery_pct"),
-            "charge_duration_min": stop.get("charge_duration_min"),
-            "street": stop.get("street"),
-            "city": stop.get("city"),
-            "state": stop.get("state"),
-            "detour_miles": stop.get("detour_miles")
+            "stop_index": s["stop_index"],
+            "id": s.get("id"),
+            "name": s["name"],
+            "lat": s["lat"],
+            "lng": s["lng"],
+            "power": s.get("power"),
+            "stalls": s.get("stalls"),
+            "arrival_battery_pct": s.get("arrival_battery_pct"),
+            "departure_battery_pct": s.get("departure_battery_pct"),
+            "charge_duration_min": s.get("charge_duration_min"),
+            "street": s.get("street"),
+            "city": s.get("city"),
+            "state": s.get("state"),
+            "detour_miles": s.get("detour_miles", 0.1),
+            "forced": s.get("forced", False)
         })
     # Destination
-    est_final_battery = round(max(5.0, 100.0 - (total_route_distance_km / max_range_km) * 100.0) if not selected_stops else target_arrival_pct, 1)
+    last_leg_dist = haversine_km(curr_point[0], curr_point[1], dest_lat, dest_lng)
+    dest_battery_pct = round(max(5.0, ((current_battery_km - last_leg_dist) / max_range_km) * 100.0), 1)
     stops_summary.append({
         "type": "DESTINATION",
         "name": "Destination",
         "lat": dest_lat,
         "lng": dest_lng,
-        "battery_pct": est_final_battery
+        "battery_pct": dest_battery_pct
     })
 
     return {
         "summary": {
+            "routing_mode": routing_mode.upper(),
             "distance_km": round(total_route_distance_km, 1),
             "distance_miles": round(total_route_distance_km * 0.621371, 1),
             "drive_duration_seconds": round(total_drive_duration_s),
             "drive_duration_formatted": format_duration(total_drive_duration_s),
             "charge_duration_minutes": total_charge_duration_min,
             "total_trip_duration_formatted": format_duration(total_drive_duration_s + total_charge_duration_min * 60),
-            "supercharger_stops_count": len(selected_stops),
-            "chargers_along_corridor_count": len(candidates)
+            "supercharger_stops_count": len(detailed_stops),
+            "forced_stops_count": sum(1 for s in detailed_stops if s.get("forced")),
+            "chargers_along_corridor_count": len(corridor_chargers)
         },
         "geometry": active_route["geometry"],
         "stops": stops_summary,
-        "all_corridor_chargers": candidates
+        "all_corridor_chargers": corridor_chargers
     }
 
 def format_duration(seconds: float) -> str:
