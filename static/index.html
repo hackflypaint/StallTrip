@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tesla Supercharger Route Planner</title>
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  
+  <!-- Fonts & Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- Sidebar / Control Panel -->
+    <aside class="sidebar" id="sidebar">
+      <!-- App Header -->
+      <div class="sidebar-header">
+        <div class="brand">
+          <div class="logo-icon">
+            <i class="fa-solid fa-bolt"></i>
+          </div>
+          <div>
+            <h1>Supercharge Route</h1>
+            <p class="subtitle">Tesla Supercharger Trip Planner</p>
+          </div>
+        </div>
+        <div class="dataset-badge" id="datasetBadge" title="Global Tesla Superchargers in database">
+          <span class="pulse-dot"></span>
+          <span id="totalChargersBadge">11,289</span> Chargers
+        </div>
+      </div>
+
+      <!-- Navigation / Tabs -->
+      <div class="tabs">
+        <button class="tab-btn active" id="tabRoute" data-tab="route-tab">
+          <i class="fa-solid fa-route"></i> Route Planner
+        </button>
+        <button class="tab-btn" id="tabExplore" data-tab="explore-tab">
+          <i class="fa-solid fa-magnifying-glass-location"></i> Explore Chargers
+        </button>
+      </div>
+
+      <!-- Route Planner Panel -->
+      <div class="tab-content active" id="route-tab">
+        <div class="route-form">
+          <!-- Origin Input -->
+          <div class="form-group location-input-group">
+            <div class="input-header">
+              <label for="originInput">
+                <span class="marker-dot origin-dot"></span> Starting Location
+              </label>
+              <button class="link-btn" id="btnUseCurrentLocation" title="Detect your current location">
+                <i class="fa-solid fa-location-crosshairs"></i> Use Current Location
+              </button>
+            </div>
+            <div class="input-wrapper">
+              <i class="fa-solid fa-circle-dot input-icon text-green"></i>
+              <input type="text" id="originInput" placeholder="Enter city, address or coordinates..." autocomplete="off">
+              <button class="clear-btn" id="clearOrigin" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="suggestions-list" id="originSuggestions"></div>
+          </div>
+
+          <!-- Quick Swap Button -->
+          <div class="swap-container">
+            <button class="swap-btn" id="btnSwapLocations" title="Swap origin & destination">
+              <i class="fa-solid fa-arrow-down-up-across-line"></i>
+            </button>
+          </div>
+
+          <!-- Destination Input -->
+          <div class="form-group location-input-group">
+            <div class="input-header">
+              <label for="destInput">
+                <span class="marker-dot dest-dot"></span> Destination
+              </label>
+            </div>
+            <div class="input-wrapper">
+              <i class="fa-solid fa-location-dot input-icon text-red"></i>
+              <input type="text" id="destInput" placeholder="Where to? (e.g. Los Angeles, Las Vegas...)" autocomplete="off">
+              <button class="clear-btn" id="clearDest" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="suggestions-list" id="destSuggestions"></div>
+          </div>
+
+          <!-- Quick Route Presets -->
+          <div class="quick-presets">
+            <span class="preset-label">Popular routes:</span>
+            <button class="preset-tag" data-orig="San Francisco, CA" data-dest="Los Angeles, CA">SF → LA</button>
+            <button class="preset-tag" data-orig="Los Angeles, CA" data-dest="Las Vegas, NV">LA → Vegas</button>
+            <button class="preset-tag" data-orig="New York, NY" data-dest="Washington, DC">NYC → DC</button>
+            <button class="preset-tag" data-orig="Seattle, WA" data-dest="Portland, OR">Seattle → Portland</button>
+          </div>
+
+          <!-- Routing Goal & Maximizer Selector -->
+          <div class="routing-goal-section">
+            <div class="input-header">
+              <label><i class="fa-solid fa-bullseye"></i> Route Strategy</label>
+            </div>
+            <div class="strategy-toggle">
+              <button type="button" class="strategy-btn active" id="btnModeMaximize" data-mode="MAXIMIZE" title="Stop at as many Superchargers as possible along the route">
+                <i class="fa-solid fa-bolt-lightning text-red"></i> Maximize Visits
+              </button>
+              <button type="button" class="strategy-btn" id="btnModeMinStops" data-mode="MIN_STOPS" title="Stop only when battery runs low for fastest trip">
+                <i class="fa-solid fa-gauge-high"></i> Min Stops
+              </button>
+            </div>
+            <div class="strategy-params" id="maximizeParams">
+              <div class="param-row">
+                <label for="maxStopsSelect">Max Corridor Stops:</label>
+                <select id="maxStopsSelect">
+                  <option value="6">6 stops</option>
+                  <option value="10">10 stops</option>
+                  <option value="15" selected>15 stops (Recommended)</option>
+                  <option value="20">20 stops</option>
+                  <option value="25">25 stops (Rally / Safari)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Area Selection & Force-Included Chargers -->
+          <div class="forced-section">
+            <div class="forced-header">
+              <label><i class="fa-solid fa-vector-square"></i> Force-Include Area / Stops</label>
+              <span class="forced-count-badge" id="forcedCountBadge">0 selected</span>
+            </div>
+            <p class="section-desc">Select an area on the map to guarantee those Superchargers are visited.</p>
+            <div class="forced-actions">
+              <button type="button" class="secondary-btn" id="btnSelectArea">
+                <i class="fa-solid fa-draw-polygon"></i> <span id="btnSelectAreaText">Select Area on Map</span>
+              </button>
+              <button type="button" class="secondary-btn text-danger" id="btnClearForced" style="display:none;">
+                <i class="fa-solid fa-xmark"></i> Clear All
+              </button>
+            </div>
+            <div class="forced-chips-list" id="forcedChipsList">
+              <div class="empty-forced-notice">No area selected. Click "Select Area on Map" to draw a box or click any station to force-include it.</div>
+            </div>
+          </div>
+
+          <!-- Advanced EV Settings Accordion -->
+          <details class="advanced-settings">
+            <summary>
+              <span><i class="fa-solid fa-sliders"></i> Vehicle & Charging Settings</span>
+              <i class="fa-solid fa-chevron-down toggle-icon"></i>
+            </summary>
+            <div class="settings-grid">
+              <div class="setting-item">
+                <label for="initialBattery">Starting Battery (%)</label>
+                <div class="range-display">
+                  <input type="range" id="initialBattery" min="20" max="100" value="90">
+                  <span id="initialBatteryVal">90%</span>
+                </div>
+              </div>
+              <div class="setting-item">
+                <label for="targetArrival">Min Arrival Reserve (%)</label>
+                <div class="range-display">
+                  <input type="range" id="targetArrival" min="10" max="30" value="15">
+                  <span id="targetArrivalVal">15%</span>
+                </div>
+              </div>
+              <div class="setting-item">
+                <label for="vehicleModel">Tesla Model / Range</label>
+                <select id="vehicleModel">
+                  <option value="530">Model S Long Range (330 mi / 530 km)</option>
+                  <option value="500">Model 3 Long Range (310 mi / 500 km)</option>
+                  <option value="450" selected>Model Y Long Range (280 mi / 450 km)</option>
+                  <option value="420">Model X Long Range (260 mi / 420 km)</option>
+                  <option value="370">Model 3 Standard (230 mi / 370 km)</option>
+                  <option value="510">Cybertruck AWD (318 mi / 510 km)</option>
+                </select>
+              </div>
+              <div class="setting-item">
+                <label for="corridorBuffer">Max Corridor Detour (km)</label>
+                <select id="corridorBuffer">
+                  <option value="15">15 km (Fastest along highway)</option>
+                  <option value="30" selected>30 km (Standard)</option>
+                  <option value="50">50 km (Broad corridor)</option>
+                </select>
+              </div>
+            </div>
+          </details>
+
+          <!-- Action Button -->
+          <button class="primary-btn" id="btnPlanRoute">
+            <i class="fa-solid fa-bolt-lightning"></i> Plan Tesla Route
+          </button>
+        </div>
+
+        <!-- Route Results Section -->
+        <div class="route-results" id="routeResults" style="display: none;">
+          <!-- Summary Cards -->
+          <div class="stats-cards">
+            <div class="stat-card">
+              <div class="stat-icon"><i class="fa-solid fa-road"></i></div>
+              <div class="stat-meta">
+                <span class="stat-title">Distance</span>
+                <span class="stat-val" id="statDistance">-- mi</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon"><i class="fa-solid fa-clock"></i></div>
+              <div class="stat-meta">
+                <span class="stat-title">Trip Time</span>
+                <span class="stat-val" id="statTotalTime">--</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon"><i class="fa-solid fa-charging-station"></i></div>
+              <div class="stat-meta">
+                <span class="stat-title">Supercharge Stops</span>
+                <span class="stat-val" id="statStops">0</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon"><i class="fa-solid fa-hourglass-half"></i></div>
+              <div class="stat-meta">
+                <span class="stat-title">Charging Time</span>
+                <span class="stat-val" id="statChargeTime">0 min</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Corridor Superchargers Overview Banner -->
+          <div class="corridor-banner">
+            <i class="fa-solid fa-map-pin"></i>
+            <span id="corridorCountText">Found 0 Superchargers along your route corridor</span>
+          </div>
+
+          <!-- Detailed Stops Itinerary -->
+          <div class="itinerary-section">
+            <div class="section-title">
+              <h3><i class="fa-solid fa-list-check"></i> Charging Itinerary</h3>
+            </div>
+            <div class="timeline" id="stopsTimeline">
+              <!-- Rendered dynamically -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Explore Chargers Panel -->
+      <div class="tab-content" id="explore-tab" style="display: none;">
+        <div class="explore-filters">
+          <div class="input-wrapper search-box">
+            <i class="fa-solid fa-magnifying-glass input-icon"></i>
+            <input type="text" id="chargerSearchInput" placeholder="Search city, state, or name...">
+          </div>
+          
+          <div class="filter-row">
+            <div class="filter-col">
+              <label>Status</label>
+              <select id="filterStatus">
+                <option value="OPEN" selected>Open Only</option>
+                <option value="CONSTRUCTION">In Construction</option>
+                <option value="PERMIT">Permit</option>
+                <option value="ALL">All Stations</option>
+              </select>
+            </div>
+            <div class="filter-col">
+              <label>Min Power</label>
+              <select id="filterMinPower">
+                <option value="0">Any Speed</option>
+                <option value="150" selected>150+ kW (V2/V3)</option>
+                <option value="250">250+ kW (V3/V4)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="filter-row">
+            <div class="filter-col">
+              <label>Min Stalls</label>
+              <select id="filterMinStalls">
+                <option value="0">Any Count</option>
+                <option value="8">8+ Stalls</option>
+                <option value="12">12+ Stalls</option>
+                <option value="16">16+ Stalls</option>
+              </select>
+            </div>
+            <div class="filter-col">
+              <button class="secondary-btn" id="btnFilterMapArea">
+                <i class="fa-solid fa-crop-simple"></i> Search Map Area
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="charger-list-header">
+          <span id="chargerListCount">Showing nearby stations</span>
+        </div>
+        <div class="charger-list" id="exploreChargerList">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Map View -->
+    <main class="map-container">
+      <div id="map"></div>
+
+      <!-- Map Floating Controls & Overlays -->
+      <div class="map-floating-bar">
+        <button class="map-btn" id="btnMapSelectArea" title="Select Area on Map to Force-Include Superchargers">
+          <i class="fa-solid fa-vector-square"></i>
+        </button>
+        <button class="map-btn" id="btnMapReset" title="Reset View">
+          <i class="fa-solid fa-expand"></i>
+        </button>
+        <button class="map-btn" id="btnLocateMe" title="Find My Location">
+          <i class="fa-solid fa-crosshairs"></i>
+        </button>
+        <button class="map-btn" id="btnToggleLayers" title="Toggle Nearby Stations">
+          <i class="fa-solid fa-layer-group"></i>
+        </button>
+      </div>
+
+      <!-- Map Mode Notification Banner (Active during Area Selection) -->
+      <div class="map-mode-banner" id="mapModeBanner" style="display: none;">
+        <i class="fa-solid fa-vector-square pulse-icon"></i>
+        <span>Click and drag on the map to draw a selection box around Superchargers.</span>
+        <button type="button" class="cancel-banner-btn" id="btnCancelAreaSelect">
+          <i class="fa-solid fa-xmark"></i> Cancel
+        </button>
+      </div>
+
+      <!-- Route Guidance Floating Legend -->
+      <div class="map-legend">
+        <div class="legend-item"><span class="legend-color orig"></span> Origin</div>
+        <div class="legend-item"><span class="legend-color forced"></span> Forced Area Stop</div>
+        <div class="legend-item"><span class="legend-color stop"></span> Supercharger Stop</div>
+        <div class="legend-item"><span class="legend-color corridor"></span> Nearby Station</div>
+        <div class="legend-item"><span class="legend-color dest"></span> Destination</div>
+      </div>
+
+      <!-- Charger Detail Modal / Drawer -->
+      <div class="charger-drawer" id="chargerDrawer" style="display: none;">
+        <button class="close-drawer-btn" id="btnCloseDrawer"><i class="fa-solid fa-xmark"></i></button>
+        <div class="drawer-header">
+          <div class="drawer-badge" id="drawerStatusBadge">OPEN</div>
+          <h2 id="drawerTitle">Supercharger Name</h2>
+          <p id="drawerAddress" class="drawer-sub">Address</p>
+        </div>
+        <div class="drawer-stats-grid">
+          <div class="drawer-stat">
+            <span class="d-label">Power</span>
+            <span class="d-val text-red" id="drawerPower">250 kW</span>
+          </div>
+          <div class="drawer-stat">
+            <span class="d-label">Stalls</span>
+            <span class="d-val" id="drawerStalls">16</span>
+          </div>
+          <div class="drawer-stat">
+            <span class="d-label">Plugs</span>
+            <span class="d-val" id="drawerPlugs">NACS / CCS</span>
+          </div>
+          <div class="drawer-stat">
+            <span class="d-label">Other EVs</span>
+            <span class="d-val" id="drawerOtherEVs">Yes</span>
+          </div>
+        </div>
+        <div class="drawer-amenities" id="drawerAmenities">
+          <!-- Amenities / Facility badges -->
+        </div>
+        <div class="drawer-actions">
+          <button class="primary-btn" id="btnAddStopToRoute">
+            <i class="fa-solid fa-route"></i> Add as Trip Stop
+          </button>
+          <a class="secondary-btn" id="btnOpenGoogleMaps" target="_blank" rel="noopener">
+            <i class="fa-solid fa-arrow-up-right-from-square"></i> Open in Maps
+          </a>
+        </div>
+      </div>
+    </main>
+
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
