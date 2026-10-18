@@ -1,0 +1,433 @@
+/* Removable Live Weather Radar & Route Headwind Module Styles — delete with static/weather/ */
+
+.weather-slot {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.weather-slot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.weather-slot-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.weather-slot-title i {
+  color: #38bdf8;
+}
+
+.weather-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.weather-toggle input {
+  accent-color: #38bdf8;
+  margin: 0;
+}
+
+.weather-detail-block {
+  display: none;
+  margin-top: 8px;
+}
+
+.weather-detail-block.is-active {
+  display: block;
+}
+
+.weather-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.weather-play-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-main);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.weather-play-btn:hover {
+  border-color: #38bdf8;
+  color: #7dd3fc;
+}
+
+.weather-frame-time {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #7dd3fc;
+}
+
+.weather-frame-slider,
+.weather-opacity-slider {
+  width: 100%;
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+
+.weather-opacity-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
+.weather-opacity-row label {
+  flex-shrink: 0;
+}
+
+.weather-opacity-row span {
+  width: 32px;
+  text-align: right;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.weather-sub-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.weather-sub-toggle input {
+  accent-color: #38bdf8;
+  margin: 0;
+}
+
+.weather-status {
+  margin-top: 6px;
+  font-size: 0.62rem;
+  color: var(--text-dim);
+}
+
+.weather-credit {
+  margin-top: 6px;
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.weather-credit a {
+  color: #38bdf8;
+  text-decoration: none;
+}
+
+.weather-credit a:hover {
+  text-decoration: underline;
+}
+
+/* Floating Radar Timestamp & Play/Pause Pill on Map */
+.weather-radar-pill {
+  position: absolute;
+  bottom: 66px;
+  right: 20px;
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(20, 25, 32, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  border-radius: 999px;
+  box-shadow: var(--shadow-md);
+  color: var(--text-main);
+  font-size: 0.72rem;
+}
+
+.weather-radar-pill[hidden] {
+  display: none !important;
+}
+
+.weather-pill-btn,
+.weather-pill-opacity {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: #7dd3fc;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+}
+
+.weather-pill-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.weather-pill-badge {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #38bdf8;
+}
+
+.weather-pill-time {
+  font-weight: 600;
+  color: #fff;
+}
+
+/* Route Weather & Wind Strip in Sidebar Results */
+.route-weather-strip {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.14), rgba(30, 41, 59, 0.7));
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.route-weather-strip[hidden] {
+  display: none !important;
+}
+
+.weather-strip-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.weather-strip-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #f0f9ff;
+}
+
+.weather-strip-title i {
+  color: #38bdf8;
+}
+
+.weather-impact-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.weather-impact-badge.tone-warn {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+}
+
+.weather-impact-badge.tone-mild-warn {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+}
+
+.weather-impact-badge.tone-boost {
+  background: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.45);
+}
+
+.weather-impact-badge.tone-neutral {
+  background: rgba(148, 163, 184, 0.2);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.weather-strip-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.weather-chip {
+  font-size: 0.66rem;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.weather-chip-cold {
+  color: #93c5fd;
+  border-color: rgba(147, 197, 253, 0.35);
+}
+
+.weather-chip-rain {
+  color: #60a5fa;
+  border-color: rgba(96, 165, 250, 0.35);
+}
+
+/* Floating Map Route Weather Pill */
+.map-weather-pill {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 1020;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(20, 25, 32, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  box-shadow: var(--shadow-md);
+  color: #f8fafc;
+  font-size: 0.74rem;
+  font-weight: 600;
+  max-width: calc(100% - 92px);
+  pointer-events: none;
+}
+
+.map-weather-pill[hidden] {
+  display: none !important;
+}
+
+.map-weather-pill-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Per-stop weather row inside Timeline */
+.timeline-weather-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.tw-badge,
+.tw-wind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.tw-headwind {
+  color: #fca5a5;
+}
+
+.tw-tailwind {
+  color: #6ee7b7;
+}
+
+.tw-crosswind {
+  color: #fcd34d;
+}
+
+/* Map Stop Weather Badges */
+.weather-map-div-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+.weather-map-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  color: #f8fafc;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+.weather-map-badge.kind-headwind {
+  border-color: rgba(248, 113, 113, 0.65);
+}
+
+.weather-map-badge.kind-tailwind {
+  border-color: rgba(52, 211, 153, 0.65);
+}
+
+.wmb-delta {
+  color: #7dd3fc;
+}
+
+/* Responsive adjustments for Tesla Car Shell & Mobile Shell */
+body.car-shell .map-weather-pill {
+  top: 36px;
+  left: 8px;
+  font-size: 0.66rem;
+  padding: 4px 9px;
+}
+
+body.car-shell .weather-radar-pill {
+  bottom: calc(var(--car-sheet-h, 72px) + 10px);
+  right: 10px;
+}
+
+body.ui-mobile .map-weather-pill {
+  top: calc(10px + var(--safe-top, 0px));
+  left: calc(10px + var(--safe-left, 0px));
+  font-size: 0.66rem;
+  padding: 4px 9px;
+  max-width: calc(100vw - 70px);
+}
+
+body.ui-mobile.sheet-open .map-weather-pill {
+  top: calc(64px + var(--safe-top, 0px));
+}
+
+body.ui-mobile .weather-radar-pill {
+  bottom: calc(var(--mobile-plan-h, 48px) + var(--mobile-fab-gap, 12px) + var(--mobile-chrome-bottom, 0px) + 8px);
+  right: calc(10px + var(--safe-right, 0px));
+}
