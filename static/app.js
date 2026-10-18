@@ -339,7 +339,7 @@ function setRoutingMode(mode) {
   }
 }
 
-/** Ray-casting point-in-polygon (lat/lng rings as [lat, lng][]). */
+/** Ray-casting point-in-polygon (Leaflet LatLng ring). */
 function pointInPolygon(lat, lng, ring) {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -347,9 +347,10 @@ function pointInPolygon(lat, lng, ring) {
     const xi = ring[i].lng;
     const yj = ring[j].lat;
     const xj = ring[j].lng;
+    if (yi === yj) continue;
     const intersect =
-      yi > lat !== yj > lat &&
-      lng < ((xj - xi) * (lat - yi)) / (yj - yi + 0.0) + xi;
+      (yi > lat) !== (yj > lat) &&
+      lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
     if (intersect) inside = !inside;
   }
   return inside;
