@@ -221,7 +221,12 @@ async function ensureServer(baseUrl) {
 
 async function runPlaywrightVerification() {
   console.log("\n=== Running Playwright UI verification (Desktop, Mobile, Tesla) ===");
-  const { chromium } = require("playwright");
+  let chromium;
+  try {
+    ({ chromium } = require("playwright"));
+  } catch (_) {
+    ({ chromium } = require("/tmp/pw/node_modules/playwright"));
+  }
   const BASE = process.env.ELEVATION_TEST_BASE || "http://127.0.0.1:8080";
   const serverProc = await ensureServer(BASE);
 
