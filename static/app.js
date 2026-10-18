@@ -93,6 +93,24 @@ function scheduleMapInvalidate(delayMs) {
 
 window.scheduleMapInvalidate = scheduleMapInvalidate;
 
+/**
+ * Safari (and similar) overlays a bottom toolbar on the layout viewport.
+ * Measure visualViewport gap → --vv-bottom so Plan / sheet clear the chrome.
+ * Mobile shell only; desktop and car-shell ignore these vars.
+ */
+function updateMobileViewportInsets() {
+  if (!document.body.classList.contains("ui-mobile")) return;
+  let overlay = 0;
+  const vv = window.visualViewport;
+  if (vv) {
+    overlay = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+  }
+  // Set on body — body.ui-mobile owns --vv-bottom; html inheritance loses to that rule.
+  document.body.style.setProperty("--vv-bottom", `${overlay}px`);
+}
+
+window.updateMobileViewportInsets = updateMobileViewportInsets;
+
 function setMobileSheetOpen(open) {
   if (!document.body.classList.contains("ui-mobile")) return;
   const wasOpen = document.body.classList.contains("sheet-open");
@@ -108,6 +126,7 @@ function setMobileSheetOpen(open) {
     const text = toggle.querySelector("span");
     if (text) text.textContent = next ? "Map" : "Plan";
   }
+  updateMobileViewportInsets();
   scheduleMapInvalidate(80);
 }
 
@@ -212,6 +231,15 @@ function initMobileShell() {
     toggle.addEventListener("click", () => {
       setMobileSheetOpen(!document.body.classList.contains("sheet-open"));
     });
+  }
+
+  updateMobileViewportInsets();
+  const onViewportChange = () => updateMobileViewportInsets();
+  window.addEventListener("resize", onViewportChange);
+  const vv = window.visualViewport;
+  if (vv) {
+    vv.addEventListener("resize", onViewportChange);
+    vv.addEventListener("scroll", onViewportChange);
   }
 
   // Demo / QA: /mobile?sheet=1 opens the planner sheet on load
