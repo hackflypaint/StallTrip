@@ -35,6 +35,12 @@ Local Python (no Docker): `python3 server.py 8080` — **stdlib only**, no `pip 
 | `data/superchargers.json` | ~11k stations (bundled) |
 | `Dockerfile` | Multi-stage **HI** Python 3.12 build |
 
+## Tesla in-car probe
+
+`GET /tesla-probe` — fingerprint page for car browser (viewport, DPR, touch, geolocation). The car cannot hit LAN/localhost; use a public HTTPS tunnel or deploy (Project store runbook `docs/https-car-access.md`).
+
+Tesla Playwright profiles: `node tests/verify_tesla_ui.js` (773×601 & 1254×784, DPR 1.53, touch).
+
 ## Docs
 
 | Doc | Purpose |
