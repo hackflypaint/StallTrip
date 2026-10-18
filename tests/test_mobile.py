@@ -82,11 +82,12 @@ class TestMobileShell(unittest.TestCase):
         try:
             with self._opener.open(req, timeout=10) as resp:
                 status = resp.status
-                headers = dict(resp.headers)
+                headers = {k.lower(): v for k, v in resp.headers.items()}
         except urllib.error.HTTPError as e:
-            status, headers = e.code, dict(e.headers)
+            status = e.code
+            headers = {k.lower(): v for k, v in e.headers.items()}
         self.assertEqual(status, 200)
-        self.assertIn("text/html", headers.get("Content-Type", headers.get("content-type", "")))
+        self.assertIn("text/html", headers.get("content-type", ""))
 
     def test_mobile_trailing_slash_serves_spa(self):
         status, _, body = self._get("/mobile/")
