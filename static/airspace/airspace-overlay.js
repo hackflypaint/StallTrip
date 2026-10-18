@@ -275,7 +275,7 @@
       this._slotEl.innerHTML = `
         <div class="airspace-slot">
           <div class="airspace-slot-header">
-            <div class="airspace-slot-title"><i class="fa-solid fa-drone"></i> Drone flight</div>
+            <div class="airspace-slot-title"><i class="fa-solid fa-plane-up"></i> Drone flight</div>
             <label class="airspace-toggle">
               <input type="checkbox" id="airspaceToggle" />
               Show
