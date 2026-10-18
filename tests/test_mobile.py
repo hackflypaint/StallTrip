@@ -221,6 +221,19 @@ class TestMobileShell(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"viewport-fit=cover", html)
 
+    def test_mobile_map_chrome_is_compact(self):
+        """Phone map tools + legend stay small; desktop/car rules unchanged."""
+        status, _, css = self._get("/style.css")
+        self.assertEqual(status, 200)
+        self.assertIn(b"body.ui-mobile .map-btn", css)
+        self.assertIn(b"width: 30px", css)
+        self.assertIn(b"body.ui-mobile .map-legend .legend-item", css)
+        self.assertIn(b"font-size: 0.55rem", css)
+        self.assertIn(b"max-width: min(118px", css)
+        # Plan FAB clearance from #29 must remain
+        self.assertIn(b"--mobile-chrome-bottom", css)
+        self.assertIn(b"var(--mobile-plan-h)", css)
+
     def test_no_ua_redirect_by_default(self):
         prev = os.environ.pop("MOBILE_UA_REDIRECT", None)
         try:
