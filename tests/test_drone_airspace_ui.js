@@ -37,6 +37,25 @@ async function main() {
     throw new Error(`Unexpected title: ${title}`);
   }
 
+  // Persistent map-canvas legend must appear while Drone Show is on
+  await page.waitForSelector("#airspaceMapLegend.is-visible", { state: "visible", timeout: 5000 });
+  const mapLegendText = await page.locator("#airspaceMapLegend").textContent();
+  if (!/Do Not Fly/i.test(mapLegendText || "") || !/Fly with Approval/i.test(mapLegendText || "")) {
+    throw new Error(`Map legend missing class labels: ${mapLegendText}`);
+  }
+  // Close Layers — legend must remain on the map canvas
+  await page.locator("#btnToggleLayers").click();
+  await page.waitForSelector("#layersPanel", { state: "hidden", timeout: 5000 }).catch(async () => {
+    const hidden = await page.locator("#layersPanel").evaluate((el) => el.style.display === "none" || el.getAttribute("aria-hidden") === "true");
+    if (!hidden) throw new Error("Layers panel did not close");
+  });
+  if (!(await page.locator("#airspaceMapLegend.is-visible").isVisible())) {
+    throw new Error("Map legend should stay visible when Layers panel is closed");
+  }
+  // Re-open Layers for the rest of the smoke
+  await page.locator("#btnToggleLayers").click();
+  await page.waitForSelector("#airspaceToggle", { state: "visible", timeout: 5000 });
+
   for (const id of ["airspaceClassNoFly", "airspaceClassParks", "airspaceClassAuth"]) {
     const el = page.locator(`#${id}`);
     if ((await el.count()) < 1) throw new Error(`Missing class toggle ${id}`);

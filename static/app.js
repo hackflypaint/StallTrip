@@ -6,6 +6,24 @@
  * Optional drone flight constraints: see static/airspace/ (AirspaceModule) — removable.
  */
 
+/**
+ * Destination arrival SOC tone vs min-arrival reserve (slider).
+ * ok ≥ target · warn ≥ half target (floor 5) · danger below that.
+ * Exported on window for unit tests.
+ */
+function destinationBatteryTone(pct, targetPct) {
+  const p = Number(pct);
+  if (!Number.isFinite(p)) return "unknown";
+  const tRaw = Number(targetPct);
+  const target = Number.isFinite(tRaw) && tRaw > 0 ? tRaw : 15;
+  if (p >= target) return "ok";
+  if (p >= Math.max(5, target * 0.5)) return "warn";
+  return "danger";
+}
+if (typeof window !== "undefined") {
+  window.destinationBatteryTone = destinationBatteryTone;
+}
+
 // Application State
 const state = {
   origin: null,        // { name, lat, lng }
@@ -939,7 +957,8 @@ function clearSelectionShape() {
 
 async function applyForcedChargersFromSelection(chargers, emptyMessage) {
   if (!chargers.length) {
-    alert(emptyMessage);
+    showToast(emptyMessage, 5200);
+    clearSelectionShape();
   } else {
     // Replace prior area-select batch so Clear selection undoes this draw only
     state.areaForcedIds.forEach((id) => {
@@ -951,10 +970,12 @@ async function applyForcedChargersFromSelection(chargers, emptyMessage) {
       state.areaForcedIds.add(c.id);
     });
     updateForcedChargersUI();
+    // Drop the draw overlay — forced markers are the lasting affordance
+    clearSelectionShape();
   }
   deactivateAreaSelectMode();
   updateClearSelectionButton();
-  if (state.origin && state.destination) {
+  if (chargers.length && state.origin && state.destination) {
     planRoute();
   }
 }
@@ -1869,7 +1890,7 @@ function updateMapMarkers() {
 
 async function planRoute() {
   if (!state.origin || !state.destination) {
-    alert("Please provide both starting location and destination.");
+    showToast("Add both a starting location and a destination (or pick a popular route).");
     return;
   }
 
@@ -1913,7 +1934,7 @@ async function planRoute() {
       return;
     }
     if (plan.error) {
-      alert(`Routing error: ${plan.error}`);
+      showToast(`Routing error: ${plan.error}`, 5600);
       return;
     }
 
@@ -1930,7 +1951,7 @@ async function planRoute() {
   } catch (err) {
     if (seq !== state.planRouteSeq) return;
     console.error("Routing error:", err);
-    alert("Failed to compute route. Check network connection.");
+    showToast("Failed to compute route. Check network connection.", 5600);
   } finally {
     if (seq === state.planRouteSeq) {
       btn.innerHTML = origBtnText;
@@ -1952,8 +1973,10 @@ function renderRoutePlan(plan) {
   if (plan.summary.forced_stops_count > 0) {
     forcedNotice = ` (${plan.summary.forced_stops_count} from forced area/selection)`;
   }
-  document.getElementById("corridorCountText").innerText = 
-    `Visited ${plan.summary.supercharger_stops_count} Superchargers${forcedNotice} • ${plan.summary.chargers_along_corridor_count} stations along corridor`;
+  const stopCount = plan.summary.supercharger_stops_count;
+  const stopLabel = stopCount === 1 ? "Supercharger" : "Superchargers";
+  document.getElementById("corridorCountText").innerText =
+    `Visited ${stopCount} ${stopLabel}${forcedNotice} • ${plan.summary.chargers_along_corridor_count} stations along corridor`;
 
   // 2. Render Map Geometry
   state.routeLayer.clearLayers();
@@ -2058,12 +2081,28 @@ function renderTimeline(stops) {
       });
     } else if (s.type === "DESTINATION") {
       item.className = "timeline-item dest";
+      const targetArrival = parseFloat(
+        document.getElementById("targetArrival")?.value || "15"
+      );
+      const tone = destinationBatteryTone(s.battery_pct, targetArrival);
+      const toneClass =
+        tone === "ok"
+          ? "battery-ok"
+          : tone === "warn"
+            ? "battery-warn"
+            : "battery-danger";
+      const toneIcon =
+        tone === "ok"
+          ? "fa-battery-full"
+          : tone === "warn"
+            ? "fa-battery-half"
+            : "fa-battery-quarter";
       item.innerHTML = `
         <div class="timeline-marker"><i class="fa-solid fa-flag-checkered"></i></div>
         <div class="timeline-content">
           <div class="item-top">
             <span class="item-name">${escapeHtml(state.destination.name)}</span>
-            <span class="item-badge" style="background:rgba(232,33,39,0.15); color:var(--tesla-red);"><i class="fa-solid fa-battery-half"></i> ~${s.battery_pct}%</span>
+            <span class="item-badge ${toneClass}" title="Arrival reserve target ${escapeHtml(targetArrival)}%"><i class="fa-solid ${toneIcon}"></i> ~${escapeHtml(s.battery_pct)}%</span>
           </div>
           <div class="item-details">
             <span>Trip destination</span>

@@ -79,6 +79,20 @@ function run() {
   assert(t.AP.parkPurple.toUpperCase() === "#7C1C8D", "AP park token");
   assert(t.MIN_ZOOM_LABELS === 11, "label minzoom (Autopylot uses 12; Leaflet 11)");
 
+  // Map-canvas legend markup lives in the overlay module source
+  const overlaySrc = fs.readFileSync(
+    path.join(__dirname, "..", "static", "airspace", "airspace-overlay.js"),
+    "utf8"
+  );
+  assert(overlaySrc.includes("_syncMapLegend"), "map legend sync helper");
+  assert(overlaySrc.includes("airspaceMapLegend"), "map legend element id");
+  assert(overlaySrc.includes("airspace-map-legend"), "map legend CSS class");
+  const legendCss = fs.readFileSync(
+    path.join(__dirname, "..", "static", "airspace", "airspace.css"),
+    "utf8"
+  );
+  assert(legendCss.includes(".airspace-map-legend"), "map legend styles");
+
   assert(t.STYLES.noFly.fillColor.toUpperCase() === "#F60726", "no-fly style");
   assert(t.STYLES.park.fillColor.toUpperCase() === "#7C1C8D", "park style");
   assert(t.STYLES.auth.fillColor.toUpperCase() === "#FD9104", "auth style");

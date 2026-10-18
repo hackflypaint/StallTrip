@@ -284,6 +284,7 @@
     _debounceTimer: null,
     _onMoveEnd: null,
     _statusEl: null,
+    _mapLegendEl: null,
     _fetchSeq: 0,
     _lastCounts: null,
 
@@ -318,12 +319,15 @@
       this._map = opts.map;
       this._slotEl = opts.slotEl;
       this._classOn = { noFly: true, parks: true, auth: true };
+      this._ensureMapLegend();
       this._renderSlot();
+      this._syncMapLegend();
     },
 
     unmount() {
       this._setEnabled(false);
       if (this._slotEl) this._slotEl.innerHTML = "";
+      this._removeMapLegend();
       this._map = null;
       this._slotEl = null;
       this._statusEl = null;
@@ -400,6 +404,7 @@
       toggle.addEventListener("change", () => {
         this._setEnabled(toggle.checked);
         if (detail) detail.classList.toggle("is-active", toggle.checked);
+        this._syncMapLegend();
       });
 
       const classInputs = this._slotEl.querySelectorAll(
@@ -412,7 +417,68 @@
           this._classOn[key] = !!input.checked;
           this._applyClassVisibility();
           this._updateVisibilityStatus();
+          this._syncMapLegend();
         });
+      });
+    },
+
+    /**
+     * Persistent map-canvas legend while Drone flight is on (visible with Layers closed).
+     */
+    _ensureMapLegend() {
+      if (this._mapLegendEl && document.body.contains(this._mapLegendEl)) return;
+      const host =
+        document.querySelector(".map-container") ||
+        (this._map && this._map.getContainer() && this._map.getContainer().parentElement);
+      if (!host) return;
+      const el = document.createElement("div");
+      el.id = "airspaceMapLegend";
+      el.className = "airspace-map-legend";
+      el.setAttribute("role", "status");
+      el.setAttribute("aria-live", "polite");
+      el.hidden = true;
+      el.innerHTML = `
+        <div class="airspace-map-legend-title"><i class="fa-solid fa-plane-up" aria-hidden="true"></i> Drone flight</div>
+        <div class="airspace-map-legend-rows">
+          <div class="airspace-map-legend-row" data-class="noFly">
+            <i class="airspace-swatch airspace-swatch-nofly" aria-hidden="true"></i>
+            <span>Do Not Fly</span>
+          </div>
+          <div class="airspace-map-legend-row" data-class="parks">
+            <i class="airspace-swatch airspace-swatch-park" aria-hidden="true"></i>
+            <span>National park</span>
+          </div>
+          <div class="airspace-map-legend-row" data-class="auth">
+            <i class="airspace-swatch airspace-swatch-auth" aria-hidden="true"></i>
+            <span>Fly with Approval</span>
+          </div>
+        </div>
+        <p class="airspace-map-legend-note">Public FAA/NPS · not LAANC · blank ≠ clearance</p>
+      `;
+      host.appendChild(el);
+      this._mapLegendEl = el;
+    },
+
+    _removeMapLegend() {
+      if (this._mapLegendEl && this._mapLegendEl.parentNode) {
+        this._mapLegendEl.parentNode.removeChild(this._mapLegendEl);
+      }
+      this._mapLegendEl = null;
+    },
+
+    _syncMapLegend() {
+      this._ensureMapLegend();
+      const el = this._mapLegendEl;
+      if (!el) return;
+      const on = !!this._enabled;
+      el.hidden = !on;
+      el.setAttribute("aria-hidden", on ? "false" : "true");
+      el.classList.toggle("is-visible", on);
+      const vis = this._classOn || {};
+      el.querySelectorAll(".airspace-map-legend-row[data-class]").forEach((row) => {
+        const key = row.getAttribute("data-class");
+        const active = !!(key && vis[key]);
+        row.classList.toggle("is-off", !active);
       });
     },
 
@@ -687,7 +753,10 @@
 
     _setEnabled(on) {
       this._enabled = !!on;
-      if (!this._map) return;
+      if (!this._map) {
+        this._syncMapLegend();
+        return;
+      }
 
       if (this._debounceTimer) {
         clearTimeout(this._debounceTimer);
@@ -721,6 +790,7 @@
         this._lastCounts = null;
         this._setStatus("Overlay off");
       }
+      this._syncMapLegend();
     },
 
     _clearLayerData() {
