@@ -1,8 +1,8 @@
 /**
  * Tesla Supercharger Route Planner - Client Application
  * Includes Visit Maximizer routing, map area drag-selection for force-included chargers,
- * Streets / Topographic (OpenTopoMap) basemap switching, Fall Foliage overlay,
- * and multi-stop itinerary generation.
+ * Streets / Topographic basemap switching via the Layers button, and multi-stop itinerary generation.
+ * Optional Fall Foliage: see static/foliage/ (FoliageModule) — removable.
  */
 
 // Application State
@@ -24,8 +24,7 @@ const state = {
   selectionRect: null,
   baseLayers: null,
   activeBasemap: "streets",
-  foliageLayer: null,
-  layerControl: null,
+  layersPanelOpen: false,
 };
 
 // Expose for Playwright / debugging (cloud verification)
@@ -49,7 +48,7 @@ function initMap() {
 
   L.control.zoom({ position: "topright" }).addTo(state.map);
 
-  // Base layers: Streets (OSM) and Topographic (OpenTopoMap)
+  // Base layers: Streets (OSM) and Topographic (OpenTopoMap) — switched via Layers button
   const streetsLayer = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     maxZoom: 19,
@@ -69,42 +68,16 @@ function initMap() {
   state.baseLayers = { streets: streetsLayer, topo: topoLayer };
   state.activeBasemap = "streets";
 
-  state.layerControl = L.control
-    .layers(
-      {
-        Streets: streetsLayer,
-        Topographic: topoLayer,
-      },
-      {},
-      { position: "bottomleft", collapsed: false }
-    )
-    .addTo(state.map);
-
-  state.map.on("baselayerchange", (e) => {
-    const mapEl = document.getElementById("map");
-    if (e.name === "Topographic") {
-      state.activeBasemap = "topo";
-      mapEl.classList.add("basemap-topo");
-    } else {
-      state.activeBasemap = "streets";
-      mapEl.classList.remove("basemap-topo");
-    }
-  });
-
-  state.map.on("overlayadd", (e) => {
-    if (e.name === "Fall Foliage") showFoliageLegend(true);
-  });
-  state.map.on("overlayremove", (e) => {
-    if (e.name === "Fall Foliage") showFoliageLegend(false);
-  });
-
-  // Async: Explore Fall–inspired seasonal choropleth overlay
-  initFoliageOverlay();
-
   state.routeLayer = L.featureGroup().addTo(state.map);
   state.corridorLayer = L.featureGroup().addTo(state.map);
   state.forcedMarkersLayer = L.featureGroup().addTo(state.map);
   state.markersLayer = L.featureGroup().addTo(state.map);
+
+  // Optional removable foliage module (static/foliage/)
+  const foliageSlot = document.getElementById("foliageSlot");
+  if (window.FoliageModule && foliageSlot) {
+    window.FoliageModule.mount({ map: state.map, slotEl: foliageSlot });
+  }
 
   // Map click handler for origin/destination when not in area selection mode
   state.map.on("click", (e) => {
@@ -137,26 +110,37 @@ function initMap() {
   setupMapAreaSelection();
 }
 
-async function initFoliageOverlay() {
-  try {
-    if (!window.FoliageOverlay) return;
-    const foliageLayer = await window.FoliageOverlay.createFoliageOverlay(new Date());
-    state.foliageLayer = foliageLayer;
-    state.layerControl.addOverlay(foliageLayer, "Fall Foliage");
+function setBasemap(name) {
+  if (!state.baseLayers || !state.map) return;
+  const next = name === "topo" ? "topo" : "streets";
+  if (state.activeBasemap === next) return;
 
-    const legendEl = document.getElementById("foliageLegend");
-    if (legendEl) {
-      legendEl.innerHTML = window.FoliageOverlay.buildFoliageLegendHtml(new Date());
-    }
-  } catch (err) {
-    console.warn("Fall Foliage overlay unavailable:", err);
-  }
+  const current = state.baseLayers[state.activeBasemap];
+  const target = state.baseLayers[next];
+  if (current) state.map.removeLayer(current);
+  if (target) state.map.addLayer(target);
+  state.activeBasemap = next;
+
+  const mapEl = document.getElementById("map");
+  if (mapEl) mapEl.classList.toggle("basemap-topo", next === "topo");
+
+  document.querySelectorAll('input[name="basemapRadio"]').forEach((el) => {
+    el.checked = el.value === next;
+  });
 }
 
-function showFoliageLegend(visible) {
-  const legendEl = document.getElementById("foliageLegend");
-  if (!legendEl) return;
-  legendEl.style.display = visible ? "block" : "none";
+function toggleLayersPanel(force) {
+  const panel = document.getElementById("layersPanel");
+  const btn = document.getElementById("btnToggleLayers");
+  if (!panel) return;
+  const open = typeof force === "boolean" ? force : !state.layersPanelOpen;
+  state.layersPanelOpen = open;
+  panel.style.display = open ? "block" : "none";
+  panel.setAttribute("aria-hidden", open ? "false" : "true");
+  if (btn) {
+    btn.classList.toggle("is-active", open);
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+  }
 }
 
 function setupEventListeners() {
@@ -276,11 +260,33 @@ function setupEventListeners() {
   });
 
   document.getElementById("btnToggleLayers").addEventListener("click", () => {
-    if (state.map.hasLayer(state.corridorLayer)) {
-      state.map.removeLayer(state.corridorLayer);
-    } else {
-      state.map.addLayer(state.corridorLayer);
-    }
+    toggleLayersPanel();
+  });
+
+  document.querySelectorAll('input[name="basemapRadio"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      if (el.checked) setBasemap(el.value);
+    });
+  });
+
+  const nearbyToggle = document.getElementById("toggleNearbyStations");
+  if (nearbyToggle) {
+    nearbyToggle.checked = state.map.hasLayer(state.corridorLayer);
+    nearbyToggle.addEventListener("change", () => {
+      if (nearbyToggle.checked) {
+        state.map.addLayer(state.corridorLayer);
+      } else {
+        state.map.removeLayer(state.corridorLayer);
+      }
+    });
+  }
+
+  document.addEventListener("click", (e) => {
+    const panel = document.getElementById("layersPanel");
+    const btn = document.getElementById("btnToggleLayers");
+    if (!state.layersPanelOpen || !panel) return;
+    if (panel.contains(e.target) || (btn && btn.contains(e.target))) return;
+    toggleLayersPanel(false);
   });
 
   // Charger Drawer Close

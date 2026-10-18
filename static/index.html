@@ -16,6 +16,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   
   <link rel="stylesheet" href="/style.css">
+  <!-- Removable foliage module CSS — delete with static/foliage/ -->
+  <link rel="stylesheet" href="/foliage/foliage.css">
 </head>
 <body>
   <div class="app-container">
@@ -319,9 +321,30 @@
         <button class="map-btn" id="btnLocateMe" title="Find My Location">
           <i class="fa-solid fa-crosshairs"></i>
         </button>
-        <button class="map-btn" id="btnToggleLayers" title="Toggle Nearby Stations">
+        <button class="map-btn" id="btnToggleLayers" title="Map Layers" aria-expanded="false" aria-controls="layersPanel">
           <i class="fa-solid fa-layer-group"></i>
         </button>
+      </div>
+
+      <!-- Layers panel (opened by the layers button) -->
+      <div class="layers-panel" id="layersPanel" style="display: none;" aria-hidden="true">
+        <div class="layers-panel-title">Map Layers</div>
+        <div class="layers-section-label">Basemap</div>
+        <label class="layers-option">
+          <input type="radio" name="basemapRadio" value="streets" checked />
+          Streets
+        </label>
+        <label class="layers-option">
+          <input type="radio" name="basemapRadio" value="topo" />
+          Topographic
+        </label>
+        <div class="layers-section-label">Overlays</div>
+        <label class="layers-option">
+          <input type="checkbox" id="toggleNearbyStations" checked />
+          Nearby stations
+        </label>
+        <!-- Removable foliage module slot — delete with static/foliage/ -->
+        <div id="foliageSlot"></div>
       </div>
 
       <!-- Map Mode Notification Banner (Active during Area Selection) -->
@@ -341,9 +364,6 @@
         <div class="legend-item"><span class="legend-color corridor"></span> Nearby Station</div>
         <div class="legend-item"><span class="legend-color dest"></span> Destination</div>
       </div>
-
-      <!-- Fall Foliage stage legend (shown when overlay is enabled) -->
-      <div class="foliage-legend" id="foliageLegend" style="display: none;" aria-live="polite"></div>
 
       <!-- Charger Detail Modal / Drawer -->
       <div class="charger-drawer" id="chargerDrawer" style="display: none;">
@@ -387,7 +407,8 @@
 
   </div>
 
-  <script src="/foliage.js"></script>
+  <!-- Removable foliage module JS — delete with static/foliage/ -->
+  <script src="/foliage/foliage-overlay.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

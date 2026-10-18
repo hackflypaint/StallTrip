@@ -72,18 +72,18 @@ async function runVerification() {
     await page.screenshot({ path: path.join(MEDIA_DIR, '01_visit_maximizer_route.png') });
     console.log('Saved 01_visit_maximizer_route.png');
 
-    // 2b. Switch to Topographic basemap and capture screenshot
-    console.log('2b. Switching basemap to Topographic (OpenTopoMap)...');
-    const topoLabel = page.locator('.leaflet-control-layers label:has-text("Topographic")');
-    await topoLabel.waitFor({ state: 'visible', timeout: 5000 });
-    await topoLabel.click();
+    // 2b. Open Layers panel → Topographic basemap
+    console.log('2b. Opening Layers panel and selecting Topographic...');
+    await page.locator('#btnToggleLayers').click();
+    await page.waitForSelector('#layersPanel', { state: 'visible', timeout: 5000 });
+    await page.locator('input[name="basemapRadio"][value="topo"]').check();
     await page.waitForTimeout(2500);
 
     const mapHasTopoClass = await page.locator('#map.basemap-topo').count();
     if (mapHasTopoClass < 1) {
       throw new Error('Expected #map.basemap-topo after selecting Topographic layer');
     }
-    const topoRadioChecked = await page.locator('.leaflet-control-layers label:has-text("Topographic") input').isChecked();
+    const topoRadioChecked = await page.locator('input[name="basemapRadio"][value="topo"]').isChecked();
     if (!topoRadioChecked) {
       throw new Error('Topographic radio was not checked after click');
     }
@@ -91,27 +91,33 @@ async function runVerification() {
     await page.screenshot({ path: path.join(MEDIA_DIR, 'topo_layer.png') });
     console.log('Saved topo_layer.png');
 
-    // Switch back to Streets so remaining overlays stay on familiar dark-filtered tiles
-    await page.locator('.leaflet-control-layers label:has-text("Streets")').click();
+    // Switch back to Streets
+    await page.locator('input[name="basemapRadio"][value="streets"]').check();
     await page.waitForTimeout(800);
 
-    // 2c. Enable Fall Foliage overlay and capture screenshot
-    console.log('2c. Enabling Fall Foliage overlay...');
-    const foliageLabel = page.locator('.leaflet-control-layers label:has-text("Fall Foliage")');
-    await foliageLabel.waitFor({ state: 'visible', timeout: 8000 });
-    await foliageLabel.click();
+    // 2c. Enable Fall Foliage overlay + scrub day slider
+    console.log('2c. Enabling Fall Foliage overlay and day slider...');
+    await page.locator('#foliageToggle').check();
+    await page.waitForSelector('#foliageSliderBlock.is-active', { state: 'visible', timeout: 5000 });
     await page.waitForTimeout(2000);
 
-    const foliageLegendVisible = await page.locator('#foliageLegend').isVisible();
-    if (!foliageLegendVisible) {
-      throw new Error('Expected #foliageLegend to be visible after enabling Fall Foliage');
-    }
-    const foliagePathCount = await page.locator('.leaflet-overlay-pane path').count();
-    if (foliagePathCount < 10) {
-      throw new Error(`Expected multiple foliage state polygons, found ${foliagePathCount}`);
+    const foliageImgCount = await page.locator('.leaflet-image-layer, img.foliage-image-overlay, .leaflet-overlay-pane img').count();
+    if (foliageImgCount < 1) {
+      throw new Error('Expected Explore Fall image overlay on the map');
     }
 
-    // Zoom out a bit to show regional autumn wash across the Lower 48
+    // Scrub slider toward mid-October (season index ~47 ≈ Oct 18)
+    await page.evaluate(() => {
+      const slider = document.getElementById('foliageDaySlider');
+      if (!slider) throw new Error('foliageDaySlider missing');
+      slider.value = '47';
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await page.waitForTimeout(1200);
+    const dateLabel = await page.locator('#foliageDateLabel').textContent();
+    console.log(`Foliage slider date label: ${dateLabel}`);
+
+    // Zoom out to show CONUS foliage wash
     await page.evaluate(() => {
       if (window.appState && window.appState.map) {
         window.appState.map.setView([39.5, -98.0], 4);
@@ -122,7 +128,8 @@ async function runVerification() {
     await page.screenshot({ path: path.join(MEDIA_DIR, 'foliage_layer.png') });
     console.log('Saved foliage_layer.png');
 
-    // Fit back to the planned route for subsequent checks
+    // Close layers panel and fit back to route
+    await page.locator('#btnToggleLayers').click();
     await page.locator('#btnMapReset').click();
     await page.waitForTimeout(1000);
 

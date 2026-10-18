@@ -1046,46 +1046,6 @@ body, html {
   filter: brightness(0.95) contrast(1.05) saturate(1.05);
 }
 
-/* Dark Leaflet base-layer control (Streets / Topographic) */
-.leaflet-control-layers {
-  background: rgba(26, 30, 36, 0.94);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  color: var(--text-main);
-  box-shadow: var(--shadow-md);
-  padding: 8px 12px;
-  line-height: 1.45;
-}
-
-.leaflet-control-layers-expanded {
-  padding: 10px 14px;
-}
-
-.leaflet-control-layers label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 2px 0;
-  font-size: 0.78rem;
-  font-weight: 500;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.leaflet-control-layers label:hover {
-  color: var(--text-main);
-}
-
-.leaflet-control-layers input.leaflet-control-layers-selector {
-  accent-color: var(--tesla-red);
-  margin: 0;
-}
-
-.leaflet-control-layers-separator {
-  border-top-color: var(--border-color);
-}
-
 .leaflet-control-attribution {
   background: rgba(26, 30, 36, 0.85) !important;
   color: var(--text-dim);
@@ -1096,87 +1056,68 @@ body, html {
   color: var(--text-muted);
 }
 
-/* Fall Foliage overlay legend (Explore Fall–style stages) */
-.foliage-legend {
+/* Layers panel (opened by map layers button) */
+.layers-panel {
   position: absolute;
   top: 18px;
-  left: 18px;
-  z-index: 1000;
-  min-width: 168px;
-  max-width: 220px;
+  right: 68px;
+  z-index: 1100;
+  width: 240px;
+  max-width: calc(100% - 90px);
   padding: 12px 14px;
-  background: rgba(26, 30, 36, 0.94);
+  background: rgba(26, 30, 36, 0.96);
   backdrop-filter: blur(8px);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
   color: var(--text-muted);
-  font-size: 0.72rem;
-  line-height: 1.35;
 }
 
-.foliage-legend-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.8rem;
+.layers-panel-title {
+  font-size: 0.82rem;
   font-weight: 600;
   color: var(--text-main);
-  margin-bottom: 2px;
-}
-
-.foliage-legend-title i {
-  color: #e8913a;
-}
-
-.foliage-legend-sub {
-  font-size: 0.65rem;
-  color: var(--text-dim);
   margin-bottom: 8px;
 }
 
-.foliage-legend-row {
+.layers-section-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin: 10px 0 4px;
+}
+
+.layers-option {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 3px 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 4px 0;
+  cursor: pointer;
 }
 
-.foliage-swatch {
-  width: 14px;
-  height: 14px;
-  border-radius: 3px;
-  border: 1px solid;
-  flex-shrink: 0;
+.layers-option:hover {
+  color: var(--text-main);
 }
 
-.foliage-legend-note {
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px solid var(--border-color);
-  font-size: 0.62rem;
-  color: var(--text-dim);
+.layers-option input {
+  accent-color: var(--tesla-red);
+  margin: 0;
 }
 
-.foliage-tooltip {
-  background: rgba(26, 30, 36, 0.95) !important;
-  border: 1px solid var(--border-color) !important;
-  color: var(--text-main) !important;
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-md);
-  font-size: 0.75rem;
-}
-
-.foliage-tooltip::before {
-  border-top-color: rgba(26, 30, 36, 0.95) !important;
+.map-btn.is-active {
+  background: var(--tesla-red);
+  color: #fff;
+  border-color: var(--tesla-red);
 }
 
 @media (max-width: 720px) {
-  .foliage-legend {
+  .layers-panel {
     top: 12px;
-    left: 10px;
-    max-width: 150px;
-    padding: 10px 12px;
+    right: 58px;
+    width: 210px;
   }
 }
 
