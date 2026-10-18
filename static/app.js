@@ -3,7 +3,7 @@
  * Includes Visit Maximizer routing, map area drag-selection for force-included chargers,
  * Streets / Topographic basemap switching via the Layers button, and multi-stop itinerary generation.
  * Optional Fall Foliage: see static/foliage/ (FoliageModule) — removable.
- * Optional Airspace / UAS: see static/airspace/ (AirspaceModule) — removable.
+ * Optional drone flight constraints: see static/airspace/ (AirspaceModule) — removable.
  */
 
 // Application State

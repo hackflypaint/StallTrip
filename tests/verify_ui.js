@@ -171,10 +171,14 @@ async function runVerification() {
     await page.locator('#foliageToggle').uncheck();
     await page.waitForTimeout(500);
 
-    // 2d. Enable Airspace / UAS overlay (FAA FeatureServers) over Mid-Atlantic
-    console.log('2d. Enabling Airspace / UAS overlay over Mid-Atlantic...');
+    // 2d. Enable drone flight constraints (FAA + NPS) over Mid-Atlantic
+    console.log('2d. Enabling drone flight overlay over Mid-Atlantic...');
     await page.locator('#airspaceToggle').check();
     await page.waitForSelector('#airspaceDetailBlock.is-active', { state: 'visible', timeout: 5000 });
+    const droneTitle = await page.locator('.airspace-slot-title').textContent();
+    if (!/Drone flight/i.test(droneTitle || '')) {
+      throw new Error(`Expected Drone flight title, got: ${droneTitle}`);
+    }
 
     await page.evaluate(() => {
       if (window.appState && window.appState.map) {
@@ -186,11 +190,11 @@ async function runVerification() {
       const el = document.getElementById('airspaceStatus');
       if (!el) return false;
       const t = el.textContent || '';
-      return /Class\s+\d+/.test(t) || /SUA\s+\d+/.test(t) || /UASFM\s+\d+/.test(t);
+      return /No-fly\s+\d+/.test(t) || /Auth\s+\d+/.test(t) || /Parks\s+\d+/.test(t) || /UASFM\s+\d+/.test(t);
     }, { timeout: 25000 });
 
     const airspaceStatus = await page.locator('#airspaceStatus').textContent();
-    console.log(`Airspace status: ${airspaceStatus}`);
+    console.log(`Drone airspace status: ${airspaceStatus}`);
     const airspaceOn = await page.evaluate(() => !!(window.AirspaceModule && window.AirspaceModule.isEnabled()));
     if (!airspaceOn) {
       throw new Error('AirspaceModule should be enabled after toggle');
