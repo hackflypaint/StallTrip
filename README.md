@@ -25,15 +25,15 @@ docker compose up -d --build
 
 Local Python (no Docker): `python3 server.py 8080` — **stdlib only**, no `pip install`.
 
-**Mobile shell:** `http://localhost:8080/mobile` (map-first UI; `?sheet=1` opens the planner). Same `/api/*` as desktop. Soft UA redirect to `/mobile` stays **off** by default — set `MOBILE_UA_REDIRECT=1` only if you want phones on `/` redirected.
+**Mobile (published):** `http://localhost:8080/mobile` — map-first web shell in the **same HI container**. Compose defaults to `COST_PROFILE=lean`. Soft UA redirect stays **off**. Full HI + cost notes: [mobile-deploy.md](./mobile-deploy.md).
 
 ### Mobile verify
 ```bash
 python3 -m unittest tests.test_mobile tests.test_security -v
 node tests/test_mobile_touch.js && node tests/test_mobile_perf.js
-python3 server.py 8080
-# optional Playwright smoke (needs: npm install --no-save playwright)
-node tests/verify_mobile.js
+docker compose up -d --build
+curl -fsS http://localhost:8080/api/health   # mobile_shell + cost_profile
+# optional Playwright: npm install --no-save playwright && node tests/verify_mobile.js
 ```
 
 ## What’s in the box

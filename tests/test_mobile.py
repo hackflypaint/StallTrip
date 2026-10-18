@@ -67,6 +67,25 @@ class TestMobileShell(unittest.TestCase):
         self.assertEqual(status, 200)
         data = json.loads(body)
         self.assertEqual(data["mobile_shell"], "/mobile")
+        self.assertIn(data.get("cost_profile"), ("lean", "default"))
+        limits = data.get("limits") or {}
+        self.assertIn("geocode_per_min", limits)
+        self.assertIn("plan_per_min", limits)
+        self.assertFalse(limits.get("mobile_ua_redirect"))
+
+    def test_static_js_has_short_cache(self):
+        status, headers, _ = self._get("/app.js")
+        self.assertEqual(status, 200)
+        lower = {k.lower(): v for k, v in headers.items()}
+        cc = lower.get("cache-control", "")
+        self.assertIn("max-age=", cc)
+        self.assertNotIn("no-store", cc)
+
+    def test_api_health_is_no_store(self):
+        status, headers, _ = self._get("/api/health")
+        self.assertEqual(status, 200)
+        lower = {k.lower(): v for k, v in headers.items()}
+        self.assertIn("no-store", lower.get("cache-control", ""))
 
     def test_mobile_path_serves_spa(self):
         status, headers, body = self._get("/mobile")
@@ -126,19 +145,32 @@ class TestMobileShell(unittest.TestCase):
 
     def test_phase4_compose_keeps_ua_redirect_off(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        compose = open(os.path.join(root, "docker-compose.yml"), encoding="utf-8").read()
+        with open(os.path.join(root, "docker-compose.yml"), encoding="utf-8") as fh:
+            compose = fh.read()
         active = "\n".join(
             line for line in compose.splitlines() if line.strip() and not line.lstrip().startswith("#")
         )
         # Must not enable soft UA redirect in default (non-comment) compose lines
         self.assertNotIn("MOBILE_UA_REDIRECT=1", active)
         self.assertIn("MOBILE_UA_REDIRECT", compose)  # documented as optional
+        self.assertIn("COST_PROFILE=lean", active)
+
+    def test_mobile_deploy_doc_exists(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(root, "mobile-deploy.md")
+        self.assertTrue(os.path.isfile(path))
+        with open(path, encoding="utf-8") as fh:
+            body = fh.read()
+        self.assertIn("/mobile", body)
+        self.assertIn("COST_PROFILE", body)
+        self.assertIn("OSRM", body)
 
     def test_phase4_verify_mobile_script_exists(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         path = os.path.join(root, "tests", "verify_mobile.js")
         self.assertTrue(os.path.isfile(path))
-        body = open(path, encoding="utf-8").read()
+        with open(path, encoding="utf-8") as fh:
+            body = fh.read()
         self.assertIn("/mobile", body)
         self.assertIn("ui-mobile", body)
         self.assertIn("SF → LA", body)
