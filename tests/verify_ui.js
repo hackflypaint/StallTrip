@@ -402,7 +402,7 @@ async function runVerification() {
     await page.evaluate(() => {
       window.__mockWatchCallbacks = {};
       window.__wakeLockRequested = 0;
-      navigator.wakeLock = {
+      const mockWakeLock = {
         request: async (type) => {
           window.__wakeLockRequested++;
           return {
@@ -412,6 +412,14 @@ async function runVerification() {
           };
         },
       };
+      try {
+        Object.defineProperty(navigator, 'wakeLock', {
+          value: mockWakeLock,
+          configurable: true,
+        });
+      } catch (_) {
+        navigator.wakeLock = mockWakeLock;
+      }
       navigator.geolocation.watchPosition = (success, error, opts) => {
         window.__mockWatchCallbacks = { success, error, opts };
         setTimeout(() => {
