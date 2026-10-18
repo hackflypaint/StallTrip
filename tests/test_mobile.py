@@ -102,6 +102,25 @@ class TestMobileShell(unittest.TestCase):
         self.assertIn(b'path === "/mobile"', body)
         self.assertIn(b'ui-mobile', body)
 
+    def test_phase2_touch_and_geo_helpers_in_app_js(self):
+        status, _, body = self._get("/app.js")
+        self.assertEqual(status, 200)
+        self.assertIn(b"function resolveGeolocationPlace", body)
+        self.assertIn(b"function applyOriginFromGeolocation", body)
+        self.assertIn(b"function exploreFetchLimit", body)
+        self.assertIn(b'touchstart', body)
+        self.assertIn(b"function beginAreaPointer", body)
+        self.assertIn(b"function setMobileSheetOpen", body)
+        self.assertIn(b"closeMobileSheet()", body)
+
+    def test_phase2_mobile_css_touch_targets(self):
+        status, _, body = self._get("/style.css")
+        self.assertEqual(status, 200)
+        self.assertIn(b"body.ui-mobile .primary-btn", body)
+        self.assertIn(b"min-height: 44px", body)
+        self.assertIn(b"touch-action: none", body)
+        self.assertIn(b"area-drawing", body)
+
     def test_no_ua_redirect_by_default(self):
         prev = os.environ.pop("MOBILE_UA_REDIRECT", None)
         try:

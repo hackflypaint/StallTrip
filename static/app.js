@@ -59,6 +59,66 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+function setMobileSheetOpen(open) {
+  if (!document.body.classList.contains("ui-mobile")) return;
+  document.body.classList.toggle("sheet-open", !!open);
+  const toggle = document.getElementById("btnMobileSheet");
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    const label = open ? "Hide planner" : "Show planner";
+    toggle.setAttribute("aria-label", label);
+    toggle.title = label;
+    const text = toggle.querySelector("span");
+    if (text) text.textContent = open ? "Map" : "Plan";
+  }
+  if (state.map) {
+    setTimeout(() => state.map.invalidateSize(), 50);
+  }
+}
+
+function openMobileSheet() {
+  setMobileSheetOpen(true);
+}
+
+function closeMobileSheet() {
+  setMobileSheetOpen(false);
+}
+
+window.setMobileSheetOpen = setMobileSheetOpen;
+
+/**
+ * Normalize geolocation success / error into an origin place.
+ * On error (or missing coords), use the SF Ferry Building demo fallback.
+ */
+function resolveGeolocationPlace(position, error) {
+  if (!error && position && position.coords) {
+    const { latitude, longitude } = position.coords;
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      return {
+        name: "Current Location",
+        lat: latitude,
+        lng: longitude,
+        source: "geolocation",
+      };
+    }
+  }
+  return {
+    name: "San Francisco, CA (Default)",
+    lat: 37.7955,
+    lng: -122.3937,
+    source: "fallback",
+  };
+}
+
+window.resolveGeolocationPlace = resolveGeolocationPlace;
+
+/** Explore fetch limit — tighter on mobile shell to keep markers light. */
+function exploreFetchLimit() {
+  return isMobileShell() ? 60 : 120;
+}
+
+window.exploreFetchLimit = exploreFetchLimit;
+
 function initMobileShell() {
   if (!isMobileShell()) return;
 
@@ -70,15 +130,7 @@ function initMobileShell() {
     toggle.hidden = false;
     toggle.setAttribute("aria-expanded", "false");
     toggle.addEventListener("click", () => {
-      const open = document.body.classList.toggle("sheet-open");
-      toggle.setAttribute("aria-expanded", open ? "true" : "false");
-      const label = open ? "Hide planner" : "Show planner";
-      toggle.setAttribute("aria-label", label);
-      toggle.title = label;
-      // Leaflet must reflow after layout change
-      if (state.map) {
-        setTimeout(() => state.map.invalidateSize(), 50);
-      }
+      setMobileSheetOpen(!document.body.classList.contains("sheet-open"));
     });
   }
 
@@ -536,69 +588,118 @@ async function finishFreehandSelection(ring) {
   }
 }
 
-// Box rectangle + freehand outline force-include (user picks mode)
+function _areaPointerLatLng(e) {
+  if (e && e.latlng) return e.latlng;
+  return null;
+}
+
+function beginAreaPointer(latlng, originalEvent) {
+  if (!state.areaSelectMode || !latlng) return;
+  if (originalEvent && originalEvent.button != null && originalEvent.button !== 0) return;
+
+  // Prevent the page from scrolling while drawing on touch devices
+  if (originalEvent && originalEvent.cancelable && originalEvent.pointerType === "touch") {
+    originalEvent.preventDefault();
+  }
+
+  clearSelectionShape();
+  state.dragStartLatLng = latlng;
+
+  if (state.areaDrawMode === "freehand") {
+    state.freehandPoints = [latlng];
+    state.selectionShape = L.polyline(state.freehandPoints, {
+      color: "#00b4d8",
+      weight: 3,
+      dashArray: "4, 6",
+      opacity: 0.95,
+    }).addTo(state.map);
+  } else {
+    state.selectionShape = L.rectangle([latlng, latlng], {
+      color: "#00b4d8",
+      weight: 2,
+      dashArray: "6, 6",
+      fillColor: "#00b4d8",
+      fillOpacity: 0.18,
+    }).addTo(state.map);
+  }
+  updateClearSelectionButton();
+}
+
+function moveAreaPointer(latlng) {
+  if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionShape || !latlng) return;
+
+  if (state.areaDrawMode === "freehand") {
+    const last = state.freehandPoints[state.freehandPoints.length - 1];
+    // Slightly looser threshold on mobile so touch samples still build a ring
+    const thresh = isMobileShell() ? 0.0004 : 0.001;
+    if (last && Math.abs(last.lat - latlng.lat) < thresh && Math.abs(last.lng - latlng.lng) < thresh) {
+      return;
+    }
+    state.freehandPoints.push(latlng);
+    state.selectionShape.setLatLngs(state.freehandPoints);
+  } else {
+    state.selectionShape.setBounds(L.latLngBounds(state.dragStartLatLng, latlng));
+  }
+}
+
+async function endAreaPointer(latlng) {
+  if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionShape) return;
+
+  if (state.areaDrawMode === "freehand") {
+    if (latlng) state.freehandPoints.push(latlng);
+    // Mobile freehand often has fewer samples — allow a shorter ring
+    const minPts = isMobileShell() ? 4 : 6;
+    if (state.freehandPoints.length < minPts) {
+      clearSelectionShape();
+      return;
+    }
+    const ring = state.freehandPoints.slice();
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (first.lat !== last.lat || first.lng !== last.lng) {
+      ring.push(L.latLng(first.lat, first.lng));
+    }
+    await finishFreehandSelection(ring);
+  } else {
+    await finishBoxSelection(state.selectionShape.getBounds());
+  }
+}
+
+function _latLngFromTouchEvent(ev) {
+  if (!state.map || !ev) return null;
+  const t = (ev.touches && ev.touches[0]) || (ev.changedTouches && ev.changedTouches[0]);
+  if (!t) return null;
+  return state.map.mouseEventToLatLng(t);
+}
+
+// Box rectangle + freehand outline force-include (mouse + touch)
 function setupMapAreaSelection() {
   state.map.on("mousedown", (e) => {
-    if (!state.areaSelectMode) return;
-    if (e.originalEvent.button !== 0) return;
-
-    clearSelectionShape();
-    state.dragStartLatLng = e.latlng;
-
-    if (state.areaDrawMode === "freehand") {
-      state.freehandPoints = [e.latlng];
-      state.selectionShape = L.polyline(state.freehandPoints, {
-        color: "#00b4d8",
-        weight: 2.5,
-        dashArray: "4, 6",
-        opacity: 0.95,
-      }).addTo(state.map);
-    } else {
-      state.selectionShape = L.rectangle([e.latlng, e.latlng], {
-        color: "#00b4d8",
-        weight: 2,
-        dashArray: "6, 6",
-        fillColor: "#00b4d8",
-        fillOpacity: 0.18,
-      }).addTo(state.map);
-    }
-    updateClearSelectionButton();
+    beginAreaPointer(_areaPointerLatLng(e), e.originalEvent);
   });
 
   state.map.on("mousemove", (e) => {
-    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionShape) return;
-
-    if (state.areaDrawMode === "freehand") {
-      const last = state.freehandPoints[state.freehandPoints.length - 1];
-      if (last && Math.abs(last.lat - e.latlng.lat) < 0.001 && Math.abs(last.lng - e.latlng.lng) < 0.001) {
-        return;
-      }
-      state.freehandPoints.push(e.latlng);
-      state.selectionShape.setLatLngs(state.freehandPoints);
-    } else {
-      state.selectionShape.setBounds(L.latLngBounds(state.dragStartLatLng, e.latlng));
-    }
+    moveAreaPointer(_areaPointerLatLng(e));
   });
 
   state.map.on("mouseup", async (e) => {
-    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionShape) return;
+    await endAreaPointer(_areaPointerLatLng(e));
+  });
 
-    if (state.areaDrawMode === "freehand") {
-      if (e.latlng) state.freehandPoints.push(e.latlng);
-      if (state.freehandPoints.length < 6) {
-        clearSelectionShape();
-        return;
-      }
-      const ring = state.freehandPoints.slice();
-      const first = ring[0];
-      const last = ring[ring.length - 1];
-      if (first.lat !== last.lat || first.lng !== last.lng) {
-        ring.push(L.latLng(first.lat, first.lng));
-      }
-      await finishFreehandSelection(ring);
-    } else {
-      await finishBoxSelection(state.selectionShape.getBounds());
-    }
+  // Touch on the map container (Leaflet does not emit map 'touch*' events)
+  const container = state.map.getContainer();
+  L.DomEvent.on(container, "touchstart", (ev) => {
+    if (!state.areaSelectMode) return;
+    beginAreaPointer(_latLngFromTouchEvent(ev), ev);
+  });
+  L.DomEvent.on(container, "touchmove", (ev) => {
+    if (!state.areaSelectMode || !state.dragStartLatLng) return;
+    if (ev.cancelable) ev.preventDefault();
+    moveAreaPointer(_latLngFromTouchEvent(ev));
+  });
+  L.DomEvent.on(container, "touchend", async (ev) => {
+    if (!state.areaSelectMode || !state.dragStartLatLng) return;
+    await endAreaPointer(_latLngFromTouchEvent(ev));
   });
 }
 
@@ -647,10 +748,17 @@ function updateAreaSelectActiveCopy() {
   const isFreehand = state.areaDrawMode === "freehand";
   const banner = document.getElementById("mapModeBannerText");
   const bannerIcon = document.querySelector("#mapModeBanner .pulse-icon");
+  const touchCopy = isMobileShell();
   if (banner) {
-    banner.textContent = isFreehand
-      ? "Click and drag to freehand-draw an outline around Superchargers. Release to force-include stations inside."
-      : "Click and drag on the map to draw a selection box around Superchargers.";
+    if (isFreehand) {
+      banner.textContent = touchCopy
+        ? "Drag with one finger to outline Superchargers. Lift to force-include stations inside."
+        : "Click and drag to freehand-draw an outline around Superchargers. Release to force-include stations inside.";
+    } else {
+      banner.textContent = touchCopy
+        ? "Drag with one finger to draw a selection box around Superchargers."
+        : "Click and drag on the map to draw a selection box around Superchargers.";
+    }
   }
   if (bannerIcon) {
     bannerIcon.className = isFreehand
@@ -663,6 +771,11 @@ function updateAreaSelectActiveCopy() {
 function activateAreaSelectMode() {
   state.areaSelectMode = true;
   state.map.dragging.disable();
+  // Full map while drawing on mobile
+  if (isMobileShell()) {
+    closeMobileSheet();
+    document.body.classList.add("area-drawing");
+  }
   document.getElementById("map").style.cursor = "crosshair";
   document.getElementById("mapModeBanner").style.display = "flex";
   updateAreaSelectActiveCopy();
@@ -673,6 +786,7 @@ function deactivateAreaSelectMode() {
   state.areaSelectMode = false;
   state.map.dragging.enable();
   state.dragStartLatLng = null;
+  document.body.classList.remove("area-drawing");
   document.getElementById("map").style.cursor = "";
   document.getElementById("mapModeBanner").style.display = "none";
   updateAreaToolDrawingState();
@@ -778,38 +892,41 @@ function setupClearBtn(btnId, inputId, onClear) {
   });
 }
 
+function applyOriginFromGeolocation(place) {
+  setOrigin(place);
+  if (state.map) {
+    state.map.setView([place.lat, place.lng], 12);
+  }
+  // On mobile, open the planner so the user can set a destination next
+  if (isMobileShell()) openMobileSheet();
+  return place;
+}
+
+window.applyOriginFromGeolocation = applyOriginFromGeolocation;
+
 function detectCurrentLocation() {
+  const btn = document.getElementById("btnUseCurrentLocation");
+  const idleHtml = '<i class="fa-solid fa-location-crosshairs"></i> Use Current Location';
+
   if (!navigator.geolocation) {
-    alert("Geolocation is not supported by your browser.");
+    console.warn("Geolocation is not supported by this browser.");
+    applyOriginFromGeolocation(resolveGeolocationPlace(null, { code: 0, message: "unsupported" }));
     return;
   }
-  const btn = document.getElementById("btnUseCurrentLocation");
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Locating...';
+
+  if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Locating...';
 
   navigator.geolocation.getCurrentPosition(
     (pos) => {
-      btn.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Use Current Location';
-      const coords = {
-        name: "Current Location",
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-      };
-      setOrigin(coords);
-      state.map.setView([coords.lat, coords.lng], 12);
+      if (btn) btn.innerHTML = idleHtml;
+      applyOriginFromGeolocation(resolveGeolocationPlace(pos, null));
     },
     (err) => {
-      btn.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Use Current Location';
+      if (btn) btn.innerHTML = idleHtml;
       console.warn("Geolocation denied or error:", err);
-      // Fallback demo location: San Francisco Ferry Building
-      const fallback = {
-        name: "San Francisco, CA (Default)",
-        lat: 37.7955,
-        lng: -122.3937,
-      };
-      setOrigin(fallback);
-      state.map.setView([fallback.lat, fallback.lng], 12);
+      applyOriginFromGeolocation(resolveGeolocationPlace(null, err));
     },
-    { timeout: 8000 }
+    { timeout: 8000, maximumAge: 60_000, enableHighAccuracy: false }
   );
 }
 
@@ -827,6 +944,8 @@ function setDestination(place) {
   input.value = place.name;
   document.getElementById("clearDest").style.display = "block";
   updateMapMarkers();
+  // Both ends set on mobile → keep sheet open so Plan Route is one tap away
+  if (isMobileShell() && state.origin) openMobileSheet();
 }
 
 function setupAutocomplete(inputId, suggestionsId, onSelect) {
@@ -983,6 +1102,8 @@ async function planRoute() {
 
     state.activePlan = plan;
     renderRoutePlan(plan);
+    // Show the route on the map after planning on mobile
+    if (isMobileShell()) closeMobileSheet();
   } catch (err) {
     if (seq !== state.planRouteSeq) return;
     console.error("Routing error:", err);
@@ -1249,7 +1370,10 @@ async function loadMapBoundsChargers() {
   const minStalls = document.getElementById("filterMinStalls").value;
   const text = document.getElementById("chargerSearchInput").value.trim();
 
-  let url = `/api/superchargers?min_lat=${bounds.getSouth()}&max_lat=${bounds.getNorth()}&min_lng=${bounds.getWest()}&max_lng=${bounds.getEast()}&status=${status}&min_power=${minPower}&min_stalls=${minStalls}&limit=120`;
+  let url =
+    `/api/superchargers?min_lat=${bounds.getSouth()}&max_lat=${bounds.getNorth()}` +
+    `&min_lng=${bounds.getWest()}&max_lng=${bounds.getEast()}` +
+    `&status=${status}&min_power=${minPower}&min_stalls=${minStalls}&limit=${exploreFetchLimit()}`;
   if (text) {
     url += `&q=${encodeURIComponent(text)}`;
   }

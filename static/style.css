@@ -1386,3 +1386,85 @@ body.ui-mobile .charger-drawer {
 body.ui-mobile .layers-panel {
   max-width: calc(100vw - 72px);
 }
+
+/* Phase 2 — touch targets + sheet polish */
+body.ui-mobile .sidebar-header {
+  padding: 12px 14px;
+}
+
+body.ui-mobile .brand h1 {
+  font-size: 1rem;
+}
+
+body.ui-mobile .brand .subtitle {
+  font-size: 0.7rem;
+}
+
+body.ui-mobile .dataset-badge {
+  font-size: 0.7rem;
+  padding: 4px 8px;
+}
+
+body.ui-mobile .tabs {
+  gap: 6px;
+  padding: 8px 10px 0;
+}
+
+body.ui-mobile .tab-btn {
+  min-height: 44px;
+  font-size: 0.85rem;
+  padding: 10px 8px;
+}
+
+body.ui-mobile .route-form,
+body.ui-mobile .tab-content {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+body.ui-mobile .input-wrapper input,
+body.ui-mobile .input-wrapper select,
+body.ui-mobile input[type="text"],
+body.ui-mobile select {
+  min-height: 44px;
+  font-size: 16px; /* avoid iOS zoom-on-focus */
+}
+
+body.ui-mobile .link-btn,
+body.ui-mobile .preset-tag,
+body.ui-mobile .swap-btn,
+body.ui-mobile .strategy-toggle button,
+body.ui-mobile .clear-btn {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+body.ui-mobile .preset-tag {
+  padding: 10px 12px;
+}
+
+body.ui-mobile .primary-btn {
+  min-height: 48px;
+  font-size: 1rem;
+  width: 100%;
+}
+
+body.ui-mobile #mapModeBanner {
+  left: 10px;
+  right: 10px;
+  top: 10px;
+  width: auto;
+  font-size: 0.82rem;
+  padding: 10px 12px;
+  line-height: 1.35;
+}
+
+body.ui-mobile .map-container,
+body.ui-mobile #map {
+  touch-action: pan-x pan-y;
+}
+
+body.ui-mobile.area-drawing .map-container,
+body.ui-mobile.area-drawing #map {
+  touch-action: none;
+}
