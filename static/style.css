@@ -1865,6 +1865,7 @@ body.car-shell .suggestion-item:active {
 /* --------------------------------------------------------------------------
    Mobile shell (/mobile or ?ui=mobile) — map-first, planner as bottom sheet.
    Explicit entry preferred over User-Agent sniffing (see server MOBILE_UA_REDIRECT).
+   Safari: viewport-fit=cover + env(safe-area-inset-*) + --vv-bottom (visualViewport).
    -------------------------------------------------------------------------- */
 .mobile-sheet-toggle {
   display: none;
@@ -1873,20 +1874,36 @@ body.car-shell .suggestion-item:active {
 body.ui-mobile {
   /* Prefer dynamic viewport units on mobile browsers when available */
   height: 100%;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  /* JS updateMobileViewportInsets() sets --vv-bottom for Safari URL/toolbar overlay */
+  --vv-bottom: 0px;
+  --mobile-chrome-bottom: calc(var(--safe-bottom) + var(--vv-bottom));
+  --mobile-plan-h: 52px;
+  --mobile-fab-gap: 12px;
+  --mobile-sheet-h: min(48dvh, 400px);
 }
 
 body.ui-mobile .app-container {
   flex-direction: column;
-  height: 100dvh;
   height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  padding-top: var(--safe-top);
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+  box-sizing: border-box;
 }
 
 body.ui-mobile .map-container {
   flex: 1 1 auto;
   width: 100%;
   height: auto;
-  min-height: 58vh;
+  min-height: 42dvh;
   order: 1;
+  position: relative;
 }
 
 body.ui-mobile .sidebar {
@@ -1903,57 +1920,79 @@ body.ui-mobile .sidebar {
 }
 
 body.ui-mobile.sheet-open .sidebar {
-  height: min(52vh, 420px);
-  max-height: min(52vh, 420px);
+  height: var(--mobile-sheet-h);
+  max-height: var(--mobile-sheet-h);
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  /* Keep Destination / CTAs above Safari bottom chrome while scrolling */
+  padding-bottom: calc(20px + var(--mobile-chrome-bottom));
+  box-sizing: border-box;
 }
 
+/* Map-first: Plan sits above home indicator + Safari toolbar overlay */
 body.ui-mobile .mobile-sheet-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   position: absolute;
-  z-index: 1100;
+  z-index: 1200;
   left: 50%;
-  bottom: 18px;
+  bottom: calc(var(--mobile-fab-gap) + var(--mobile-chrome-bottom));
   transform: translateX(-50%);
-  min-height: 44px;
-  min-width: 44px;
-  padding: 10px 18px;
+  min-height: var(--mobile-plan-h);
+  min-width: 96px;
+  padding: 12px 22px;
   border: 1px solid var(--border-color);
   border-radius: 999px;
   background: var(--bg-card);
   color: var(--text-main);
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 600;
   box-shadow: var(--shadow-md);
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
+/* Sheet open: Map FAB top-left — never overlaps legend / sheet seam */
 body.ui-mobile.sheet-open .mobile-sheet-toggle {
-  bottom: calc(min(52vh, 420px) + 10px);
+  top: calc(10px + var(--safe-top));
+  bottom: auto;
+  left: calc(10px + var(--safe-left));
+  right: auto;
+  transform: none;
   background: var(--tesla-red);
   border-color: var(--tesla-red);
   color: #fff;
+  min-width: 88px;
 }
 
 body.ui-mobile .map-floating-bar {
-  top: 12px;
-  right: 12px;
+  top: calc(10px + var(--safe-top));
+  right: calc(10px + var(--safe-right));
 }
 
-/* Keep Plan CTA clear of the legend on the collapsed map */
+/*
+ * Legend sits above Plan (+ chrome). Cap width so it never fights the centered FAB.
+ * When sheet is open, hide legend — map strip is short; Map FAB owns that space.
+ */
 body.ui-mobile .map-legend {
-  left: 10px;
+  left: calc(10px + var(--safe-left));
   right: auto;
-  bottom: 72px;
-  max-width: calc(100vw - 20px);
+  bottom: calc(var(--mobile-plan-h) + var(--mobile-fab-gap) + var(--mobile-chrome-bottom) + 10px);
+  max-width: min(280px, calc(100vw - 24px));
   flex-wrap: wrap;
-  gap: 10px 12px;
+  gap: 8px 10px;
   padding: 8px 10px;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+body.ui-mobile.sheet-open .map-legend {
+  display: none;
 }
 
 body.ui-mobile .map-btn,
@@ -1963,20 +2002,27 @@ body.ui-mobile .map-area-tools .map-btn {
 }
 
 body.ui-mobile .charger-drawer {
-  left: 10px;
-  right: 10px;
-  bottom: 10px;
+  left: calc(10px + var(--safe-left));
+  right: calc(10px + var(--safe-right));
+  bottom: calc(10px + var(--mobile-chrome-bottom));
   width: auto;
-  max-height: 55vh;
+  max-height: 50dvh;
+}
+
+body.ui-mobile.sheet-open .charger-drawer {
+  bottom: calc(var(--mobile-sheet-h) + 8px + var(--mobile-chrome-bottom));
+  max-height: 36dvh;
 }
 
 body.ui-mobile .layers-panel {
   max-width: calc(100vw - 72px);
+  top: calc(10px + var(--safe-top));
 }
 
 /* Phase 2 — touch targets + sheet polish */
 body.ui-mobile .sidebar-header {
-  padding: 12px 14px;
+  padding: 10px 12px;
+  gap: 8px;
 }
 
 body.ui-mobile .brand h1 {
@@ -1987,6 +2033,15 @@ body.ui-mobile .brand .subtitle {
   font-size: 0.7rem;
 }
 
+/* Less chrome on short phones so Origin + Destination stay reachable */
+body.ui-mobile.sheet-open .brand .subtitle {
+  display: none;
+}
+
+body.ui-mobile.sheet-open .dataset-badge {
+  display: none;
+}
+
 body.ui-mobile .dataset-badge {
   font-size: 0.7rem;
   padding: 4px 8px;
@@ -1994,7 +2049,11 @@ body.ui-mobile .dataset-badge {
 
 body.ui-mobile .tabs {
   gap: 6px;
-  padding: 8px 10px 0;
+  padding: 6px 10px 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-secondary, var(--bg-card));
 }
 
 body.ui-mobile .tab-btn {
@@ -2007,6 +2066,7 @@ body.ui-mobile .route-form,
 body.ui-mobile .tab-content {
   padding-left: 12px;
   padding-right: 12px;
+  padding-bottom: 8px;
 }
 
 body.ui-mobile .input-wrapper input,
@@ -2037,9 +2097,9 @@ body.ui-mobile .primary-btn {
 }
 
 body.ui-mobile #mapModeBanner {
-  left: 10px;
-  right: 10px;
-  top: 10px;
+  left: calc(10px + var(--safe-left));
+  right: calc(10px + var(--safe-right));
+  top: calc(10px + var(--safe-top));
   width: auto;
   font-size: 0.82rem;
   padding: 10px 12px;
@@ -2054,4 +2114,14 @@ body.ui-mobile #map {
 body.ui-mobile.area-drawing .map-container,
 body.ui-mobile.area-drawing #map {
   touch-action: none;
+}
+
+/* Very short landscape / split Safari: keep sheet scrollable, map visible */
+@media (max-height: 560px) {
+  body.ui-mobile {
+    --mobile-sheet-h: min(55dvh, 320px);
+  }
+  body.ui-mobile .map-legend .legend-item:nth-child(n + 4) {
+    display: none;
+  }
 }
