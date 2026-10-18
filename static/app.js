@@ -939,7 +939,8 @@ function clearSelectionShape() {
 
 async function applyForcedChargersFromSelection(chargers, emptyMessage) {
   if (!chargers.length) {
-    alert(emptyMessage);
+    showToast(emptyMessage, 5200);
+    clearSelectionShape();
   } else {
     // Replace prior area-select batch so Clear selection undoes this draw only
     state.areaForcedIds.forEach((id) => {
@@ -951,10 +952,12 @@ async function applyForcedChargersFromSelection(chargers, emptyMessage) {
       state.areaForcedIds.add(c.id);
     });
     updateForcedChargersUI();
+    // Drop the draw overlay — forced markers are the lasting affordance
+    clearSelectionShape();
   }
   deactivateAreaSelectMode();
   updateClearSelectionButton();
-  if (state.origin && state.destination) {
+  if (chargers.length && state.origin && state.destination) {
     planRoute();
   }
 }
@@ -1869,7 +1872,7 @@ function updateMapMarkers() {
 
 async function planRoute() {
   if (!state.origin || !state.destination) {
-    alert("Please provide both starting location and destination.");
+    showToast("Add both a starting location and a destination (or pick a popular route).");
     return;
   }
 
@@ -1913,7 +1916,7 @@ async function planRoute() {
       return;
     }
     if (plan.error) {
-      alert(`Routing error: ${plan.error}`);
+      showToast(`Routing error: ${plan.error}`, 5600);
       return;
     }
 
@@ -1930,7 +1933,7 @@ async function planRoute() {
   } catch (err) {
     if (seq !== state.planRouteSeq) return;
     console.error("Routing error:", err);
-    alert("Failed to compute route. Check network connection.");
+    showToast("Failed to compute route. Check network connection.", 5600);
   } finally {
     if (seq === state.planRouteSeq) {
       btn.innerHTML = origBtnText;
@@ -1952,8 +1955,10 @@ function renderRoutePlan(plan) {
   if (plan.summary.forced_stops_count > 0) {
     forcedNotice = ` (${plan.summary.forced_stops_count} from forced area/selection)`;
   }
-  document.getElementById("corridorCountText").innerText = 
-    `Visited ${plan.summary.supercharger_stops_count} Superchargers${forcedNotice} • ${plan.summary.chargers_along_corridor_count} stations along corridor`;
+  const stopCount = plan.summary.supercharger_stops_count;
+  const stopLabel = stopCount === 1 ? "Supercharger" : "Superchargers";
+  document.getElementById("corridorCountText").innerText =
+    `Visited ${stopCount} ${stopLabel}${forcedNotice} • ${plan.summary.chargers_along_corridor_count} stations along corridor`;
 
   // 2. Render Map Geometry
   state.routeLayer.clearLayers();
