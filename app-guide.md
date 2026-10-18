@@ -174,6 +174,14 @@ Runs end-to-end automated UI checks including Visit Maximizer calculation, drawe
 node tests/verify_ui.js
 ```
 
+### Mobile shell smoke (`/mobile`)
+Phone viewport Playwright checks for map-first shell, Plan sheet, SF→LA plan, and default-off UA redirect:
+```bash
+# requires Chrome + playwright (npm install --no-save playwright)
+MOBILE_MEDIA_DIR=/tmp/tesla-planner-media node tests/verify_mobile.js
+```
+Soft UA redirect (`MOBILE_UA_REDIRECT`) remains **disabled** in Docker compose unless explicitly set.
+
 ---
 
 ## API Reference

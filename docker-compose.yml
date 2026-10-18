@@ -12,6 +12,8 @@ services:
       - "8080:8080"
     environment:
       - PORT=8080
+      # Soft phone→/mobile redirect stays OFF (unset). Enable only if desired:
+      # - MOBILE_UA_REDIRECT=1
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
