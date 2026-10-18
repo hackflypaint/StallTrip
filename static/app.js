@@ -32,6 +32,10 @@ const state = {
   layersPanelOpen: false,
   /** Monotonic token so overlapping planRoute calls discard stale responses. */
   planRouteSeq: 0,
+  /** Tesla landscape bottom-sheet mode (not phone /mobile). */
+  carShell: false,
+  /** peek | plan | itinerary */
+  sheetMode: "plan",
 };
 
 // Expose for Playwright / debugging (cloud verification)
@@ -52,9 +56,142 @@ function escapeHtml(value) {
 document.addEventListener("DOMContentLoaded", () => {
   initMap();
   setupEventListeners();
+  setupCarShell();
   loadStats();
   loadNearbyChargers();
 });
+
+/**
+ * Tesla / short-landscape car shell: map-first + bottom plan sheet.
+ * Primary target ~773×601; also 1254×784. Skips phone portrait.
+ * Force: ?car=1  Disable: ?car=0
+ */
+function shouldUseCarShell() {
+  const params = new URLSearchParams(window.location.search);
+  const forced = params.get("car");
+  if (forced === "0" || forced === "false") return false;
+  if (forced === "1" || forced === "true") return true;
+  try {
+    if (window.localStorage.getItem("teslaCarShell") === "1") return true;
+  } catch (_) {
+    /* ignore */
+  }
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  // Phone portrait — keep existing narrow stack, not this shell
+  if (w < 600 && h > w) return false;
+  // Tesla windowed (~773×601) and landscape car canvases (~1254×784)
+  if (w >= 700 && w <= 1400 && h >= 500 && h <= 820) return true;
+  return false;
+}
+
+function setupCarShell() {
+  applyCarShell();
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => applyCarShell(), 150);
+  });
+
+  const handle = document.getElementById("btnCarSheetHandle");
+  const planBtn = document.getElementById("btnCarSheetPlan");
+  const itinBtn = document.getElementById("btnCarSheetItinerary");
+  if (handle) {
+    handle.addEventListener("click", () => cycleCarSheet());
+  }
+  if (planBtn) {
+    planBtn.addEventListener("click", () => setCarSheet("plan"));
+  }
+  if (itinBtn) {
+    itinBtn.addEventListener("click", () => {
+      if (state.activePlan) setCarSheet("itinerary");
+      else setCarSheet("plan");
+    });
+  }
+}
+
+function applyCarShell() {
+  const enable = shouldUseCarShell();
+  const was = state.carShell;
+  state.carShell = enable;
+  document.body.classList.toggle("car-shell", enable);
+  const chrome = document.getElementById("carSheetChrome");
+  if (chrome) {
+    if (enable) chrome.removeAttribute("hidden");
+    else chrome.setAttribute("hidden", "");
+  }
+  if (enable) {
+    if (!was) setCarSheet(state.activePlan ? "peek" : "plan");
+    else setCarSheet(state.sheetMode || "plan");
+  } else {
+    document.body.removeAttribute("data-sheet");
+  }
+  requestAnimationFrame(() => {
+    if (state.map) state.map.invalidateSize({ animate: false });
+  });
+}
+
+function setCarSheet(mode) {
+  if (!state.carShell) return;
+  const next = mode === "peek" || mode === "plan" || mode === "itinerary" ? mode : "plan";
+  state.sheetMode = next;
+  document.body.setAttribute("data-sheet", next);
+  if (next === "plan" || next === "itinerary") {
+    switchTab("route-tab");
+  }
+  if (next === "itinerary") {
+    const results = document.getElementById("routeResults");
+    if (results && results.style.display !== "none") {
+      setTimeout(() => {
+        results.scrollIntoView({ block: "start", behavior: "smooth" });
+      }, 80);
+    }
+  }
+  updateCarPeek();
+  requestAnimationFrame(() => {
+    if (state.map) state.map.invalidateSize({ animate: false });
+  });
+}
+
+function cycleCarSheet() {
+  if (!state.carShell) return;
+  if (state.sheetMode === "peek") {
+    setCarSheet(state.activePlan ? "itinerary" : "plan");
+  } else if (state.sheetMode === "plan") {
+    setCarSheet(state.activePlan ? "itinerary" : "peek");
+  } else {
+    setCarSheet("peek");
+  }
+}
+
+function updateCarPeek() {
+  const summary = document.getElementById("carPeekSummary");
+  const itinBtn = document.getElementById("btnCarSheetItinerary");
+  if (!summary) return;
+  if (state.activePlan && state.activePlan.summary) {
+    const s = state.activePlan.summary;
+    summary.textContent = `${s.supercharger_stops_count} stops · ${s.distance_miles} mi · ${s.total_trip_duration_formatted}`;
+    if (itinBtn) itinBtn.hidden = false;
+  } else if (state.origin && state.destination) {
+    summary.textContent = "Ready — tap Plan Tesla Route";
+    if (itinBtn) itinBtn.hidden = true;
+  } else {
+    summary.textContent = "Tap a preset or enter places";
+    if (itinBtn) itinBtn.hidden = true;
+  }
+}
+
+let _toastTimer = null;
+function showToast(message, ms = 4200) {
+  const el = document.getElementById("appToast");
+  if (!el) return;
+  el.textContent = message;
+  el.hidden = false;
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => {
+    el.hidden = true;
+  }, ms);
+}
 
 function initMap() {
   // Center roughly on US/Continental view or default SF
@@ -273,6 +410,7 @@ function setupEventListeners() {
   // Preset buttons
   document.querySelectorAll(".preset-tag").forEach((btn) => {
     btn.addEventListener("click", async () => {
+      if (state.carShell) setCarSheet("plan");
       const origText = btn.dataset.orig;
       const destText = btn.dataset.dest;
 
@@ -284,6 +422,7 @@ function setupEventListeners() {
 
       if (origRes) setOrigin(origRes);
       if (destRes) setDestination(destRes);
+      updateCarPeek();
 
       if (origRes && destRes) {
         planRoute();
@@ -739,16 +878,23 @@ function setupClearBtn(btnId, inputId, onClear) {
 }
 
 function detectCurrentLocation() {
+  const resetLocateBtns = () => {
+    const label = '<i class="fa-solid fa-location-crosshairs"></i> Use Current Location';
+    const btn = document.getElementById("btnUseCurrentLocation");
+    if (btn) btn.innerHTML = label;
+  };
+
   if (!navigator.geolocation) {
-    alert("Geolocation is not supported by your browser.");
+    showToast("Location unavailable in this browser. Use a preset or type an address.");
+    if (state.carShell) setCarSheet("plan");
     return;
   }
   const btn = document.getElementById("btnUseCurrentLocation");
-  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Locating...';
+  if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Locating...';
 
   navigator.geolocation.getCurrentPosition(
     (pos) => {
-      btn.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Use Current Location';
+      resetLocateBtns();
       const coords = {
         name: "Current Location",
         lat: pos.coords.latitude,
@@ -756,20 +902,17 @@ function detectCurrentLocation() {
       };
       setOrigin(coords);
       state.map.setView([coords.lat, coords.lng], 12);
+      showToast("Location set — pick a destination or preset.", 2800);
+      updateCarPeek();
     },
     (err) => {
-      btn.innerHTML = '<i class="fa-solid fa-location-crosshairs"></i> Use Current Location';
+      resetLocateBtns();
       console.warn("Geolocation denied or error:", err);
-      // Fallback demo location: San Francisco Ferry Building
-      const fallback = {
-        name: "San Francisco, CA (Default)",
-        lat: 37.7955,
-        lng: -122.3937,
-      };
-      setOrigin(fallback);
-      state.map.setView([fallback.lat, fallback.lng], 12);
+      // Fail soft: do NOT silently overwrite origin with a demo city.
+      showToast("Location unavailable in this browser. Use a preset or type an address.");
+      if (state.carShell) setCarSheet("plan");
     },
-    { timeout: 8000 }
+    { enableHighAccuracy: false, timeout: 8000, maximumAge: 0 }
   );
 }
 
@@ -943,6 +1086,11 @@ async function planRoute() {
 
     state.activePlan = plan;
     renderRoutePlan(plan);
+    if (state.carShell) {
+      updateCarPeek();
+      // Map-first after plan: collapse sheet so corridor dominates
+      setCarSheet("peek");
+    }
   } catch (err) {
     if (seq !== state.planRouteSeq) return;
     console.error("Routing error:", err);
@@ -962,6 +1110,7 @@ function renderRoutePlan(plan) {
   document.getElementById("statTotalTime").innerText = plan.summary.total_trip_duration_formatted;
   document.getElementById("statStops").innerText = `${plan.summary.supercharger_stops_count}`;
   document.getElementById("statChargeTime").innerText = `${plan.summary.charge_duration_minutes} min`;
+  updateCarPeek();
   
   let forcedNotice = "";
   if (plan.summary.forced_stops_count > 0) {

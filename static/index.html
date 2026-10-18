@@ -22,10 +22,30 @@
   <link rel="stylesheet" href="/airspace/airspace.css">
 </head>
 <body>
-  <div class="app-container">
+  <div class="app-container" id="appContainer">
     
-    <!-- Sidebar / Control Panel -->
+    <!-- Sidebar / Control Panel (becomes bottom sheet in car-shell mode) -->
     <aside class="sidebar" id="sidebar">
+      <!-- Car sheet chrome: handle + peek summary (visible only in body.car-shell) -->
+      <div class="car-sheet-chrome" id="carSheetChrome" hidden>
+        <button type="button" class="car-sheet-handle" id="btnCarSheetHandle" aria-label="Expand or collapse plan sheet">
+          <span class="car-sheet-grip" aria-hidden="true"></span>
+        </button>
+        <div class="car-peek-bar" id="carPeekBar">
+          <div class="car-peek-brand">
+            <span class="logo-icon car-peek-logo" aria-hidden="true"><i class="fa-solid fa-bolt"></i></span>
+            <div class="car-peek-text">
+              <strong>Supercharge</strong>
+              <span class="car-peek-summary" id="carPeekSummary">Tap a preset or enter places</span>
+            </div>
+          </div>
+          <div class="car-peek-actions">
+            <button type="button" class="car-peek-btn" id="btnCarSheetPlan">Plan</button>
+            <button type="button" class="car-peek-btn car-peek-btn-primary" id="btnCarSheetItinerary" hidden>Stops</button>
+          </div>
+        </div>
+      </div>
+
       <!-- App Header -->
       <div class="sidebar-header">
         <div class="brand">
@@ -407,6 +427,9 @@
     </main>
 
   </div>
+
+  <!-- Transient status (geo deny, etc.) — large enough for arm’s-length glance -->
+  <div id="appToast" class="app-toast" role="status" aria-live="polite" hidden></div>
 
   <!-- Removable foliage module JS — delete with static/foliage/ -->
   <script src="/foliage/foliage-overlay.js"></script>
