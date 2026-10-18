@@ -174,6 +174,18 @@ Runs end-to-end automated UI checks including Visit Maximizer calculation, drawe
 node tests/verify_ui.js
 ```
 
+### Tesla landscape suite (in-car profiles)
+Chromium with `deviceScaleFactor: 1.53`, `hasTouch: true`, viewports **773×601** and **1254×784**. Smoke: probe page → preset plan → drawer → box select → layers. Screenshots go to the TESLA Project store `media/tesla-emulation/` when run:
+```bash
+# requires: npm install playwright && server on :8080 (or let the script start it)
+node tests/verify_tesla_ui.js
+```
+
+### Tesla browser probe
+In-car fingerprint page (UA, Chromium major, viewport/screen, DPR, touch, hover/pointer MQs, geolocation attempt):
+- `GET /tesla-probe` (also `/tesla-probe.html`)
+- Needs **public HTTPS** in the car — LAN/localhost are blocked (see Project store `docs/https-car-access.md`).
+
 ---
 
 ## API Reference

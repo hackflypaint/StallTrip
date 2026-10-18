@@ -118,6 +118,22 @@ class TestSecurityHardening(unittest.TestCase):
         data = json.loads(body)
         self.assertIn("error", data)
 
+    def test_tesla_probe_route_serves_fingerprint_page(self):
+        """Clean /tesla-probe URL must serve the probe HTML, not the SPA shell."""
+        for path in ("/tesla-probe", "/tesla-probe/", "/tesla-probe.html"):
+            status, headers, body = self._get(path)
+            self.assertEqual(status, 200, path)
+            lower = {k.lower(): v for k, v in headers.items()}
+            self.assertIn("text/html", lower.get("content-type", ""))
+            self.assertIn(b"Tesla browser probe", body)
+            self.assertIn(b"/tesla-probe.js", body)
+            # Must not be the main planner shell
+            self.assertNotIn(b'id="btnPlanRoute"', body)
+        # External script is reachable (CSP script-src 'self')
+        status, headers, body = self._get("/tesla-probe.js")
+        self.assertEqual(status, 200)
+        self.assertIn(b"parseChromiumMajor", body)
+
     def test_superchargers_limit_clamped(self):
         status, _, body = self._get("/api/superchargers?limit=99999&status=OPEN")
         self.assertEqual(status, 200)
