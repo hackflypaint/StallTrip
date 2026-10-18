@@ -135,22 +135,34 @@ async function runProfile(browser, profile) {
   const metrics = await page.locator("body").evaluate((body) => {
     const sb = document.getElementById("sidebar");
     const btn = document.getElementById("btnToggleLayers");
+    const locate = document.getElementById("btnLocateMe");
     const sheetH = sb ? sb.getBoundingClientRect().height : 0;
     const layersH = btn ? btn.getBoundingClientRect().height : 0;
+    const locateH = locate ? locate.getBoundingClientRect().height : 0;
     const varH = getComputedStyle(body).getPropertyValue("--car-sheet-h").trim();
-    return { sheetH, layersH, varH, sheet: body.getAttribute("data-sheet") };
+    return { sheetH, layersH, locateH, varH, sheet: body.getAttribute("data-sheet") };
   });
-  if (metrics.layersH < 44) {
-    throw new Error(`map control too small: ${metrics.layersH}px`);
+  if (metrics.layersH < 40) {
+    throw new Error(`map control hit area too small: ${metrics.layersH}px`);
+  }
+  if (metrics.locateH < 40) {
+    throw new Error(`locate control hit area too small: ${metrics.locateH}px`);
   }
   const sheetH = metrics.sheetH;
   const mapShare = 1 - sheetH / profile.height;
+  const peekPct = (sheetH / profile.height) * 100;
   console.log(
-    `  ${badgeText.trim()}; sheet≈${Math.round(sheetH)}px (css ${metrics.varH}); map≈${(mapShare * 100).toFixed(0)}%`
+    `  ${badgeText.trim()}; sheet≈${Math.round(sheetH)}px (${peekPct.toFixed(1)}% vh, css ${metrics.varH}); map≈${(mapShare * 100).toFixed(0)}%`
   );
-  if (mapShare < 0.6) {
+  // Peek ~12–18% vh (not 25–33%). Prior #28 peek was 88px/~15%; target ≤18%.
+  if (peekPct > 18.5) {
     throw new Error(
-      `MAP MUST DOMINATE: share ${(mapShare * 100).toFixed(0)}% < 60% (sheet ${Math.round(sheetH)}px / ${profile.height}px)`
+      `PEEK TOO TALL: ${peekPct.toFixed(1)}% > 18.5% (sheet ${Math.round(sheetH)}px / ${profile.height}px)`
+    );
+  }
+  if (mapShare < 0.8) {
+    throw new Error(
+      `MAP MUST DOMINATE: share ${(mapShare * 100).toFixed(0)}% < 80% (sheet ${Math.round(sheetH)}px / ${profile.height}px)`
     );
   }
 
@@ -159,8 +171,63 @@ async function runProfile(browser, profile) {
   if (headerVisible) {
     throw new Error("sidebar-header still visible in car peek — not compressed");
   }
+  const tabsVisible = await page.locator(".tabs").isVisible().catch(() => false);
+  if (tabsVisible) {
+    throw new Error("tabs still visible in car peek — should be route-only");
+  }
 
   await shot("01_load_peek");
+
+  console.log("1b. Expand sheet peek → half → full...");
+  const peekH = sheetH;
+  await page.locator("#btnCarSheetHandle").click({ force: true });
+  await page.waitForSelector('body[data-sheet="plan"]', { timeout: 5000 });
+  await page.waitForSelector("#originInput", { state: "visible", timeout: 5000 });
+  // Poll height (CSP blocks waitForFunction predicates)
+  let halfH = peekH;
+  for (let i = 0; i < 20; i++) {
+    halfH = await page.locator("#sidebar").evaluate((el) => el.getBoundingClientRect().height);
+    if (halfH > peekH + 60) break;
+    await sleep(50);
+  }
+  if (!(halfH > peekH + 60)) {
+    throw new Error(`half sheet did not expand enough: peek=${Math.round(peekH)} half=${Math.round(halfH)}`);
+  }
+  await shot("01b_half_plan");
+  await page.locator("#btnCarSheetHandle").click({ force: true });
+  await page.waitForSelector('body[data-sheet="itinerary"]', { timeout: 5000 });
+  let fullH = halfH;
+  for (let i = 0; i < 20; i++) {
+    fullH = await page.locator("#sidebar").evaluate((el) => el.getBoundingClientRect().height);
+    if (fullH > halfH + 40) break;
+    await sleep(50);
+  }
+  if (!(fullH > halfH + 40)) {
+    throw new Error(`full sheet did not expand enough: half=${Math.round(halfH)} full=${Math.round(fullH)}`);
+  }
+  await shot("01c_full_sheet");
+  await page.locator("#btnCarSheetHandle").click({ force: true });
+  await page.waitForSelector('body[data-sheet="peek"]', { timeout: 5000 });
+
+  console.log("1c. Locate control (fail-soft if geo denied)...");
+  await page.locator("#btnLocateMe").tap();
+  // Either toast (denied/unavailable) or locating class / origin set
+  await Promise.race([
+    page.waitForSelector("#appToast:not([hidden])", { timeout: 12000 }),
+    page.waitForSelector("#btnLocateMe.is-locating", { timeout: 3000 }).then(() =>
+      page.waitForSelector("#btnLocateMe:not(.is-locating)", { timeout: 12000 })
+    ),
+  ]).catch(() => null);
+  const toastOrIdle = await page.evaluate(() => {
+    const t = document.getElementById("appToast");
+    const b = document.getElementById("btnLocateMe");
+    return {
+      toast: t && !t.hidden ? t.textContent : "",
+      locating: !!(b && b.classList.contains("is-locating")),
+    };
+  });
+  console.log(`  locate feedback: toast="${toastOrIdle.toast}" locating=${toastOrIdle.locating}`);
+  await shot("01d_locate");
 
   console.log("2. Preset SF → LA...");
   await page.locator('#carPresetRow .preset-tag:has-text("SF → LA")').tap();
@@ -182,9 +249,24 @@ async function runProfile(browser, profile) {
     timeout: 10000,
   });
   await shot("03_drawer");
-  await page.locator("#btnCloseDrawer").tap();
+  await page.locator("#btnCloseDrawer").click({ force: true });
   await sleep(200);
-  await page.locator("#btnCarSheetHandle").tap();
+  // Replan after force-include collapses to peek; if still expanded, cycle down
+  const sheetNow = await page.locator("body").getAttribute("data-sheet");
+  if (sheetNow !== "peek") {
+    // itinerary → peek (or plan → itinerary → peek)
+    await page.locator("#btnCarSheetHandle").click({ force: true });
+    await sleep(100);
+    const mid = await page.locator("body").getAttribute("data-sheet");
+    if (mid !== "peek") {
+      await page.locator("#btnCarSheetHandle").click({ force: true });
+      await sleep(100);
+      const mid2 = await page.locator("body").getAttribute("data-sheet");
+      if (mid2 !== "peek") {
+        await page.locator("#btnCarSheetHandle").click({ force: true });
+      }
+    }
+  }
   await page.waitForSelector('body[data-sheet="peek"]', { timeout: 5000 });
 
   console.log("4. Box select...");

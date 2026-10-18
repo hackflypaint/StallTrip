@@ -41,30 +41,33 @@
 
     <!-- Sidebar / Control Panel (becomes bottom sheet in car-shell mode) -->
     <aside class="sidebar" id="sidebar">
-      <!-- Car sheet chrome: compact peek + presets (visible only in body.car-shell) -->
+      <!-- Car sheet chrome: single ultra-compact row (visible only in body.car-shell) -->
       <div class="car-sheet-chrome" id="carSheetChrome" hidden>
-        <button type="button" class="car-sheet-handle" id="btnCarSheetHandle" aria-label="Expand or collapse plan sheet">
-          <span class="car-sheet-grip" aria-hidden="true"></span>
-        </button>
         <div class="car-peek-bar" id="carPeekBar">
+          <button type="button" class="car-sheet-handle" id="btnCarSheetHandle" aria-label="Expand or collapse plan sheet" aria-expanded="false" title="Expand">
+            <span class="car-sheet-grip" aria-hidden="true"></span>
+            <span class="car-sheet-hint" id="carSheetHint">Expand</span>
+          </button>
           <div class="car-peek-brand">
             <span class="logo-icon car-peek-logo" aria-hidden="true"><i class="fa-solid fa-bolt"></i></span>
             <div class="car-peek-text">
               <strong>Supercharge <span class="car-mode-chip" id="carModeChip" title="Car layout active">CAR</span></strong>
-              <span class="car-peek-summary" id="carPeekSummary">Tap a preset — map stays big</span>
+              <span class="car-peek-summary" id="carPeekSummary">Preset</span>
             </div>
           </div>
+          <div class="car-preset-row" id="carPresetRow" role="group" aria-label="Popular routes">
+            <button type="button" class="preset-tag" data-orig="San Francisco, CA" data-dest="Los Angeles, CA">SF→LA</button>
+            <button type="button" class="preset-tag" data-orig="Los Angeles, CA" data-dest="Las Vegas, NV">LA→Vegas</button>
+            <button type="button" class="preset-tag" data-orig="New York, NY" data-dest="Washington, DC">NYC→DC</button>
+            <button type="button" class="preset-tag" data-orig="Seattle, WA" data-dest="Portland, OR">SEA→PDX</button>
+          </div>
           <div class="car-peek-actions">
+            <button type="button" class="car-peek-btn car-peek-locate" id="btnCarSheetLocate" title="Find my location" aria-label="Find my location">
+              <i class="fa-solid fa-crosshairs" aria-hidden="true"></i>
+            </button>
             <button type="button" class="car-peek-btn" id="btnCarSheetPlan">Edit</button>
             <button type="button" class="car-peek-btn car-peek-btn-primary" id="btnCarSheetItinerary" hidden>Stops</button>
           </div>
-        </div>
-        <!-- Presets live in peek so  can plan without opening the tall form -->
-        <div class="car-preset-row" id="carPresetRow" role="group" aria-label="Popular routes">
-          <button type="button" class="preset-tag" data-orig="San Francisco, CA" data-dest="Los Angeles, CA">SF → LA</button>
-          <button type="button" class="preset-tag" data-orig="Los Angeles, CA" data-dest="Las Vegas, NV">LA → Vegas</button>
-          <button type="button" class="preset-tag" data-orig="New York, NY" data-dest="Washington, DC">NYC → DC</button>
-          <button type="button" class="preset-tag" data-orig="Seattle, WA" data-dest="Portland, OR">Seattle → Portland</button>
         </div>
       </div>
 
@@ -457,9 +460,9 @@
   <div id="appToast" class="app-toast" role="status" aria-live="polite" hidden></div>
 
   <!-- Removable foliage module JS — delete with static/foliage/ -->
-  <script src="/foliage/foliage-overlay.js?v=car3"></script>
+  <script src="/foliage/foliage-overlay.js?v=car5"></script>
   <!-- Removable drone flight module JS — delete with static/airspace/ -->
-  <script src="/airspace/airspace-overlay.js?v=car3"></script>
-  <script src="/app.js?v=car3"></script>
+  <script src="/airspace/airspace-overlay.js?v=car5"></script>
+  <script src="/app.js?v=car5"></script>
 </body>
 </html>
