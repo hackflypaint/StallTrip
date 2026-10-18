@@ -80,14 +80,31 @@ class TestSecurityHardening(unittest.TestCase):
         lower = {k.lower(): v for k, v in headers.items()}
         self.assertEqual(lower.get("x-content-type-options"), "nosniff")
         self.assertEqual(lower.get("x-frame-options"), "DENY")
+        self.assertNotIn("access-control-allow-origin", lower)
         csp = lower.get("content-security-policy", "")
         self.assertIn("default-src 'self'", csp)
         self.assertIn("https://tile.openstreetmap.org", csp)
         self.assertIn("services6.arcgis.com", csp)
+        self.assertIn("services1.arcgis.com", csp)
         self.assertIn("*.arcgis.com", csp)
         self.assertIn("explorefall.com", csp)
         data = json.loads(body)
         self.assertEqual(data["status"], "healthy")
+
+    def test_options_rejects_cors_preflight(self):
+        req = urllib.request.Request(
+            self.base + "/api/plan-route",
+            method="OPTIONS",
+            headers={"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                status = resp.status
+                body = resp.read()
+        except urllib.error.HTTPError as e:
+            status, body = e.code, e.read()
+        self.assertEqual(status, 403)
+        self.assertIn(b"CORS", body)
 
     def test_path_traversal_falls_back_to_spa(self):
         status, headers, body = self._get("/../../etc/passwd")
@@ -173,6 +190,34 @@ class TestSecurityHardening(unittest.TestCase):
             max_stops=4,
         )
         self.assertEqual(plan["summary"]["forced_stops_count"], 0)
+
+    def test_forced_chargers_sanitize_xss_fields(self):
+        plan = routing.plan_trip(
+            origin=(37.7749, -122.4194),
+            destination=(34.0522, -118.2437),
+            routing_mode="MAXIMIZE",
+            forced_chargers=[{
+                "id": 900001,
+                "name": "<script>alert(1)</script>",
+                "lat": 36.0,
+                "lng": -120.0,
+                "power": "<img onerror=1>",
+                "stalls": None,
+                "evil": "drop-me",
+            }],
+            max_stops=4,
+        )
+        forced = [s for s in plan["stops"] if s.get("forced")]
+        self.assertEqual(len(forced), 1)
+        self.assertEqual(forced[0]["name"], "<script>alert(1)</script>")
+        self.assertIsInstance(forced[0]["power"], int)
+        self.assertIsInstance(forced[0]["stalls"], int)
+        self.assertNotIn("evil", forced[0])
+        coords = plan["geometry"].get("coordinates") or []
+        self.assertLessEqual(len(coords), routing.MAX_GEOMETRY_POINTS)
+
+    def test_osrm_uses_https_by_default(self):
+        self.assertTrue(routing.OSRM_BASE_URL.startswith("https://"))
 
 
 if __name__ == "__main__":

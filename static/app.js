@@ -1092,14 +1092,14 @@ function renderTimeline(stops) {
           <div class="item-top">
             <span class="item-name">${escapeHtml(s.name)}</span>
             <span class="item-badge ${isForced ? 'badge-forced' : 'badge-charge'}">
-              ${isForced ? '⭐ FORCED STOP' : `<i class="fa-solid fa-bolt"></i> +${s.charge_duration_min} min`}
+              ${isForced ? '⭐ FORCED STOP' : `<i class="fa-solid fa-bolt"></i> +${escapeHtml(s.charge_duration_min)} min`}
             </span>
           </div>
           <div class="item-details">
-            <span class="battery-tag"><i class="fa-solid fa-battery-quarter" style="color:var(--accent-orange)"></i> ${s.arrival_battery_pct}% &rarr; ${s.departure_battery_pct}%</span>
-            <span>${s.power} kW</span>
-            <span>${s.stalls} stalls</span>
-            <span>${s.detour_miles} mi detour</span>
+            <span class="battery-tag"><i class="fa-solid fa-battery-quarter" style="color:var(--accent-orange)"></i> ${escapeHtml(s.arrival_battery_pct)}% &rarr; ${escapeHtml(s.departure_battery_pct)}%</span>
+            <span>${escapeHtml(s.power)} kW</span>
+            <span>${escapeHtml(s.stalls)} stalls</span>
+            <span>${escapeHtml(s.detour_miles)} mi detour</span>
           </div>
         </div>
       `;
@@ -1242,8 +1242,8 @@ function renderExploreList(chargers) {
         ${escapeHtml([c.street, c.city, c.state].filter(Boolean).join(", "))}
       </div>
       <div class="charger-list-tags">
-        <span class="chip red"><i class="fa-solid fa-bolt"></i> ${c.power || 150} kW</span>
-        <span class="chip"><i class="fa-solid fa-charging-station"></i> ${c.stalls || 8} stalls</span>
+        <span class="chip red"><i class="fa-solid fa-bolt"></i> ${escapeHtml(c.power || 150)} kW</span>
+        <span class="chip"><i class="fa-solid fa-charging-station"></i> ${escapeHtml(c.stalls || 8)} stalls</span>
         ${c.otherEVs ? '<span class="chip green">All EVs</span>' : ''}
         ${isForced ? '<span class="chip" style="background:#00b4d8; color:#fff;">Force-Included</span>' : ''}
         ${c.distance_km !== undefined ? `<span class="chip">${c.distance_km} km away</span>` : ''}

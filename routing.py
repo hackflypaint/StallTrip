@@ -17,13 +17,83 @@ import urllib.request
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "superchargers.json")
-OSRM_BASE_URL = "http://router.project-osrm.org"
+OSRM_BASE_URL = os.environ.get("OSRM_BASE_URL", "https://router.project-osrm.org")
 PHOTON_BASE_URL = "https://photon.komoot.io/api"
 NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org"
+
+MAX_GEOCODE_RESPONSE_BYTES = 1_000_000
+MAX_OSRM_RESPONSE_BYTES = 8_000_000
+MAX_GEOMETRY_POINTS = 2000
 
 # In-memory store of all Superchargers
 SUPERCHARGERS: List[Dict[str, Any]] = []
 SUPERCHARGERS_BY_ID: Dict[int, Dict[str, Any]] = {}
+
+
+def _read_response_limited(resp: Any, max_bytes: int) -> bytes:
+    """Read an HTTP response body with a hard size cap (prod memory safety)."""
+    chunks: List[bytes] = []
+    total = 0
+    while True:
+        chunk = resp.read(65536)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise ValueError(f"Upstream response exceeded {max_bytes} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _downsample_coordinates(coords: List[Any], max_points: int = MAX_GEOMETRY_POINTS) -> List[Any]:
+    if not coords or len(coords) <= max_points:
+        return coords
+    step = max(1, math.ceil(len(coords) / max_points))
+    sampled = coords[::step]
+    if sampled[-1] != coords[-1]:
+        sampled.append(coords[-1])
+    return sampled
+
+
+def _sanitize_forced_charger(fc: Dict[str, Any], lat: float, lng: float) -> Dict[str, Any]:
+    """Keep only safe coerced fields from a client-supplied forced charger."""
+    name = fc.get("name")
+    if not isinstance(name, str) or not name.strip():
+        name = "Force-included Supercharger"
+    name = name.strip()[:200]
+
+    try:
+        power = int(float(fc.get("power") if fc.get("power") is not None else 150))
+    except (TypeError, ValueError):
+        power = 150
+    power = max(1, min(1000, power))
+
+    try:
+        stalls = int(float(fc.get("stalls") if fc.get("stalls") is not None else 8))
+    except (TypeError, ValueError):
+        stalls = 8
+    stalls = max(1, min(200, stalls))
+
+    entry: Dict[str, Any] = {
+        "name": name,
+        "lat": lat,
+        "lng": lng,
+        "power": power,
+        "stalls": stalls,
+        "forced": True,
+    }
+    fid = fc.get("id")
+    if fid is not None:
+        try:
+            entry["id"] = int(fid)
+        except (TypeError, ValueError):
+            pass
+    for key in ("street", "city", "state", "zip", "country", "status", "facility"):
+        val = fc.get(key)
+        if isinstance(val, str) and val.strip():
+            entry[key] = val.strip()[:200]
+    return entry
+
 
 def load_superchargers() -> List[Dict[str, Any]]:
     global SUPERCHARGERS, SUPERCHARGERS_BY_ID
@@ -205,7 +275,7 @@ def geocode_address(query: str) -> List[Dict[str, Any]]:
         url = f"{PHOTON_BASE_URL}/?q={encoded_q}&limit=5"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
         with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            data = json.loads(_read_response_limited(resp, MAX_GEOCODE_RESPONSE_BYTES).decode("utf-8"))
         features = data.get("features", [])
         if features:
             results = []
@@ -240,7 +310,7 @@ def geocode_address(query: str) -> List[Dict[str, Any]]:
         url = f"{NOMINATIM_BASE_URL}/search?format=json&q={encoded_q}&addressdetails=1&limit=5"
         req = urllib.request.Request(url, headers={"User-Agent": "TeslaSuperchargerApp/1.0 (tester@example.com)"})
         with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            data = json.loads(_read_response_limited(resp, MAX_GEOCODE_RESPONSE_BYTES).decode("utf-8"))
         results = []
         for item in data:
             results.append({
@@ -264,12 +334,12 @@ def get_osrm_route(coordinates: List[Tuple[float, float]], overview: str = "full
     req = urllib.request.Request(url, headers={"User-Agent": "TeslaSuperchargerApp/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=12) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            data = json.loads(_read_response_limited(resp, MAX_OSRM_RESPONSE_BYTES).decode("utf-8"))
             if data.get("code") == "Ok" and data.get("routes"):
                 return data
     except Exception as e:
         print(f"OSRM single call failed: {e}")
-    
+
     return create_direct_route_fallback(coordinates)
 
 def get_chunked_osrm_route(coordinates: List[Tuple[float, float]], chunk_size: int = 18) -> Dict[str, Any]:
@@ -700,16 +770,8 @@ def plan_trip(
                 continue
             if not (-90 <= lat <= 90 and -180 <= lng <= 180):
                 continue
-            entry = dict(fc)
-            entry["lat"] = lat
-            entry["lng"] = lng
+            entry = _sanitize_forced_charger(fc, lat, lng)
             fid = entry.get("id")
-            if fid is not None:
-                try:
-                    fid = int(fid)
-                    entry["id"] = fid
-                except (TypeError, ValueError):
-                    fid = None
             if fid is not None:
                 if fid in seen_forced_ids:
                     continue
@@ -784,7 +846,10 @@ def plan_trip(
         # In Visit Maximizer mode, quick top-ups (e.g. up to 75-80% or +15-20 min visit)
         target_pct = min(85.0, max(arrival_pct + 15.0, 75.0))
         pct_to_add = max(10.0, target_pct - arrival_pct)
-        charge_speed = max(100, stop.get("power", 150))
+        try:
+            charge_speed = max(100, int(float(stop.get("power") or 150)))
+        except (TypeError, ValueError):
+            charge_speed = 150
         charge_duration_min = round(pct_to_add * 0.38 * (250.0 / charge_speed) + 4.0)
 
         current_battery_km = (target_pct / 100.0) * max_range_km
@@ -828,23 +893,34 @@ def plan_trip(
     })
     # Supercharger stops
     for s in detailed_stops:
+        try:
+            power_out = int(float(s.get("power") or 150))
+        except (TypeError, ValueError):
+            power_out = 150
+        try:
+            stalls_out = int(float(s.get("stalls") or 8))
+        except (TypeError, ValueError):
+            stalls_out = 8
+        name_out = s.get("name")
+        if not isinstance(name_out, str) or not name_out.strip():
+            name_out = "Supercharger"
         stops_summary.append({
             "type": "SUPERCHARGER",
             "stop_index": s["stop_index"],
             "id": s.get("id"),
-            "name": s["name"],
+            "name": name_out[:200],
             "lat": s["lat"],
             "lng": s["lng"],
-            "power": s.get("power"),
-            "stalls": s.get("stalls"),
+            "power": power_out,
+            "stalls": stalls_out,
             "arrival_battery_pct": s.get("arrival_battery_pct"),
             "departure_battery_pct": s.get("departure_battery_pct"),
             "charge_duration_min": s.get("charge_duration_min"),
-            "street": s.get("street"),
-            "city": s.get("city"),
-            "state": s.get("state"),
+            "street": s.get("street") if isinstance(s.get("street"), str) else None,
+            "city": s.get("city") if isinstance(s.get("city"), str) else None,
+            "state": s.get("state") if isinstance(s.get("state"), str) else None,
             "detour_miles": s.get("detour_miles", 0.1),
-            "forced": s.get("forced", False)
+            "forced": bool(s.get("forced", False)),
         })
     # Destination
     last_leg_dist = haversine_km(curr_point[0], curr_point[1], dest_lat, dest_lng)
@@ -856,6 +932,10 @@ def plan_trip(
         "lng": dest_lng,
         "battery_pct": dest_battery_pct
     })
+
+    geometry = dict(active_route.get("geometry") or {})
+    if isinstance(geometry.get("coordinates"), list):
+        geometry["coordinates"] = _downsample_coordinates(geometry["coordinates"])
 
     return {
         "summary": {
@@ -870,7 +950,7 @@ def plan_trip(
             "forced_stops_count": sum(1 for s in detailed_stops if s.get("forced")),
             "chargers_along_corridor_count": len(corridor_chargers)
         },
-        "geometry": active_route["geometry"],
+        "geometry": geometry,
         "stops": stops_summary,
         # Cap corridor payload to limit JSON / map marker DoS
         "all_corridor_chargers": corridor_chargers[:500],
