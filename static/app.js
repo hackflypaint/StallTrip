@@ -314,10 +314,11 @@ function setupCarShell() {
   const itinBtn = document.getElementById("btnCarSheetItinerary");
   const locateBtn = document.getElementById("btnCarSheetLocate");
   if (handle) {
+    // Tap/drag owned by setupCarSheetDrag (pointer events). Click is a fallback
+    // for keyboard / non-pointer activation only.
     handle.addEventListener("click", (e) => {
-      // Ignore click that ends a drag gesture
-      if (handle.dataset.dragged === "1") {
-        handle.dataset.dragged = "0";
+      if (handle.dataset.pointerHandled === "1") {
+        handle.dataset.pointerHandled = "0";
         e.preventDefault();
         return;
       }
@@ -340,6 +341,7 @@ function setupCarShell() {
 
 /**
  * Drag the sheet handle: swipe up expands (peek→half→full), down collapses.
+ * Short press (tap) cycles the same way — don't rely on click alone (Tesla touch).
  * Intentional limit: max ~88vh so a map strip + Tesla browser chrome stay visible.
  */
 function setupCarSheetDrag(handle) {
@@ -349,8 +351,8 @@ function setupCarSheetDrag(handle) {
 
   const onDown = (e) => {
     if (!state.carShell) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
     tracking = true;
-    handle.dataset.dragged = "0";
     startY = e.clientY;
     try {
       handle.setPointerCapture(e.pointerId);
@@ -358,28 +360,24 @@ function setupCarSheetDrag(handle) {
       /* ignore */
     }
   };
-  const onMove = (e) => {
-    if (!tracking) return;
-    const dy = e.clientY - startY;
-    if (Math.abs(dy) > 10) handle.dataset.dragged = "1";
-  };
   const onUp = (e) => {
     if (!tracking) return;
     tracking = false;
+    handle.dataset.pointerHandled = "1";
     const dy = e.clientY - startY;
     if (dy < -THRESH) {
-      // swipe up → expand
       if (state.sheetMode === "peek") setCarSheet("plan");
       else if (state.sheetMode === "plan") setCarSheet("itinerary");
     } else if (dy > THRESH) {
-      // swipe down → collapse
       if (state.sheetMode === "itinerary") setCarSheet("plan");
       else if (state.sheetMode === "plan") setCarSheet("peek");
+    } else {
+      // Tap → cycle peek → half → full → peek
+      cycleCarSheet();
     }
   };
 
   handle.addEventListener("pointerdown", onDown);
-  handle.addEventListener("pointermove", onMove);
   handle.addEventListener("pointerup", onUp);
   handle.addEventListener("pointercancel", () => {
     tracking = false;

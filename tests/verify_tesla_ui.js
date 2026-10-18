@@ -174,22 +174,33 @@ async function runProfile(browser, profile) {
 
   console.log("1b. Expand sheet peek → half → full...");
   const peekH = sheetH;
-  await page.locator("#btnCarSheetHandle").tap();
+  await page.locator("#btnCarSheetHandle").click({ force: true });
   await page.waitForSelector('body[data-sheet="plan"]', { timeout: 5000 });
   await page.waitForSelector("#originInput", { state: "visible", timeout: 5000 });
-  const halfH = await page.locator("#sidebar").evaluate((el) => el.getBoundingClientRect().height);
+  // Poll height (CSP blocks waitForFunction predicates)
+  let halfH = peekH;
+  for (let i = 0; i < 20; i++) {
+    halfH = await page.locator("#sidebar").evaluate((el) => el.getBoundingClientRect().height);
+    if (halfH > peekH + 60) break;
+    await sleep(50);
+  }
   if (!(halfH > peekH + 60)) {
     throw new Error(`half sheet did not expand enough: peek=${Math.round(peekH)} half=${Math.round(halfH)}`);
   }
   await shot("01b_half_plan");
-  await page.locator("#btnCarSheetHandle").tap();
+  await page.locator("#btnCarSheetHandle").click({ force: true });
   await page.waitForSelector('body[data-sheet="itinerary"]', { timeout: 5000 });
-  const fullH = await page.locator("#sidebar").evaluate((el) => el.getBoundingClientRect().height);
+  let fullH = halfH;
+  for (let i = 0; i < 20; i++) {
+    fullH = await page.locator("#sidebar").evaluate((el) => el.getBoundingClientRect().height);
+    if (fullH > halfH + 40) break;
+    await sleep(50);
+  }
   if (!(fullH > halfH + 40)) {
     throw new Error(`full sheet did not expand enough: half=${Math.round(halfH)} full=${Math.round(fullH)}`);
   }
   await shot("01c_full_sheet");
-  await page.locator("#btnCarSheetHandle").tap();
+  await page.locator("#btnCarSheetHandle").click({ force: true });
   await page.waitForSelector('body[data-sheet="peek"]', { timeout: 5000 });
 
   console.log("1c. Locate control (fail-soft if geo denied)...");
@@ -232,10 +243,24 @@ async function runProfile(browser, profile) {
     timeout: 10000,
   });
   await shot("03_drawer");
-  await page.locator("#btnCloseDrawer").tap();
+  await page.locator("#btnCloseDrawer").click({ force: true });
   await sleep(200);
-  // Collapse full → half → peek via handle
-  await page.locator("#btnCarSheetHandle").tap();
+  // Replan after force-include collapses to peek; if still expanded, cycle down
+  const sheetNow = await page.locator("body").getAttribute("data-sheet");
+  if (sheetNow !== "peek") {
+    // itinerary → peek (or plan → itinerary → peek)
+    await page.locator("#btnCarSheetHandle").click({ force: true });
+    await sleep(100);
+    const mid = await page.locator("body").getAttribute("data-sheet");
+    if (mid !== "peek") {
+      await page.locator("#btnCarSheetHandle").click({ force: true });
+      await sleep(100);
+      const mid2 = await page.locator("body").getAttribute("data-sheet");
+      if (mid2 !== "peek") {
+        await page.locator("#btnCarSheetHandle").click({ force: true });
+      }
+    }
+  }
   await page.waitForSelector('body[data-sheet="peek"]', { timeout: 5000 });
 
   console.log("4. Box select...");
