@@ -7,7 +7,12 @@
  *
  * Run: node tests/verify_weather.js
  */
-const { chromium } = require("playwright");
+let chromium;
+try {
+  ({ chromium } = require("playwright"));
+} catch (_) {
+  ({ chromium } = require("/tmp/pw/node_modules/playwright"));
+}
 const fs = require("fs");
 const path = require("path");
 

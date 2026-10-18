@@ -5,7 +5,12 @@
  * the v1 detector (w>=700). Also 773×601 and 1254×784.
  * Avoid waitForFunction predicates (CSP blocks unsafe-eval).
  */
-const { chromium } = require("playwright");
+let chromium;
+try {
+  ({ chromium } = require("playwright"));
+} catch (_) {
+  ({ chromium } = require("/tmp/pw/node_modules/playwright"));
+}
 const fs = require("fs");
 const path = require("path");
 const http = require("http");
@@ -14,7 +19,7 @@ const { spawn } = require("child_process");
 const BASE = process.env.TESLA_UI_BASE || "http://127.0.0.1:8080";
 const MEDIA_DIR =
   process.env.TESLA_MEDIA_DIR ||
-  "/tmp/tesla-planner-media";
+  "/tmp/tesla-planner-media/car-shell";
 
 const TESLA_UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +

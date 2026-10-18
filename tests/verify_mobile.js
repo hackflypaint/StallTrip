@@ -8,14 +8,19 @@
  *
  * Screenshots → MEDIA_DIR (override with MOBILE_MEDIA_DIR).
  */
-const { chromium } = require("playwright");
+let chromium;
+try {
+  ({ chromium } = require("playwright"));
+} catch (_) {
+  ({ chromium } = require("/tmp/pw/node_modules/playwright"));
+}
 const fs = require("fs");
 const path = require("path");
 
 const BASE = process.env.MOBILE_BASE_URL || "http://127.0.0.1:8080";
 const MEDIA_DIR =
   process.env.MOBILE_MEDIA_DIR ||
-  "/tmp/tesla-planner-media";
+  "/tmp/tesla-planner-media/mobile-sheet";
 
 async function run() {
   console.log("Mobile shell Playwright smoke…");

@@ -152,12 +152,12 @@ function runUnitTests() {
   assert(impact.overall.ascentM === 1000, `Expected 1000m ascent, got ${impact.overall.ascentM}`);
   assert(impact.overall.descentM === 800, `Expected 800m descent, got ${impact.overall.descentM}`);
   assert(
-    impact.overall.climbPenaltyKwh > 5.5 && impact.overall.climbPenaltyKwh < 7.5,
-    `Expected ~6.4 kWh climb penalty for 1000m ascent, got ${impact.overall.climbPenaltyKwh}`
+    impact.overall.climbPenaltyKwh > 5.8 && impact.overall.climbPenaltyKwh < 7.5,
+    `Expected ~6.45 kWh climb penalty for 1000m ascent (Model Y LR 2,130 kg), got ${impact.overall.climbPenaltyKwh}`
   );
   assert(
-    impact.overall.regenRecoveryKwh > 2.0 && impact.overall.regenRecoveryKwh < 4.0,
-    `Expected ~2.85 kWh regen recovery for 800m descent, got ${impact.overall.regenRecoveryKwh}`
+    impact.overall.regenRecoveryKwh > 2.8 && impact.overall.regenRecoveryKwh < 4.5,
+    `Expected ~3.8 kWh downhill recovery for 800m descent, got ${impact.overall.regenRecoveryKwh}`
   );
   assert(
     Math.abs(
@@ -166,9 +166,44 @@ function runUnitTests() {
     ) < 0.05,
     "Net elevation kWh equals climb penalty minus regen recovery"
   );
+  assert(
+    impact.overall.netSocDeltaPct < 0,
+    `Expected negative SoC delta % when net climb > regen, got ${impact.overall.netSocDeltaPct}`
+  );
   assert(impact.legs.length === 2, "2 legs computed for 1 intermediate Supercharger stop");
   assert(impact.legs[0].climbPenaltyKwh > 0, "Leg 1 uphill has positive climb penalty");
   assert(impact.legs[1].regenRecoveryKwh > 0, "Leg 2 downhill has positive regen recovery");
+
+  // 5b. Verify Tesla Longitudinal Physics: Symmetric Mountain Pass (0m -> 1000m -> 0m)
+  // Climbing 1,000m and descending 1,000m back to starting elevation MUST consume net positive
+  // battery energy because 1/η_drive (~1.11) > η_regen (~0.75).
+  const symPassSamples = samples.map((s, i) => ({
+    ...s,
+    distKm: i * 1.0, // 1 km per step -> steep 4% grade (40m per km)
+    distMi: i * 0.621371,
+  }));
+  const symElevs = symPassSamples.map((_, i) => (i <= 25 ? i * 40 : (50 - i) * 40));
+  const symEnriched = t.enrichSamplesWithGrade(symPassSamples, symElevs);
+  const symSeg = t.computeSegmentEnergy(symEnriched, 0, symEnriched.length - 1, {
+    vehiclePresetId: "modely_lr",
+  });
+  assert(symSeg.ascentM === 1000 && symSeg.descentM === 960, "Symmetric pass ascent/descent");
+  assert(
+    symSeg.activeRegenKwh > 0,
+    `Steep -4% grade must engage active battery regenerative braking, got ${symSeg.activeRegenKwh}`
+  );
+  assert(
+    symSeg.netElevationKwh > 1.2,
+    `Round-trip mountain pass must have positive net kWh penalty (1/η_drive > η_regen), got ${symSeg.netElevationKwh}`
+  );
+
+  // 5c. Verify Tesla Vehicle Mass Presets (Model 3 LR 1,980 kg vs Cybertruck 3,150 kg)
+  const m3Seg = t.computeSegmentEnergy(symEnriched, 0, 25, { vehiclePresetId: "model3_lr" });
+  const ctSeg = t.computeSegmentEnergy(symEnriched, 0, 25, { vehiclePresetId: "cybertruck" });
+  assert(
+    ctSeg.climbPenaltyKwh > m3Seg.climbPenaltyKwh * 1.45,
+    `Cybertruck (3,150 kg) climb energy (${ctSeg.climbPenaltyKwh}) should scale vs Model 3 LR (1,980 kg) (${m3Seg.climbPenaltyKwh})`
+  );
 
   // 6. Verify CSP in server.py allows https://api.open-meteo.com
   const serverSrc = fs.readFileSync(path.join(__dirname, "..", "server.py"), "utf8");
@@ -268,18 +303,20 @@ async function runPlaywrightVerification() {
     const pinCount = await page.locator("#elevationSvg .elev-stop-pin").count();
     assert(pinCount >= 2, `Expected >=2 Supercharger pins on elevation curve, got ${pinCount}`);
 
-    // Check Climb / Regen / Net energy delta badges
+    // Check Climb / Regen / Net energy delta badges (including SoC %)
     const climbText = await page.locator("#elevClimbText").textContent();
     const regenText = await page.locator("#elevRegenText").textContent();
     const netKwhText = await page.locator("#elevNetKwhText").textContent();
+    const netSocText = await page.locator("#elevNetSocText").textContent();
     const netWhMiText = await page.locator("#elevNetWhMiText").textContent();
 
     console.log(
-      `  Desktop strip badges: Climb="${climbText}" | Regen="${regenText}" | Net="${netKwhText} · ${netWhMiText}" (${pinCount} stop pins)`
+      `  Desktop strip badges: Climb="${climbText}" | Regen="${regenText}" | Net="${netKwhText} · ${netSocText} · ${netWhMiText}" (${pinCount} stop pins)`
     );
     assert(/\+\d+\.\d+\s*kWh/.test(climbText || ""), `Valid climb kWh badge: ${climbText}`);
     assert(/−\d+\.\d+\s*kWh/.test(regenText || ""), `Valid regen kWh badge: ${regenText}`);
     assert(/Net\s+[+−±]\d+\.\d+\s*kWh/.test(netKwhText || ""), `Valid net kWh badge: ${netKwhText}`);
+    assert(/[+−±]\d+\.\d+%\s*SoC/.test(netSocText || ""), `Valid net SoC % badge: ${netSocText}`);
     assert(/[+−±]\d+\s*Wh\/mi/.test(netWhMiText || ""), `Valid net Wh/mi badge: ${netWhMiText}`);
 
     // Hover along the elevation chart -> verify map marker & scrub readout update

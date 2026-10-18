@@ -1612,10 +1612,12 @@ function syncLiveLocationUi() {
 
   if (!live.watching) {
     hud.hidden = true;
+    document.body.classList.remove("live-hud-visible");
     return;
   }
 
   hud.hidden = false;
+  document.body.classList.add("live-hud-visible");
   if (speedEl) {
     speedEl.textContent = awaitingFix
       ? "Acquiring GPS…"
@@ -2174,11 +2176,10 @@ async function planRoute() {
     }
 
     state.activePlan = plan;
-    renderRoutePlan(plan);
-    if (window.WeatherModule) {
-      if (!state.optionalOverlaysMounted) mountOptionalOverlays();
-      else window.WeatherModule.analyzeRoutePlan(plan);
+    if (window.WeatherModule && !state.optionalOverlaysMounted) {
+      mountOptionalOverlays();
     }
+    renderRoutePlan(plan);
     syncCarTestHooks();
     // Phone: show route on the map. Car: collapse sheet to peek.
     if (isMobileShell()) {

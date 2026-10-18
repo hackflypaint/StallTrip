@@ -402,12 +402,27 @@
   color: #7dd3fc;
 }
 
-/* Responsive adjustments for Tesla Car Shell & Mobile Shell */
+/* Responsive adjustments for Tesla Car Shell & Mobile Shell + Non-overlapping stack with Live Drive HUD */
+body.live-hud-visible .map-weather-pill,
+.map-container:has(#liveDriveHud:not([hidden])) .map-weather-pill {
+  top: 62px;
+}
+
 body.car-shell .map-weather-pill {
   top: 36px;
   left: 8px;
   font-size: 0.66rem;
   padding: 4px 9px;
+}
+
+body.car-shell.live-hud-visible .map-weather-pill,
+body.car-shell .map-container:has(#liveDriveHud:not([hidden])) .map-weather-pill {
+  top: 84px;
+}
+
+body.car-shell[data-sheet="plan"] .weather-radar-pill,
+body.car-shell[data-sheet="itinerary"] .weather-radar-pill {
+  display: none !important;
 }
 
 body.car-shell .weather-radar-pill {
@@ -423,8 +438,22 @@ body.ui-mobile .map-weather-pill {
   max-width: calc(100vw - 70px);
 }
 
+body.ui-mobile.live-hud-visible .map-weather-pill,
+body.ui-mobile .map-container:has(#liveDriveHud:not([hidden])) .map-weather-pill {
+  top: calc(54px + var(--safe-top, 0px));
+}
+
 body.ui-mobile.sheet-open .map-weather-pill {
   top: calc(64px + var(--safe-top, 0px));
+}
+
+body.ui-mobile.sheet-open.live-hud-visible .map-weather-pill,
+body.ui-mobile.sheet-open .map-container:has(#liveDriveHud:not([hidden])) .map-weather-pill {
+  top: calc(108px + var(--safe-top, 0px));
+}
+
+body.ui-mobile.sheet-open .weather-radar-pill {
+  display: none !important;
 }
 
 body.ui-mobile .weather-radar-pill {

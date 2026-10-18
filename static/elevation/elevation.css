@@ -151,6 +151,23 @@
   flex-shrink: 0;
 }
 
+.elev-vehicle-select {
+  background: var(--bg-tertiary, #232931);
+  border: 1px solid var(--border-color, #2c3540);
+  color: var(--text-main, #f0f3f6);
+  border-radius: 6px;
+  height: 26px;
+  padding: 0 6px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.elev-vehicle-select:focus {
+  outline: none;
+  border-color: #38bdf8;
+}
+
 .elev-unit-btn,
 .elev-collapse-btn {
   background: var(--bg-tertiary, #232931);
@@ -270,13 +287,24 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45) !important;
 }
 
-/* Lift desktop map legend above the elevation strip when active */
-body.elevation-strip-visible:not(.car-shell):not(.ui-mobile) .map-legend {
-  bottom: 162px;
+/* Lift desktop map legend, drone airspace legend, and weather radar pill above the elevation strip when active */
+body.elevation-strip-visible:not(.car-shell):not(.ui-mobile) .map-legend,
+body.elevation-strip-visible:not(.car-shell):not(.ui-mobile) .airspace-map-legend {
+  bottom: 164px;
   transition: bottom 0.18s ease;
 }
 
-body.elevation-strip-visible.elevation-strip-collapsed:not(.car-shell):not(.ui-mobile) .map-legend {
+body.elevation-strip-visible.elevation-strip-collapsed:not(.car-shell):not(.ui-mobile) .map-legend,
+body.elevation-strip-visible.elevation-strip-collapsed:not(.car-shell):not(.ui-mobile) .airspace-map-legend {
+  bottom: 62px;
+}
+
+body.elevation-strip-visible:not(.car-shell):not(.ui-mobile) .weather-radar-pill {
+  bottom: 164px;
+  transition: bottom 0.18s ease;
+}
+
+body.elevation-strip-visible.elevation-strip-collapsed:not(.car-shell):not(.ui-mobile) .weather-radar-pill {
   bottom: 62px;
 }
 
@@ -305,6 +333,20 @@ body.car-shell .elev-collapse-btn {
   min-width: 34px;
 }
 
+body.car-shell .elev-vehicle-select {
+  height: 32px;
+}
+
+body.car-shell.elevation-strip-visible .weather-radar-pill,
+body.car-shell.elevation-strip-visible .airspace-map-legend {
+  bottom: calc(var(--car-sheet-h, 72px) + 140px);
+}
+
+body.car-shell.elevation-strip-visible.elevation-strip-collapsed .weather-radar-pill,
+body.car-shell.elevation-strip-visible.elevation-strip-collapsed .airspace-map-legend {
+  bottom: calc(var(--car-sheet-h, 72px) + 52px);
+}
+
 /* --------------------------------------------------------------------------
    Mobile Shell Adaptation (/mobile or ?ui=mobile)
    -------------------------------------------------------------------------- */
@@ -324,13 +366,27 @@ body.ui-mobile .elevation-chart-wrap {
 }
 
 body.ui-mobile .elevation-source-pill,
-body.ui-mobile .elev-scrub-leg {
+body.ui-mobile .elev-scrub-leg,
+body.ui-mobile .elev-vehicle-select {
   display: none;
+}
+
+body.ui-mobile.elevation-strip-visible .weather-radar-pill,
+body.ui-mobile.elevation-strip-visible .map-legend,
+body.ui-mobile.elevation-strip-visible .airspace-map-legend {
+  bottom: calc(var(--mobile-plan-h, 48px) + var(--mobile-fab-gap, 12px) + var(--mobile-chrome-bottom, 0px) + 132px);
+}
+
+body.ui-mobile.elevation-strip-visible.elevation-strip-collapsed .weather-radar-pill,
+body.ui-mobile.elevation-strip-visible.elevation-strip-collapsed .map-legend,
+body.ui-mobile.elevation-strip-visible.elevation-strip-collapsed .airspace-map-legend {
+  bottom: calc(var(--mobile-plan-h, 48px) + var(--mobile-fab-gap, 12px) + var(--mobile-chrome-bottom, 0px) + 52px);
 }
 
 @media (max-width: 640px) {
   .elevation-source-pill,
-  .elev-scrub-leg {
+  .elev-scrub-leg,
+  .elev-vehicle-select {
     display: none;
   }
   .elevation-strip-header {

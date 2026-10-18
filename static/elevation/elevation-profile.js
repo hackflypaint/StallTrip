@@ -1,18 +1,27 @@
 /**
  * Removable Elevation-Aware Battery & Grade Profile Strip.
  *
- * 100% client-side route elevation & grade profiling:
- * - Samples ~48 equidistant points along the planned route geometry (or stop coordinates).
+ * 100% client-side route elevation & grade profiling using the
+ * Tesla in-car Navigation / Energy App longitudinal vehicle dynamics model:
+ * - Samples ~50 equidistant points along the planned route geometry (or stop coordinates).
  * - Queries the free, no-key Open-Meteo Elevation API directly from the browser
  *   (https://api.open-meteo.com/v1/elevation?latitude=...&longitude=...),
  *   with a deterministic synthetic terrain fallback when offline.
- * - Renders a collapsible bottom strip over the map (desktop, mobile, and Tesla car-shell):
- *   - Interactive SVG area chart with Supercharger stop pins plotted on the terrain curve.
- *   - Hover / touch scrubbing along the profile highlights the exact location on the Leaflet map
- *     and displays elevation (ft/m), % grade, cumulative distance, and active leg energy impact.
- *   - Computes EV Elevation Energy Impact per leg and overall trip:
- *     climbing penalty (+kWh for ascent) vs. regenerative braking recovery (-kWh on descent),
- *     displaying net elevation kWh and Wh/mi badges in the strip header.
+ * - Longitudinal EV Dynamics & Potential Energy Model:
+ *   - Gravitational potential energy: ΔE_pot = m * g * Δh / 3,600,000 (kWh), g = 9.80665 m/s²
+ *   - Vehicle mass presets (m = m_curb + m_payload):
+ *     Model 3 LR (1,980 kg), Model Y LR (2,130 kg), Model S/X (2,350 kg), Cybertruck (3,150 kg)
+ *   - Climbing (Δh > 0): Tractive motor + SiC inverter efficiency η_drive ≈ 0.90
+ *     with high-power I²R derating on steep grades (>3%):
+ *       ΔE_climb = (m * g * Δh) / (3,600,000 * η_climb(G))
+ *   - Descent (Δh < 0): Two physical regimes (matching Tesla Energy App):
+ *     1. Gentle descent (0 > G >= G_coast ≈ -2.2%): Gravity offsets forward tractive motor
+ *        draw required to overcome aerodynamic + rolling resistance (no battery inversion
+ *        loop required; effective draw savings η_shallow ≈ 0.85).
+ *     2. Steep descent (G < G_coast): Gravity exceeds road load; excess mechanical power
+ *        drives the motor as a generator through the inverter into the pack at round-trip
+ *        regenerative efficiency η_regen ≈ 0.75, capped by pack max regen power (65–85 kW).
+ *   - Computes Net kWh, Net Wh/mi, and Net SoC % impact relative to active battery capacity.
  *
  * See static/elevation/README.md for formulas and removal steps.
  */
@@ -24,26 +33,96 @@
   const MAX_COORDS_PER_REQUEST = 90;
   const METERS_TO_FEET = 3.28084;
   const KM_TO_MILES = 0.621371;
+  const JOULES_PER_KWH = 3600000;
 
   /**
-   * EV physics & energy constants (representative Tesla Model Y/3 Long Range + pack scaling):
-   * - Mass m ≈ 2,050 kg (curb weight + passengers/cargo)
+   * Tesla Vehicle Mass & Longitudinal Aero/Rolling Presets
+   * Mass m includes curb weight + ~150 kg typical occupants & luggage payload.
+   */
+  const VEHICLE_MASS_PRESETS = {
+    model3_lr: {
+      id: "model3_lr",
+      label: "Model 3 LR",
+      shortLabel: "M3 LR (1,980 kg)",
+      massKg: 1980,
+      defaultPackKwh: 75,
+      dragAreaCdA: 0.48,
+      crr: 0.0085,
+      maxRegenKw: 65,
+    },
+    modely_lr: {
+      id: "modely_lr",
+      label: "Model Y LR",
+      shortLabel: "MY LR (2,130 kg)",
+      massKg: 2130,
+      defaultPackKwh: 75,
+      dragAreaCdA: 0.56,
+      crr: 0.009,
+      maxRegenKw: 70,
+    },
+    models_x: {
+      id: "models_x",
+      label: "Model S / X",
+      shortLabel: "MS/X (2,350 kg)",
+      massKg: 2350,
+      defaultPackKwh: 100,
+      dragAreaCdA: 0.51,
+      crr: 0.009,
+      maxRegenKw: 75,
+    },
+    cybertruck: {
+      id: "cybertruck",
+      label: "Cybertruck",
+      shortLabel: "CT (3,150 kg)",
+      massKg: 3150,
+      defaultPackKwh: 123,
+      dragAreaCdA: 0.92,
+      crr: 0.011,
+      maxRegenKw: 85,
+    },
+  };
+
+  /**
+   * Tesla in-car Navigation / Energy App longitudinal physics constants:
    * - Gravity g = 9.80665 m/s²
-   * - Potential energy per meter of elevation: m * g / 3,600,000 ≈ 0.005585 kWh/m
-   * - Drivetrain climb factor: 1 / 0.87 ≈ 1.15 → ~0.00642 kWh per meter climbed
-   *   (~6.42 kWh per 1,000 m / ~1.96 kWh per 1,000 ft gained)
-   * - Regenerative braking recovery on net descent segments: ~64% of potential energy
-   *   returned to battery (~0.00357 kWh per meter descended, ~1.09 kWh per 1,000 ft lost)
-   * - Noise deadband: ignore micro-undulations < 1.5 m per sample segment.
+   * - Tractive drivetrain efficiency η_drive = 0.90 (SiC inverter ~0.97 * PM motor ~0.94 * gear ~0.985)
+   * - Steep-grade round-trip regenerative efficiency η_regen = 0.75
+   *   (wheel -> gear -> motor generator -> SiC inverter -> Li-ion charge acceptance)
+   * - Gentle-grade tractive offset efficiency η_shallow = 0.85
+   *   (gravity reduces forward motor current draw without battery charge inversion)
+   * - Highway reference speed v = 29.0576 m/s (65 mph)
    */
   const PHYSICS = {
-    vehicleMassKg: 2050,
+    vehicleMassKg: VEHICLE_MASS_PRESETS.modely_lr.massKg,
+    defaultPresetId: "modely_lr",
     gravityMps2: 9.80665,
-    climbEfficiency: 0.87,
-    regenEfficiency: 0.64,
-    deadbandMeters: 1.5,
-    nominalWhPerKm: 168,
+    airDensityKgM3: 1.204,
+    cruiseSpeedMps: 29.0576, // 65 mph
+    driveEfficiency: 0.9,
+    climbEfficiency: 0.9,
+    regenEfficiency: 0.75,
+    shallowDescentEfficiency: 0.85,
+    steepGradeThresholdPct: -2.2,
+    deadbandMeters: 1.0,
+    defaultPackKwh: 75,
   };
+
+  /**
+   * Infer or resolve the Tesla vehicle preset from preset ID or battery capacity (kWh).
+   */
+  function resolveVehiclePreset(opts = {}) {
+    if (opts && opts.vehiclePresetId && VEHICLE_MASS_PRESETS[opts.vehiclePresetId]) {
+      return VEHICLE_MASS_PRESETS[opts.vehiclePresetId];
+    }
+    const cap = Number(opts && opts.batteryCapacityKwh);
+    if (Number.isFinite(cap) && cap > 0) {
+      if (cap <= 65) return VEHICLE_MASS_PRESETS.model3_lr;
+      if (cap <= 85) return VEHICLE_MASS_PRESETS.modely_lr;
+      if (cap <= 110) return VEHICLE_MASS_PRESETS.models_x;
+      return VEHICLE_MASS_PRESETS.cybertruck;
+    }
+    return VEHICLE_MASS_PRESETS.modely_lr;
+  }
 
   function haversineKm(lat1, lng1, lat2, lng2) {
     const R = 6371.0088;
@@ -214,17 +293,14 @@
       const lng = Number(pt.lng) || 0;
       const frac = n > 1 ? i / (n - 1) : 0;
 
-      // Regional base elevation (higher in Western US interior / mountain longitudes)
       let baseM = 65;
       if (lng > -120.5 && lng < -104.0 && lat > 31 && lat < 49) {
         const interiorFactor = Math.sin(((lng + 120.5) / 16.5) * Math.PI);
         baseM += Math.max(0, interiorFactor) * 950;
       } else if (lng >= -84.0 && lng <= -76.0 && lat >= 34 && lat <= 45) {
-        // Appalachian / Blue Ridge wave
         baseM += 260 * Math.sin(((lng + 84) / 8) * Math.PI);
       }
 
-      // Mountain pass / ridge profile along the trip (e.g., Grapevine / Cajon / Baker pass)
       const passPeak1 = 420 * Math.exp(-Math.pow((frac - 0.36) / 0.14, 2));
       const passPeak2 = 580 * Math.exp(-Math.pow((frac - 0.72) / 0.12, 2));
       const valleyDip = -140 * Math.exp(-Math.pow((frac - 0.54) / 0.09, 2));
@@ -262,7 +338,6 @@
       const dElevM = next.elevM - prev.elevM;
       if (horizKm > 0.05) {
         const rawGrade = (dElevM / (horizKm * 1000)) * 100;
-        // Clamp extreme DEM step artifacts to realistic highway bounds [-15%, +15%]
         const clamped = Math.max(-15, Math.min(15, rawGrade));
         enriched[i].gradePct = Number(clamped.toFixed(1));
       } else {
@@ -306,7 +381,6 @@
         });
       }
 
-      // Find closest sample point at or after minSampleIdx
       let bestIdx = minSampleIdx;
       let bestDist = Infinity;
       const sLat = Number(stop.lat);
@@ -334,73 +408,176 @@
   }
 
   /**
-   * Compute climb penalty (+kWh), regenerative braking recovery (-kWh), and net delta
-   * for a slice of enriched samples [startIdx .. endIdx].
+   * Tesla in-car Navigation / Energy App segment-by-segment longitudinal energy physics.
+   *
+   * Computes:
+   * - Potential energy: ΔE_pot = m * g * Δh / 3,600,000 (kWh)
+   * - Ascent tractive battery penalty (+kWh):
+   *     ΔE_climb = ΔE_pot / η_climb(G), where η_drive = 0.90 with high-current I²R derating on grades >3%
+   * - Descent battery recovery (-kWh):
+   *     Splits downhill segments at the zero-torque coasting grade G_coast = -(F_aero + F_roll)/(m*g):
+   *     - Gentle descent (0 > G >= G_coast): Gravity directly reduces tractive motor draw (η_shallow = 0.85)
+   *     - Steep descent (G < G_coast): Excess potential energy drives active regenerative braking into the
+   *       battery pack at round-trip efficiency η_regen = 0.75, capped by pack max regen power (kW).
+   * - Net elevation battery delta (kWh), Wh/mi impact, and Net SoC % impact.
    */
-  function computeSegmentEnergy(enrichedSamples, startIdx, endIdx) {
+  function computeSegmentEnergy(enrichedSamples, startIdx, endIdx, opts = {}) {
+    const preset = resolveVehiclePreset(opts);
+    const massKg =
+      Number.isFinite(Number(opts.vehicleMassKg)) && Number(opts.vehicleMassKg) > 500
+        ? Number(opts.vehicleMassKg)
+        : preset.massKg;
+    const packKwh =
+      Number.isFinite(Number(opts.batteryCapacityKwh)) && Number(opts.batteryCapacityKwh) > 10
+        ? Number(opts.batteryCapacityKwh)
+        : preset.defaultPackKwh || PHYSICS.defaultPackKwh;
+    const vMps =
+      Number.isFinite(Number(opts.cruiseSpeedMps)) && Number(opts.cruiseSpeedMps) > 5
+        ? Number(opts.cruiseSpeedMps)
+        : PHYSICS.cruiseSpeedMps;
+    const maxRegenKw =
+      Number.isFinite(Number(opts.maxRegenKw)) && Number(opts.maxRegenKw) > 10
+        ? Number(opts.maxRegenKw)
+        : preset.maxRegenKw || 70;
+
     if (!Array.isArray(enrichedSamples) || enrichedSamples.length < 2) {
       return {
         ascentM: 0,
         descentM: 0,
         ascentFt: 0,
         descentFt: 0,
+        potentialEnergyAscentKwh: 0,
+        potentialEnergyDescentKwh: 0,
         climbPenaltyKwh: 0,
         regenRecoveryKwh: 0,
+        activeRegenKwh: 0,
+        shallowGravityOffsetKwh: 0,
         netElevationKwh: 0,
         netWhPerMi: 0,
+        netSocDeltaPct: 0,
+        vehicleMassKg: massKg,
+        vehiclePresetId: preset.id,
+        vehicleLabel: preset.label,
+        batteryCapacityKwh: packKwh,
         distKm: 0,
         distMi: 0,
       };
     }
+
     const lo = Math.max(0, Math.min(enrichedSamples.length - 1, startIdx || 0));
     const hi = Math.max(lo, Math.min(enrichedSamples.length - 1, endIdx ?? enrichedSamples.length - 1));
 
-    const pePerMeterKwh = (PHYSICS.vehicleMassKg * PHYSICS.gravityMps2) / 3600000;
-    const climbFactorKwhPerM = pePerMeterKwh / PHYSICS.climbEfficiency;
-    const regenFactorKwhPerM = pePerMeterKwh * PHYSICS.regenEfficiency;
+    const g = PHYSICS.gravityMps2;
+    const pePerMeterKwh = (massKg * g) / JOULES_PER_KWH;
+
+    // Aerodynamic + rolling resistance flat force at reference cruise speed
+    const fAeroN = 0.5 * PHYSICS.airDensityKgM3 * (preset.dragAreaCdA || 0.56) * vMps * vMps;
+    const fRollN = massKg * g * (preset.crr || 0.009);
+    const fFlatN = fAeroN + fRollN;
+    // Zero-torque coasting grade (%) where gravity balances road load
+    const coastGradePct = -((fFlatN / (massKg * g)) * 100); // ~ -2.1% to -2.3%
 
     let ascentM = 0;
     let descentM = 0;
+    let potentialEnergyAscentKwh = 0;
+    let potentialEnergyDescentKwh = 0;
+    let climbPenaltyKwh = 0;
+    let regenRecoveryKwh = 0;
+    let activeRegenKwh = 0;
+    let shallowGravityOffsetKwh = 0;
 
     for (let i = lo; i < hi; i++) {
-      const dh = enrichedSamples[i + 1].elevM - enrichedSamples[i].elevM;
+      const s0 = enrichedSamples[i];
+      const s1 = enrichedSamples[i + 1];
+      const dh = s1.elevM - s0.elevM;
+      const dHorizM = Math.max(100, (s1.distKm - s0.distKm) * 1000);
+      const segGradePct = (dh / dHorizM) * 100;
+
       if (dh > PHYSICS.deadbandMeters) {
         ascentM += dh;
+        const dPeKwh = dh * pePerMeterKwh;
+        potentialEnergyAscentKwh += dPeKwh;
+
+        // Tractive motor + SiC inverter efficiency with high-load I²R stator/pack derating on steep climbs
+        const steepOver3 = Math.max(0, Math.min(12, segGradePct - 3));
+        const effClimb = Math.max(0.84, PHYSICS.driveEfficiency - 0.004 * steepOver3);
+        climbPenaltyKwh += dPeKwh / effClimb;
       } else if (dh < -PHYSICS.deadbandMeters) {
-        descentM += Math.abs(dh);
+        const dropM = Math.abs(dh);
+        descentM += dropM;
+        const dPeKwh = dropM * pePerMeterKwh;
+        potentialEnergyDescentKwh += dPeKwh;
+
+        const absGrade = Math.abs(segGradePct);
+        const absCoast = Math.abs(coastGradePct);
+
+        if (segGradePct >= coastGradePct) {
+          // Regime 2A: Gentle descent (0 > G >= G_coast)
+          // Gravity directly offsets tractive motor draw without battery charge inversion loop
+          const savedKwh = dPeKwh * PHYSICS.shallowDescentEfficiency;
+          shallowGravityOffsetKwh += savedKwh;
+          regenRecoveryKwh += savedKwh;
+        } else {
+          // Regime 2B: Steep descent (G < G_coast)
+          // Coasting fraction eliminates motor draw; excess steep grade actively regenerates into battery pack
+          const coastFrac = Math.max(0, Math.min(1, absCoast / Math.max(0.1, absGrade)));
+          const steepFrac = 1 - coastFrac;
+
+          const offsetPartKwh = dPeKwh * coastFrac * PHYSICS.shallowDescentEfficiency;
+          const rawRegenPartKwh = dPeKwh * steepFrac * PHYSICS.regenEfficiency;
+
+          // Cap active regenerative charging energy by maxRegenKw over segment duration Δt = Δd / v
+          const segHours = (dHorizM / vMps) / 3600;
+          const maxRegenCapKwh = segHours > 0 ? maxRegenKw * segHours : rawRegenPartKwh;
+          const cappedRegenPartKwh = Math.min(rawRegenPartKwh, maxRegenCapKwh);
+
+          shallowGravityOffsetKwh += offsetPartKwh;
+          activeRegenKwh += cappedRegenPartKwh;
+          regenRecoveryKwh += offsetPartKwh + cappedRegenPartKwh;
+        }
       }
     }
 
-    const climbPenaltyKwh = ascentM * climbFactorKwhPerM;
-    const regenRecoveryKwh = descentM * regenFactorKwhPerM;
     const netElevationKwh = climbPenaltyKwh - regenRecoveryKwh;
-
     const distKm = Math.max(0, enrichedSamples[hi].distKm - enrichedSamples[lo].distKm);
     const distMi = distKm * KM_TO_MILES;
     const netWhPerMi = distMi > 0.5 ? Math.round((netElevationKwh * 1000) / distMi) : 0;
+    // Positive netElevationKwh means extra battery consumed -> negative SoC delta %
+    const netSocDeltaPct =
+      packKwh > 0 ? Number(((-netElevationKwh / packKwh) * 100).toFixed(1)) : 0;
 
     return {
       ascentM: Math.round(ascentM),
       descentM: Math.round(descentM),
       ascentFt: Math.round(ascentM * METERS_TO_FEET),
       descentFt: Math.round(descentM * METERS_TO_FEET),
+      potentialEnergyAscentKwh: Number(potentialEnergyAscentKwh.toFixed(2)),
+      potentialEnergyDescentKwh: Number(potentialEnergyDescentKwh.toFixed(2)),
       climbPenaltyKwh: Number(climbPenaltyKwh.toFixed(2)),
       regenRecoveryKwh: Number(regenRecoveryKwh.toFixed(2)),
+      activeRegenKwh: Number(activeRegenKwh.toFixed(2)),
+      shallowGravityOffsetKwh: Number(shallowGravityOffsetKwh.toFixed(2)),
       netElevationKwh: Number(netElevationKwh.toFixed(2)),
       netWhPerMi,
+      netSocDeltaPct,
+      vehicleMassKg: massKg,
+      vehiclePresetId: preset.id,
+      vehicleLabel: preset.label,
+      batteryCapacityKwh: packKwh,
       distKm: Number(distKm.toFixed(1)),
       distMi: Number(distMi.toFixed(1)),
     };
   }
 
   /**
-   * Compute full-trip + per-leg elevation energy summary.
+   * Compute full-trip + per-leg elevation energy summary using Tesla longitudinal physics.
    */
-  function computeElevationEnergyImpact(enrichedSamples, projectedStops) {
+  function computeElevationEnergyImpact(enrichedSamples, projectedStops, opts = {}) {
     const overall = computeSegmentEnergy(
       enrichedSamples,
       0,
-      Math.max(0, (enrichedSamples || []).length - 1)
+      Math.max(0, (enrichedSamples || []).length - 1),
+      opts
     );
 
     let minElevM = Infinity;
@@ -441,7 +618,8 @@
       const seg = computeSegmentEnergy(
         enrichedSamples,
         fromStop.sampleIndex,
-        toStop.sampleIndex
+        toStop.sampleIndex,
+        opts
       );
       legs.push(
         Object.assign({}, seg, {
@@ -482,23 +660,34 @@
     return `${sign}${Math.abs(n)} Wh/mi`;
   }
 
+  function formatSignedSocPct(val) {
+    const n = Number(val) || 0;
+    const sign = n > 0 ? "+" : n < 0 ? "−" : "±";
+    return `${sign}${Math.abs(n).toFixed(1)}% SoC`;
+  }
+
   const ElevationModule = {
     _map: null,
     _containerEl: null,
     _stripEl: null,
     _collapsed: false,
     _unit: "ft", // 'ft' | 'm'
+    _vehiclePresetId: "modely_lr",
+    _userSelectedPreset: false,
     _profile: null,
     _hoverMarker: null,
     _activeSampleIdx: null,
     _fetchSeq: 0,
     _abortCtrl: null,
     _boundRoutePlanned: null,
+    _boundBatteryCapChange: null,
 
     _test: {
       OPEN_METEO_ELEVATION_URL,
       DEFAULT_SAMPLE_COUNT,
+      VEHICLE_MASS_PRESETS,
       PHYSICS,
+      resolveVehiclePreset,
       haversineKm,
       escapeHtml,
       extractRouteCoordinates,
@@ -511,6 +700,7 @@
       computeElevationEnergyImpact,
       formatSignedKwh,
       formatSignedWhMi,
+      formatSignedSocPct,
     },
 
     mount(opts = {}) {
@@ -533,7 +723,25 @@
         window.addEventListener("routePlanned", this._boundRoutePlanned);
       }
 
-      // If a plan is already active on mount, render immediately
+      if (!this._boundBatteryCapChange && typeof document !== "undefined") {
+        const capInput = document.getElementById("batteryCapacity");
+        if (capInput) {
+          this._boundBatteryCapChange = () => {
+            if (!this._userSelectedPreset) {
+              const inferred = resolveVehiclePreset({
+                batteryCapacityKwh: Number(capInput.value),
+              });
+              this._vehiclePresetId = inferred.id;
+              const sel = this._stripEl && this._stripEl.querySelector("#elevVehicleSelect");
+              if (sel) sel.value = this._vehiclePresetId;
+            }
+            this._recomputeEnergyIfLoaded();
+          };
+          capInput.addEventListener("input", this._boundBatteryCapChange);
+          capInput.addEventListener("change", this._boundBatteryCapChange);
+        }
+      }
+
       if (global.appState && global.appState.activePlan) {
         this.renderForPlan(global.appState.activePlan);
       }
@@ -543,6 +751,14 @@
       if (this._boundRoutePlanned && typeof window !== "undefined") {
         window.removeEventListener("routePlanned", this._boundRoutePlanned);
         this._boundRoutePlanned = null;
+      }
+      if (this._boundBatteryCapChange && typeof document !== "undefined") {
+        const capInput = document.getElementById("batteryCapacity");
+        if (capInput) {
+          capInput.removeEventListener("input", this._boundBatteryCapChange);
+          capInput.removeEventListener("change", this._boundBatteryCapChange);
+        }
+        this._boundBatteryCapChange = null;
       }
       this._clearHoverMarker();
       if (this._abortCtrl) {
@@ -561,6 +777,37 @@
 
     getProfileData() {
       return this._profile;
+    },
+
+    _getActivePhysicsOptions() {
+      let batteryCapacityKwh = null;
+      if (typeof document !== "undefined") {
+        const capInput = document.getElementById("batteryCapacity");
+        if (capInput && Number.isFinite(Number(capInput.value)) && Number(capInput.value) > 10) {
+          batteryCapacityKwh = Number(capInput.value);
+        }
+      }
+      if (!this._userSelectedPreset && batteryCapacityKwh) {
+        const inferred = resolveVehiclePreset({ batteryCapacityKwh });
+        this._vehiclePresetId = inferred.id;
+      }
+      const preset = VEHICLE_MASS_PRESETS[this._vehiclePresetId] || VEHICLE_MASS_PRESETS.modely_lr;
+      return {
+        vehiclePresetId: preset.id,
+        vehicleMassKg: preset.massKg,
+        batteryCapacityKwh: batteryCapacityKwh || preset.defaultPackKwh,
+      };
+    },
+
+    _recomputeEnergyIfLoaded() {
+      if (!this._profile || !this._profile.samples) return;
+      const physOpts = this._getActivePhysicsOptions();
+      this._profile.energy = computeElevationEnergyImpact(
+        this._profile.samples,
+        this._profile.stops,
+        physOpts
+      );
+      this._renderProfileView();
     },
 
     _ensureStripDom() {
@@ -587,22 +834,30 @@
           </div>
 
           <div class="elevation-badges" id="elevationBadges">
-            <span class="elev-badge elev-badge-climb" id="elevBadgeClimb" title="Climbing energy penalty (ascent)">
+            <span class="elev-badge elev-badge-climb" id="elevBadgeClimb" title="Tesla longitudinal climb penalty: ΔE = m·g·Δh / η_drive (η_drive ≈ 90%)">
               <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i>
               <span id="elevClimbText">+0.0 kWh</span>
             </span>
-            <span class="elev-badge elev-badge-regen" id="elevBadgeRegen" title="Regenerative braking energy recovery (descent)">
+            <span class="elev-badge elev-badge-regen" id="elevBadgeRegen" title="Downhill gravity offset + steep-grade regenerative braking recovery (η_regen ≈ 75%)">
               <i class="fa-solid fa-bolt" aria-hidden="true"></i>
               <span id="elevRegenText">−0.0 kWh</span>
             </span>
-            <span class="elev-badge elev-badge-net" id="elevBadgeNet" title="Net elevation battery impact">
+            <span class="elev-badge elev-badge-net" id="elevBadgeNet" title="Net elevation battery impact (kWh, SoC %, and Wh/mi)">
               <span id="elevNetKwhText">±0.0 kWh</span>
+              <span class="elev-badge-sep">·</span>
+              <span id="elevNetSocText">±0.0% SoC</span>
               <span class="elev-badge-sep">·</span>
               <span id="elevNetWhMiText">±0 Wh/mi</span>
             </span>
           </div>
 
           <div class="elevation-controls">
+            <select class="elev-vehicle-select" id="elevVehicleSelect" title="Tesla vehicle mass preset for potential energy ΔE = m·g·Δh" aria-label="Tesla vehicle mass preset">
+              <option value="model3_lr">M3 LR · 1,980 kg</option>
+              <option value="modely_lr" selected>MY LR · 2,130 kg</option>
+              <option value="models_x">MS/X · 2,350 kg</option>
+              <option value="cybertruck">CT · 3,150 kg</option>
+            </select>
             <button type="button" class="elev-unit-btn" id="btnElevUnit" title="Toggle feet / meters" aria-label="Toggle elevation units">
               ft
             </button>
@@ -628,6 +883,17 @@
       this._containerEl.appendChild(el);
       this._stripEl = el;
 
+      const vehicleSelect = el.querySelector("#elevVehicleSelect");
+      if (vehicleSelect) {
+        vehicleSelect.addEventListener("click", (e) => e.stopPropagation());
+        vehicleSelect.addEventListener("change", (e) => {
+          e.stopPropagation();
+          this._vehiclePresetId = vehicleSelect.value;
+          this._userSelectedPreset = true;
+          this._recomputeEnergyIfLoaded();
+        });
+      }
+
       const unitBtn = el.querySelector("#btnElevUnit");
       if (unitBtn) {
         unitBtn.addEventListener("click", (e) => {
@@ -649,7 +915,7 @@
       const header = el.querySelector("#elevationStripHeader");
       if (header) {
         header.addEventListener("click", (e) => {
-          if (e.target.closest("button")) return;
+          if (e.target.closest("button") || e.target.closest("select")) return;
           if (this._collapsed) this.setCollapsed(false);
         });
       }
@@ -742,7 +1008,13 @@
 
       const enrichedSamples = enrichSamplesWithGrade(samples, elevationsM);
       const projectedStops = projectStopsToProfile(plan.stops || [], enrichedSamples);
-      const energy = computeElevationEnergyImpact(enrichedSamples, projectedStops);
+      const physOpts = this._getActivePhysicsOptions();
+      const energy = computeElevationEnergyImpact(enrichedSamples, projectedStops, physOpts);
+
+      const sel = this._stripEl.querySelector("#elevVehicleSelect");
+      if (sel && sel.value !== physOpts.vehiclePresetId) {
+        sel.value = physOpts.vehiclePresetId;
+      }
 
       this._profile = {
         source,
@@ -782,16 +1054,17 @@
       }
 
       const netKwhEl = this._stripEl.querySelector("#elevNetKwhText");
+      const netSocEl = this._stripEl.querySelector("#elevNetSocText");
       const netWhMiEl = this._stripEl.querySelector("#elevNetWhMiText");
       const netBadge = this._stripEl.querySelector("#elevBadgeNet");
       if (netKwhEl) netKwhEl.textContent = `Net ${formatSignedKwh(overall.netElevationKwh)}`;
+      if (netSocEl) netSocEl.textContent = formatSignedSocPct(overall.netSocDeltaPct);
       if (netWhMiEl) netWhMiEl.textContent = formatSignedWhMi(overall.netWhPerMi);
       if (netBadge) {
         netBadge.classList.toggle("is-penalty", overall.netElevationKwh > 0.25);
         netBadge.classList.toggle("is-saving", overall.netElevationKwh < -0.25);
       }
 
-      // Default scrub bar summary when not hovering
       if (this._activeSampleIdx == null) {
         this._updateScrubReadout(null);
       } else {
@@ -841,13 +1114,11 @@
       const baselineY = (padT + plotH).toFixed(1);
       const areaPath = `${linePath} L${pts[pts.length - 1].x},${baselineY} L${pts[0].x},${baselineY} Z`;
 
-      // Horizontal reference lines (min / mid / max)
       const yMidVal = Math.round((yMin + yMax) / 2);
       const yTop = padT;
       const yMid = Math.round(padT + plotH / 2);
       const yBot = padT + plotH;
 
-      // Supercharger pins plotted right on the ridge/valley curve
       const chargerPins = (stops || [])
         .filter((st) => st.type === "SUPERCHARGER")
         .map((st) => {
@@ -1050,7 +1321,7 @@
         }
         if (legEl) {
           const legCount = (this._profile.energy.legs || []).length;
-          legEl.textContent = `${legCount} leg${legCount === 1 ? "" : "s"} · Hover/tap chart to scrub grade & stops`;
+          legEl.textContent = `${overall.vehicleLabel} (${overall.vehicleMassKg.toLocaleString()} kg) · η_drive 90% · η_regen 75% · ${legCount} leg${legCount === 1 ? "" : "s"}`;
         }
         return;
       }
@@ -1073,7 +1344,7 @@
 
       const leg = this._findLegForSample(idx);
       if (legEl && leg) {
-        legEl.textContent = `Leg #${leg.legIndex} (→ ${leg.toName}): ${formatSignedKwh(leg.netElevationKwh)} net (+${leg.climbPenaltyKwh.toFixed(1)} climb / −${leg.regenRecoveryKwh.toFixed(1)} regen)`;
+        legEl.textContent = `Leg #${leg.legIndex} (→ ${leg.toName}): ${formatSignedKwh(leg.netElevationKwh)} (${formatSignedSocPct(leg.netSocDeltaPct)}) · +${leg.climbPenaltyKwh.toFixed(1)} climb / −${leg.regenRecoveryKwh.toFixed(1)} regen`;
       }
     },
 
