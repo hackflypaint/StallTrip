@@ -3,6 +3,7 @@
  * Includes Visit Maximizer routing, map area drag-selection for force-included chargers,
  * Streets / Topographic basemap switching via the Layers button, and multi-stop itinerary generation.
  * Optional Fall Foliage: see static/foliage/ (FoliageModule) — removable.
+ * Optional Airspace / UAS: see static/airspace/ (AirspaceModule) — removable.
  */
 
 // Application State
@@ -83,6 +84,12 @@ function initMap() {
   const foliageSlot = document.getElementById("foliageSlot");
   if (window.FoliageModule && foliageSlot) {
     window.FoliageModule.mount({ map: state.map, slotEl: foliageSlot });
+  }
+
+  // Optional removable airspace / UAS module (static/airspace/)
+  const airspaceSlot = document.getElementById("airspaceSlot");
+  if (window.AirspaceModule && airspaceSlot) {
+    window.AirspaceModule.mount({ map: state.map, slotEl: airspaceSlot });
   }
 
   // Map click handler for origin/destination when not in area selection mode

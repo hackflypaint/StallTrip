@@ -16,8 +16,19 @@ Open the **Layers** button (layer-group icon on the map toolbar) for basemaps an
 | **Topographic** | Basemap | OpenTopoMap terrain tiles (contours / hillshade) |
 | **Nearby stations** | Overlay | Corridor Supercharger markers |
 | **Fall Foliage** | Overlay + day slider | Explore Fall daily CONUS color map |
+| **Airspace / UAS** | Overlay | FAA Class B/C/D, special-use, UAS Facility Map cells |
 
 ![Topographic basemap](media/topo_layer.png)
+
+### Airspace / UAS (FAA ArcGIS)
+Airspace lives in a **removable** module under `static/airspace/` (see that folder’s `README.md`).
+
+- **Sources (public FAA FeatureServers, org `ssFJjBXIUyZDrSYZ`):** viewport-bounded GeoJSON from `Class_Airspace`, `Special_Use_Airspace`, `FAA_UAS_FacilityMap_Data`, `Stadiums`, `US_Airport`. Catalog: [FAA ArcGIS REST](https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services). Hubs: [ADDS](https://adds-faa.opendata.arcgis.com/) · [UDDS](https://udds-faa.opendata.arcgis.com/).
+- **Not used:** Autopylot private APIs (AutoPylot is an FAA-approved LAANC USS; map visuals come from FAA GIS).
+- **Performance:** fetches only when the overlay is on; min zoom 7 (Class/SUA), 9 (UASFM grids), 8 (airport/stadium points); debounced + abortable.
+- **Attribution:** FAA AIS / ADDS · UDDS. UAS Facility Maps are informational only (not flight authorization).
+
+**How to delete airspace later:** remove `static/airspace/`, drop the `#airspaceSlot` + airspace CSS/JS includes from `index.html`, and remove the optional `AirspaceModule.mount` hook in `app.js`.
 
 ### Fall Foliage (Explore Fall rasters)
 Foliage lives in a **removable** module under `static/foliage/` (see that folder’s `README.md`).

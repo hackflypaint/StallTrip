@@ -167,6 +167,47 @@ async function runVerification() {
     await page.screenshot({ path: path.join(MEDIA_DIR, 'foliage_layer.png') });
     console.log('Saved foliage_layer.png');
 
+    // Disable foliage so it does not obscure airspace check
+    await page.locator('#foliageToggle').uncheck();
+    await page.waitForTimeout(500);
+
+    // 2d. Enable Airspace / UAS overlay (FAA FeatureServers) over Mid-Atlantic
+    console.log('2d. Enabling Airspace / UAS overlay over Mid-Atlantic...');
+    await page.locator('#airspaceToggle').check();
+    await page.waitForSelector('#airspaceDetailBlock.is-active', { state: 'visible', timeout: 5000 });
+
+    await page.evaluate(() => {
+      if (window.appState && window.appState.map) {
+        window.appState.map.setView([38.9, -76.5], 9);
+      }
+    });
+
+    await page.waitForFunction(() => {
+      const el = document.getElementById('airspaceStatus');
+      if (!el) return false;
+      const t = el.textContent || '';
+      return /Class\s+\d+/.test(t) || /SUA\s+\d+/.test(t) || /UASFM\s+\d+/.test(t);
+    }, { timeout: 25000 });
+
+    const airspaceStatus = await page.locator('#airspaceStatus').textContent();
+    console.log(`Airspace status: ${airspaceStatus}`);
+    const airspaceOn = await page.evaluate(() => !!(window.AirspaceModule && window.AirspaceModule.isEnabled()));
+    if (!airspaceOn) {
+      throw new Error('AirspaceModule should be enabled after toggle');
+    }
+
+    // Ensure route/foliage modules still present and layers panel intact
+    const foliageStillThere = await page.locator('#foliageToggle').count();
+    if (foliageStillThere < 1) {
+      throw new Error('Foliage toggle missing after airspace enable');
+    }
+
+    await page.screenshot({ path: path.join(MEDIA_DIR, 'airspace_layer.png') });
+    console.log('Saved airspace_layer.png');
+
+    await page.locator('#airspaceToggle').uncheck();
+    await page.waitForTimeout(400);
+
     // Close layers panel and fit back to route
     await page.locator('#btnToggleLayers').click();
     await page.locator('#btnMapReset').click();
