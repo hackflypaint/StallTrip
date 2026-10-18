@@ -7,6 +7,7 @@ Zero extra third-party dependencies: Built with Python's high performance standa
 import http.server
 import json
 import os
+import re
 import socketserver
 import sys
 import threading
@@ -19,6 +20,18 @@ import routing
 
 PORT = int(os.environ.get("PORT", 8080))
 STATIC_DIR = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"))
+
+# Soft mobile UA redirect is OFF by default. Prefer explicit /mobile for tests & bookmarks.
+# Enable with MOBILE_UA_REDIRECT=1 only when you want phones on / to land on the mobile shell.
+_MOBILE_UA_RE = re.compile(r"Mobile|Android|iPhone|iPad|iPod", re.IGNORECASE)
+
+
+def mobile_ua_redirect_enabled() -> bool:
+    return os.environ.get("MOBILE_UA_REDIRECT", "").strip().lower() in ("1", "true", "yes")
+
+
+def looks_like_mobile_ua(user_agent: str) -> bool:
+    return bool(user_agent and _MOBILE_UA_RE.search(user_agent))
 
 # Request / response hardening limits
 MAX_BODY_BYTES = 256 * 1024  # 256 KiB
@@ -92,17 +105,59 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_stats()
             return
         if path == "/api/health":
-            self.send_json_response({"status": "healthy", "service": "Tesla Supercharger Route Planner"})
+            self.send_json_response({
+                "status": "healthy",
+                "service": "Tesla Supercharger Route Planner",
+                "mobile_shell": "/mobile",
+            })
             return
         if path.startswith("/api/"):
             self.send_json_response({"error": "Endpoint not found"}, status=404)
             return
 
-        # SPA fallback only for non-API GETs; path existence checked under STATIC_DIR only
-        if path == "/" or not self._static_file_exists(path):
-            self.path = "/index.html"
+        if self._maybe_mobile_ua_redirect(path):
+            return
 
+        self._map_spa_path(path)
         return super().do_GET()
+
+    def do_HEAD(self):
+        """Same SPA mapping as GET so probes like `curl -I /mobile` succeed."""
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path.startswith("/api/"):
+            # JSON APIs are GET/POST oriented; HEAD → 405 keeps surface small.
+            self.send_response(405)
+            self.send_header("Allow", "GET, POST, OPTIONS")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        if self._maybe_mobile_ua_redirect(path):
+            return
+
+        self._map_spa_path(path)
+        return super().do_HEAD()
+
+    def _maybe_mobile_ua_redirect(self, path: str) -> bool:
+        """Optional soft UA redirect (HTML entry only). Returns True if response sent."""
+        if (
+            path == "/"
+            and mobile_ua_redirect_enabled()
+            and looks_like_mobile_ua(self.headers.get("User-Agent", ""))
+        ):
+            self.send_response(302)
+            self.send_header("Location", "/mobile")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return True
+        return False
+
+    def _map_spa_path(self, path: str) -> None:
+        """Rewrite mobile + unknown paths onto index.html (same SPA)."""
+        if path in ("/mobile", "/mobile/", "/") or not self._static_file_exists(path):
+            self.path = "/index.html"
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)

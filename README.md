@@ -25,6 +25,8 @@ docker compose up -d --build
 
 Local Python (no Docker): `python3 server.py 8080` — **stdlib only**, no `pip install`.
 
+**Mobile shell:** open `http://localhost:8080/mobile` (map-first UI). Same APIs as desktop. Optional soft UA redirect: `MOBILE_UA_REDIRECT=1`.
+
 ## What’s in the box
 
 | Layer | Role |

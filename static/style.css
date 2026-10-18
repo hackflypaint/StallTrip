@@ -1285,3 +1285,104 @@ body, html {
     width: auto;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Mobile shell (/mobile or ?ui=mobile) — map-first, planner as bottom sheet.
+   Explicit entry preferred over User-Agent sniffing (see server MOBILE_UA_REDIRECT).
+   -------------------------------------------------------------------------- */
+.mobile-sheet-toggle {
+  display: none;
+}
+
+body.ui-mobile {
+  /* Prefer dynamic viewport units on mobile browsers when available */
+  height: 100%;
+}
+
+body.ui-mobile .app-container {
+  flex-direction: column;
+  height: 100dvh;
+  height: 100vh;
+}
+
+body.ui-mobile .map-container {
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto;
+  min-height: 58vh;
+  order: 1;
+}
+
+body.ui-mobile .sidebar {
+  order: 2;
+  width: 100%;
+  min-width: unset;
+  height: 0;
+  max-height: 0;
+  border-right: none;
+  border-top: 1px solid var(--border-color);
+  box-shadow: none;
+  overflow: hidden;
+  transition: max-height 0.22s ease, height 0.22s ease;
+}
+
+body.ui-mobile.sheet-open .sidebar {
+  height: min(52vh, 420px);
+  max-height: min(52vh, 420px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+body.ui-mobile .mobile-sheet-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  position: absolute;
+  z-index: 1100;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  min-height: 44px;
+  min-width: 44px;
+  padding: 10px 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-main);
+  font-size: 0.95rem;
+  font-weight: 600;
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+}
+
+body.ui-mobile.sheet-open .mobile-sheet-toggle {
+  bottom: calc(min(52vh, 420px) + 10px);
+  background: var(--tesla-red);
+  border-color: var(--tesla-red);
+  color: #fff;
+}
+
+body.ui-mobile .map-floating-bar {
+  top: 12px;
+  right: 12px;
+}
+
+body.ui-mobile .map-btn,
+body.ui-mobile .map-area-tools .map-btn {
+  width: 44px;
+  height: 44px;
+}
+
+body.ui-mobile .charger-drawer {
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  width: auto;
+  max-height: 55vh;
+}
+
+body.ui-mobile .layers-panel {
+  max-width: calc(100vw - 72px);
+}

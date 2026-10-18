@@ -37,6 +37,17 @@ const state = {
 // Expose for Playwright / debugging (cloud verification)
 window.appState = state;
 
+/**
+ * Mobile shell detection: explicit /mobile path or ?ui=mobile.
+ * Do not rely on User-Agent here — server may soft-redirect UA→/mobile behind an env flag.
+ */
+function isMobileShell() {
+  const path = (location.pathname || "/").replace(/\/+$/, "") || "/";
+  const params = new URLSearchParams(location.search || "");
+  return path === "/mobile" || params.get("ui") === "mobile";
+}
+
+window.isMobileShell = isMobileShell;
 
 /** Escape text for safe interpolation into HTML / Leaflet popups. */
 function escapeHtml(value) {
@@ -48,9 +59,38 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+function initMobileShell() {
+  if (!isMobileShell()) return;
+
+  document.body.classList.add("ui-mobile");
+  document.documentElement.dataset.ui = "mobile";
+
+  const toggle = document.getElementById("btnMobileSheet");
+  if (toggle) {
+    toggle.hidden = false;
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.addEventListener("click", () => {
+      const open = document.body.classList.toggle("sheet-open");
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      const label = open ? "Hide planner" : "Show planner";
+      toggle.setAttribute("aria-label", label);
+      toggle.title = label;
+      // Leaflet must reflow after layout change
+      if (state.map) {
+        setTimeout(() => state.map.invalidateSize(), 50);
+      }
+    });
+  }
+
+  if (state.map) {
+    setTimeout(() => state.map.invalidateSize(), 100);
+  }
+}
+
 // Initialize Application
 document.addEventListener("DOMContentLoaded", () => {
   initMap();
+  initMobileShell();
   setupEventListeners();
   loadStats();
   loadNearbyChargers();
