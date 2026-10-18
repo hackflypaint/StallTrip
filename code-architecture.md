@@ -96,7 +96,7 @@ routing.py
 | `/api/plan-route` | origin, destination, battery/range, mode, max_stops, forced_* | Full trip plan + geometry + corridor list |
 | `/api/find-along-route` | `coordinates` [[lng,lat],…], buffer, status | Chargers near polyline |
 
-CORS headers allow `*` on JSON responses. Cache-Control is `no-store` (dev-friendly). The process is a standard `TCPServer` (single-threaded unless changed).
+Same-origin only: no `Access-Control-Allow-Origin` (OPTIONS → 403). Cache-Control is `no-store`. The process uses a threaded `TCPServer` (`ThreadingMixIn`) with geocode/plan rate limits and a concurrency semaphore around heavy plan/corridor work.
 
 ### 3.2 `routing.py`
 

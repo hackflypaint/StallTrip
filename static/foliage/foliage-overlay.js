@@ -205,13 +205,23 @@
         zIndex: 350,
       }).addTo(this._map);
 
-      // If remote fails and we aren't already on cache, fall back when possible
+      // If remote fails, fall back to nearest shipped cache tile
       const img = this._overlay.getElement && this._overlay.getElement();
       if (img) {
         img.addEventListener("error", () => {
-          if (CACHED_DATES.includes(dateKey) && !url.startsWith(EF_CACHE)) {
-            this._overlay.setUrl(`${EF_CACHE}/${dateKey}.png`);
+          if (url.startsWith(EF_CACHE)) return;
+          let fallback = null;
+          if (CACHED_DATES.includes(dateKey)) {
+            fallback = dateKey;
+          } else if (CACHED_DATES.length) {
+            fallback = CACHED_DATES.reduce((best, d) =>
+              Math.abs(Number(d) - Number(dateKey)) <
+              Math.abs(Number(best) - Number(dateKey))
+                ? d
+                : best
+            );
           }
+          if (fallback) this._overlay.setUrl(`${EF_CACHE}/${fallback}.png`);
         });
       }
     },

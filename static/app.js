@@ -793,6 +793,7 @@ function setupAutocomplete(inputId, suggestionsId, onSelect) {
   const input = document.getElementById(inputId);
   const list = document.getElementById(suggestionsId);
   let timer = null;
+  let geocodeSeq = 0;
 
   input.addEventListener("input", () => {
     clearTimeout(timer);
@@ -803,9 +804,11 @@ function setupAutocomplete(inputId, suggestionsId, onSelect) {
     }
 
     timer = setTimeout(async () => {
+      const seq = ++geocodeSeq;
       try {
         const res = await fetch(`/api/geocode?q=${encodeURIComponent(query)}`);
         const data = await res.json();
+        if (seq !== geocodeSeq) return; // stale response
         list.innerHTML = "";
 
         if (data.results && data.results.length > 0) {
@@ -825,6 +828,7 @@ function setupAutocomplete(inputId, suggestionsId, onSelect) {
           list.style.display = "none";
         }
       } catch (err) {
+        if (seq !== geocodeSeq) return;
         console.error("Geocode error", err);
       }
     }, 300);
@@ -1018,7 +1022,7 @@ function renderRoutePlan(plan) {
         className: "custom-div-icon",
         html: `<div style="background:#ffffff; border:3px solid ${markerColor}; color:${markerColor}; width:34px; height:34px; border-radius:50%; display:flex; flex-direction:column; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(0,0,0,0.5); font-weight:800; font-size:11px;">
                  <i class="${iconClass}" style="font-size:11px;"></i>
-                 <span style="font-size:9px; margin-top:-2px;">#${stop.stop_index}</span>
+                 <span style="font-size:9px; margin-top:-2px;">#${escapeHtml(stop.stop_index)}</span>
                </div>`,
         iconSize: [34, 34],
         iconAnchor: [17, 17],
@@ -1087,7 +1091,7 @@ function renderTimeline(stops) {
       const isForced = s.forced;
       item.className = `timeline-item supercharger ${isForced ? 'forced' : ''}`;
       item.innerHTML = `
-        <div class="timeline-marker">${isForced ? '<i class="fa-solid fa-star"></i>' : s.stop_index}</div>
+        <div class="timeline-marker">${isForced ? '<i class="fa-solid fa-star"></i>' : escapeHtml(s.stop_index)}</div>
         <div class="timeline-content">
           <div class="item-top">
             <span class="item-name">${escapeHtml(s.name)}</span>

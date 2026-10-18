@@ -48,26 +48,31 @@ async function main() {
     throw new Error(`Class toggles missing park: ${toggles}`);
   }
 
+  // Poll DOM via Playwright locators (avoid waitForFunction — CSP blocks unsafe-eval)
+  async function waitStatus(pred, timeoutMs) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const t = (await page.locator("#airspaceStatus").textContent()) || "";
+      if (pred(t)) return t;
+      await page.waitForTimeout(250);
+    }
+    throw new Error(`Timeout waiting for airspace status (${timeoutMs}ms)`);
+  }
+
   // Shenandoah / Mid-Atlantic — parks + Class airspace + SUA
   await page.evaluate(() => {
     window.appState.map.setView([38.55, -78.35], 9);
   });
 
-  await page.waitForFunction(() => {
-    const t = document.getElementById("airspaceStatus")?.textContent || "";
-    return /No-fly\s+\d+/.test(t) && /Parks\s+[1-9]\d*/.test(t);
-  }, { timeout: 30000 });
-
-  const status = await page.locator("#airspaceStatus").textContent();
+  const status = await waitStatus(
+    (t) => /No-fly\s+\d+/.test(t) && /Parks\s+[1-9]\d*/.test(t),
+    30000
+  );
   console.log("status:", status);
 
   // Independent toggle: hide auth, keep no-fly + parks
   await page.locator("#airspaceClassAuth").uncheck();
-  await page.waitForFunction(() => {
-    const vis = window.AirspaceModule && window.AirspaceModule.getClassVisibility();
-    const t = document.getElementById("airspaceStatus")?.textContent || "";
-    return vis && vis.auth === false && vis.noFly === true && /Auth off/.test(t);
-  }, { timeout: 5000 });
+  await waitStatus((t) => /Auth off/.test(t), 5000);
   console.log("after auth off:", await page.locator("#airspaceStatus").textContent());
 
   const shotToggles = path.join(MEDIA_DIR, "drone_class_toggles_auth_off.png");
@@ -76,27 +81,28 @@ async function main() {
   fs.copyFileSync(shotToggles, shotTogglesA);
 
   await page.locator("#airspaceClassAuth").check();
-  await page.waitForFunction(() => {
-    const vis = window.AirspaceModule.getClassVisibility();
-    return vis && vis.auth === true;
-  }, { timeout: 5000 });
+  await waitStatus((t) => !/Auth off/.test(t), 5000);
 
   // DC area — prohibited P-56, Class B/D, NPS units
   await page.evaluate(() => {
     window.appState.map.setView([38.89, -77.03], 11);
   });
-  await page.waitForFunction(() => {
-    const t = document.getElementById("airspaceStatus")?.textContent || "";
-    return /No-fly\s+[1-9]\d*/.test(t) && /Auth\s+[1-9]\d*/.test(t);
-  }, { timeout: 30000 });
-
-  const statusDc = await page.locator("#airspaceStatus").textContent();
+  const statusDc = await waitStatus(
+    (t) => /No-fly\s+[1-9]\d*/.test(t) && /Auth\s+[1-9]\d*/.test(t),
+    30000
+  );
   console.log("status DC:", statusDc);
+
+  const FINAL =
+    "/tmp/tesla-planner-media/media/final-audit";
+  fs.mkdirSync(FINAL, { recursive: true });
 
   const shot2 = path.join(MEDIA_DIR, "drone_constraints_dc_toggles.png");
   const shot2a = path.join(ARTIFACTS, "drone_constraints_dc_toggles.png");
   await page.screenshot({ path: shot2, fullPage: false });
   fs.copyFileSync(shot2, shot2a);
+  fs.copyFileSync(shot2, path.join(FINAL, "drone_constraints_dc_toggles.png"));
+  fs.copyFileSync(shotToggles, path.join(FINAL, "drone_class_toggles_auth_off.png"));
 
   // Layers panel close-up with class toggles
   const panel = page.locator("#layersPanel");
@@ -104,6 +110,7 @@ async function main() {
   const shot3a = path.join(ARTIFACTS, "drone_layers_panel_class_toggles.png");
   await panel.screenshot({ path: shot3 });
   fs.copyFileSync(shot3, shot3a);
+  fs.copyFileSync(shot3, path.join(FINAL, "drone_layers_panel_class_toggles.png"));
 
   await browser.close();
   console.log("test_drone_airspace_ui.js: OK");

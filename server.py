@@ -191,8 +191,12 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                 ]
                 for key in stale:
                     del hits[key]
+                # Evict oldest windows instead of wiping all (avoids RL burst)
                 if len(hits) > MAX_GEOCODE_TRACKED_IPS:
-                    hits.clear()
+                    overflow = len(hits) - (MAX_GEOCODE_TRACKED_IPS // 2)
+                    oldest = sorted(hits.items(), key=lambda kv: kv[1][0])[:overflow]
+                    for key, _ in oldest:
+                        del hits[key]
 
             start, count = hits.get(ip, (now, 0))
             if now - start >= window_sec:
@@ -335,110 +339,113 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                 status=429,
             )
             return
+
+        data = self._read_json_body()
+        if data is None:
+            return
+
+        try:
+            origin = data.get("origin")
+            destination = data.get("destination")
+            if (
+                not isinstance(origin, (list, tuple))
+                or not isinstance(destination, (list, tuple))
+                or len(origin) < 2
+                or len(destination) < 2
+            ):
+                self.send_json_response(
+                    {"error": "Missing origin or destination coordinates"},
+                    status=400,
+                )
+                return
+
+            try:
+                origin_lat = float(origin[0])
+                origin_lng = float(origin[1])
+                dest_lat = float(destination[0])
+                dest_lng = float(destination[1])
+            except (TypeError, ValueError):
+                self.send_json_response(
+                    {"error": "Invalid origin or destination coordinates"},
+                    status=400,
+                )
+                return
+            if not (
+                -90 <= origin_lat <= 90
+                and -180 <= origin_lng <= 180
+                and -90 <= dest_lat <= 90
+                and -180 <= dest_lng <= 180
+            ):
+                self.send_json_response(
+                    {"error": "Origin or destination out of range"},
+                    status=400,
+                )
+                return
+
+            initial_battery = _clamp_float(data.get("initial_battery", 90.0), 90.0, 0.0, 100.0)
+            target_arrival = _clamp_float(data.get("target_arrival", 15.0), 15.0, 0.0, 100.0)
+            max_range = _clamp_float(data.get("max_range_km", 450.0), 450.0, 50.0, 1000.0)
+            corridor_buffer = _clamp_float(
+                data.get("corridor_buffer_km", 30.0), 30.0, 1.0, MAX_CORRIDOR_BUFFER_KM
+            )
+            min_power = _clamp_int(data.get("min_power", 0), 0, 0, 1000)
+            routing_mode = str(data.get("routing_mode", "MAXIMIZE"))[:32]
+            max_stops = _clamp_int(data.get("max_stops", 20), 20, 1, 50)
+
+            forced_chargers = data.get("forced_chargers", [])
+            if not isinstance(forced_chargers, list):
+                forced_chargers = []
+            if len(forced_chargers) > MAX_FORCED_CHARGERS:
+                self.send_json_response(
+                    {"error": f"Too many forced_chargers (max {MAX_FORCED_CHARGERS})"},
+                    status=400,
+                )
+                return
+
+            forced_charger_ids = data.get("forced_charger_ids", [])
+            if not isinstance(forced_charger_ids, list):
+                forced_charger_ids = []
+            if len(forced_charger_ids) > MAX_FORCED_CHARGERS:
+                self.send_json_response(
+                    {"error": f"Too many forced_charger_ids (max {MAX_FORCED_CHARGERS})"},
+                    status=400,
+                )
+                return
+        except Exception:
+            traceback.print_exc()
+            self.send_json_response({"error": "Invalid plan-route payload"}, status=400)
+            return
+
+        # Hold heavy-work slot only around OSRM / planning (not body read / validation)
         if not _plan_semaphore.acquire(blocking=False):
             self.send_json_response(
                 {"error": "Server busy — too many concurrent route plans"},
                 status=503,
             )
             return
-
         try:
-            data = self._read_json_body()
-            if data is None:
-                return
-
-            try:
-                origin = data.get("origin")
-                destination = data.get("destination")
-                if (
-                    not isinstance(origin, (list, tuple))
-                    or not isinstance(destination, (list, tuple))
-                    or len(origin) < 2
-                    or len(destination) < 2
-                ):
-                    self.send_json_response(
-                        {"error": "Missing origin or destination coordinates"},
-                        status=400,
-                    )
-                    return
-
-                try:
-                    origin_lat = float(origin[0])
-                    origin_lng = float(origin[1])
-                    dest_lat = float(destination[0])
-                    dest_lng = float(destination[1])
-                except (TypeError, ValueError):
-                    self.send_json_response(
-                        {"error": "Invalid origin or destination coordinates"},
-                        status=400,
-                    )
-                    return
-                if not (
-                    -90 <= origin_lat <= 90
-                    and -180 <= origin_lng <= 180
-                    and -90 <= dest_lat <= 90
-                    and -180 <= dest_lng <= 180
-                ):
-                    self.send_json_response(
-                        {"error": "Origin or destination out of range"},
-                        status=400,
-                    )
-                    return
-
-                initial_battery = _clamp_float(data.get("initial_battery", 90.0), 90.0, 0.0, 100.0)
-                target_arrival = _clamp_float(data.get("target_arrival", 15.0), 15.0, 0.0, 100.0)
-                max_range = _clamp_float(data.get("max_range_km", 450.0), 450.0, 50.0, 1000.0)
-                corridor_buffer = _clamp_float(
-                    data.get("corridor_buffer_km", 30.0), 30.0, 1.0, MAX_CORRIDOR_BUFFER_KM
-                )
-                min_power = _clamp_int(data.get("min_power", 0), 0, 0, 1000)
-                routing_mode = str(data.get("routing_mode", "MAXIMIZE"))[:32]
-                max_stops = _clamp_int(data.get("max_stops", 20), 20, 1, 50)
-
-                forced_chargers = data.get("forced_chargers", [])
-                if not isinstance(forced_chargers, list):
-                    forced_chargers = []
-                if len(forced_chargers) > MAX_FORCED_CHARGERS:
-                    self.send_json_response(
-                        {"error": f"Too many forced_chargers (max {MAX_FORCED_CHARGERS})"},
-                        status=400,
-                    )
-                    return
-
-                forced_charger_ids = data.get("forced_charger_ids", [])
-                if not isinstance(forced_charger_ids, list):
-                    forced_charger_ids = []
-                if len(forced_charger_ids) > MAX_FORCED_CHARGERS:
-                    self.send_json_response(
-                        {"error": f"Too many forced_charger_ids (max {MAX_FORCED_CHARGERS})"},
-                        status=400,
-                    )
-                    return
-
-                plan = routing.plan_trip(
-                    origin=(origin_lat, origin_lng),
-                    destination=(dest_lat, dest_lng),
-                    routing_mode=routing_mode,
-                    forced_chargers=forced_chargers,
-                    forced_charger_ids=forced_charger_ids,
-                    max_stops=max_stops,
-                    initial_battery_pct=initial_battery,
-                    target_arrival_pct=target_arrival,
-                    max_range_km=max_range,
-                    corridor_buffer_km=corridor_buffer,
-                    min_power=min_power,
-                )
-
-                self.send_json_response(plan)
-            except ValueError as e:
-                # Domain validation (e.g. no route) — safe short message
-                msg = str(e)
-                if len(msg) > 200:
-                    msg = "Unable to plan route"
-                self.send_json_response({"error": msg}, status=400)
-            except Exception:
-                traceback.print_exc()
-                self.send_json_response({"error": "Route planning failed"}, status=500)
+            plan = routing.plan_trip(
+                origin=(origin_lat, origin_lng),
+                destination=(dest_lat, dest_lng),
+                routing_mode=routing_mode,
+                forced_chargers=forced_chargers,
+                forced_charger_ids=forced_charger_ids,
+                max_stops=max_stops,
+                initial_battery_pct=initial_battery,
+                target_arrival_pct=target_arrival,
+                max_range_km=max_range,
+                corridor_buffer_km=corridor_buffer,
+                min_power=min_power,
+            )
+            self.send_json_response(plan)
+        except ValueError as e:
+            msg = str(e)
+            if len(msg) > 200:
+                msg = "Unable to plan route"
+            self.send_json_response({"error": msg}, status=400)
+        except Exception:
+            traceback.print_exc()
+            self.send_json_response({"error": "Route planning failed"}, status=500)
         finally:
             _plan_semaphore.release()
 
@@ -481,14 +488,27 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                     continue
                 if -180 <= lng <= 180 and -90 <= lat <= 90:
                     cleaned.append((lng, lat))
-            if not cleaned:
-                self.send_json_response({"error": "No valid coordinates provided"}, status=400)
+            if len(cleaned) < 2:
+                self.send_json_response(
+                    {"error": "At least two valid coordinates required"},
+                    status=400,
+                )
                 return
+        except Exception:
+            traceback.print_exc()
+            self.send_json_response({"error": "Invalid corridor search payload"}, status=400)
+            return
 
+        if not _plan_semaphore.acquire(blocking=False):
+            self.send_json_response(
+                {"error": "Server busy — too many concurrent corridor searches"},
+                status=503,
+            )
+            return
+        try:
             chargers = routing.find_superchargers_along_route(
                 cleaned, corridor_buffer_km=buffer_km, status_filter=status
             )
-            # Cap response size
             if len(chargers) > MAX_SUPERCHARGER_LIMIT:
                 chargers = chargers[:MAX_SUPERCHARGER_LIMIT]
             self.send_json_response({
@@ -498,6 +518,8 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         except Exception:
             traceback.print_exc()
             self.send_json_response({"error": "Corridor search failed"}, status=500)
+        finally:
+            _plan_semaphore.release()
 
     def _send_security_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")

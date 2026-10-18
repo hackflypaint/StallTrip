@@ -171,6 +171,14 @@ class TestSecurityHardening(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn(b"Too many coordinates", body)
 
+    def test_find_along_route_requires_two_coords(self):
+        status, _, body = self._post(
+            "/api/find-along-route",
+            {"coordinates": [[-122.4, 37.7]], "buffer_km": 10},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn(b"At least two", body)
+
     def test_corridor_response_capped_in_plan_trip(self):
         plan = routing.plan_trip(
             origin=(37.7749, -122.4194),
