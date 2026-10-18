@@ -58,13 +58,19 @@ async function run() {
     await page.screenshot({ path: path.join(MEDIA_DIR, "01-mobile-map-first.png") });
     console.log("2. Map-first shell + Plan toggle visible");
 
-    // 3. Open planner sheet
+    // 3. Open planner sheet — tabs first, no Supercharge brand header
     await toggle.click();
     await page.waitForFunction(() => document.body.classList.contains("sheet-open"), null, {
       timeout: 5000,
     });
-    await page.screenshot({ path: path.join(MEDIA_DIR, "02-mobile-sheet-open.png") });
-    console.log("3. Sheet opens on Plan tap");
+    const headerVisible = await page.locator(".sidebar-header").isVisible().catch(() => false);
+    if (headerVisible) {
+      throw new Error("sidebar-header (Supercharge Route) must be hidden on /mobile sheet");
+    }
+    await page.waitForSelector(".tabs", { state: "visible", timeout: 5000 });
+    await page.waitForSelector("#tabRoute", { state: "visible", timeout: 3000 });
+    await page.screenshot({ path: path.join(MEDIA_DIR, "02-mobile-sheet-tabs-first.png") });
+    console.log("3. Sheet opens — tabs first, brand header gone");
 
     // 4. Plan a short corridor trip (SF → LA, capped stops)
     await page.selectOption("#maxStopsSelect", "6");

@@ -1523,15 +1523,7 @@ body.car-shell .car-peek-brand {
   gap: 4px;
   min-width: 0;
   flex: 0 1 auto;
-  max-width: 34%;
-}
-
-body.car-shell .car-peek-logo {
-  width: 22px;
-  height: 22px;
-  flex-shrink: 0;
-  font-size: 0.65rem;
-  border-radius: 5px;
+  max-width: 28%;
 }
 
 body.car-shell .car-peek-text {
@@ -1652,15 +1644,28 @@ body.car-shell .subtitle {
   display: none;
 }
 
-/* Tabs ate peek/plan height ( photo) — car shell is route-only */
-body.car-shell .tabs {
+/* Peek: no tabs (presets row). Half/full: tabs own the top — no brand header */
+body.car-shell[data-sheet="peek"] .tabs {
   display: none !important;
 }
 
+body.car-shell[data-sheet="plan"] .tabs,
+body.car-shell[data-sheet="itinerary"] .tabs {
+  display: flex !important;
+  gap: 0;
+  padding: 0;
+  min-height: 36px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-secondary);
+}
+
 body.car-shell .tab-btn {
-  min-height: 40px;
-  font-size: 0.78rem;
-  padding: 6px 6px;
+  min-height: 36px;
+  font-size: 0.72rem;
+  padding: 4px 6px;
   gap: 4px;
 }
 
@@ -1669,11 +1674,7 @@ body.car-shell .tab-content {
   gap: 4px;
 }
 
-/* Ensure route form stays visible when expanded (tabs hidden) */
-body.car-shell[data-sheet="plan"] #route-tab,
-body.car-shell[data-sheet="itinerary"] #route-tab {
-  display: flex !important;
-}
+/* Expanded: allow switchTab() inline display; peek rule above forces hide */
 
 body.car-shell .route-form {
   gap: 4px;
@@ -1962,9 +1963,10 @@ body.ui-mobile {
   /* JS updateMobileViewportInsets() sets --vv-bottom for Safari URL/toolbar overlay */
   --vv-bottom: 0px;
   --mobile-chrome-bottom: calc(var(--safe-bottom) + var(--vv-bottom));
-  --mobile-plan-h: 52px;
-  --mobile-fab-gap: 16px;
-  --mobile-sheet-h: min(46dvh, 380px);
+  --mobile-plan-h: 48px;
+  --mobile-fab-gap: 12px;
+  /* Brand row removed — shorter sheet, more map (/mobile photo) */
+  --mobile-sheet-h: min(42dvh, 340px);
 }
 
 body.ui-mobile .app-container {
@@ -2010,7 +2012,7 @@ body.ui-mobile.sheet-open .sidebar {
   overscroll-behavior: contain;
   /* Lift sheet above Safari toolbar so Destination is not clipped */
   margin-bottom: var(--mobile-chrome-bottom);
-  padding-bottom: 28px;
+  padding-bottom: 16px;
   box-sizing: border-box;
 }
 
@@ -2144,81 +2146,120 @@ body.ui-mobile .layers-panel {
   top: calc(10px + var(--safe-top));
 }
 
-/* Phase 2 — touch targets + sheet polish */
+/*
+ * In-car /mobile photo: kill "Supercharge Route" brand row.
+ * Tabs (Route Planner | Explore) own the top of the bottom sheet.
+ */
 body.ui-mobile .sidebar-header {
-  padding: 10px 12px;
-  gap: 8px;
-}
-
-body.ui-mobile .brand h1 {
-  font-size: 1rem;
-}
-
-body.ui-mobile .brand .subtitle {
-  font-size: 0.7rem;
-}
-
-/* Less chrome on short phones so Origin + Destination stay reachable */
-body.ui-mobile.sheet-open .brand .subtitle {
-  display: none;
-}
-
-body.ui-mobile.sheet-open .dataset-badge {
-  display: none;
-}
-
-body.ui-mobile .dataset-badge {
-  font-size: 0.7rem;
-  padding: 4px 8px;
+  display: none !important;
 }
 
 body.ui-mobile .tabs {
-  gap: 6px;
-  padding: 6px 10px 0;
+  gap: 0;
+  padding: 0;
+  margin: 0;
   position: sticky;
   top: 0;
   z-index: 2;
   background: var(--bg-secondary, var(--bg-card));
+  border-bottom: 1px solid var(--border-color);
 }
 
 body.ui-mobile .tab-btn {
-  min-height: 44px;
-  font-size: 0.85rem;
-  padding: 10px 8px;
+  min-height: 40px;
+  font-size: 0.78rem;
+  padding: 6px 8px;
+  gap: 5px;
 }
 
 body.ui-mobile .route-form,
 body.ui-mobile .tab-content {
-  padding-left: 12px;
-  padding-right: 12px;
-  padding-bottom: 8px;
+  padding: 6px 10px 8px;
+  gap: 6px;
+}
+
+body.ui-mobile .form-group {
+  margin: 0;
+  gap: 2px;
+}
+
+body.ui-mobile .input-header {
+  margin-bottom: 2px;
+  min-height: 0;
+}
+
+body.ui-mobile .input-header label {
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+}
+
+body.ui-mobile .link-btn {
+  min-height: 32px;
+  padding: 2px 6px;
+  font-size: 0.72rem;
 }
 
 body.ui-mobile .input-wrapper input,
 body.ui-mobile .input-wrapper select,
 body.ui-mobile input[type="text"],
 body.ui-mobile select {
-  min-height: 44px;
+  min-height: 40px;
+  height: 40px;
   font-size: 16px; /* avoid iOS zoom-on-focus */
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 
-body.ui-mobile .link-btn,
-body.ui-mobile .preset-tag,
-body.ui-mobile .swap-btn,
-body.ui-mobile .strategy-toggle button,
-body.ui-mobile .clear-btn {
-  min-height: 44px;
-  min-width: 44px;
+body.ui-mobile .swap-container {
+  margin: 2px 0;
+}
+
+body.ui-mobile .swap-btn {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  min-width: 36px;
+}
+
+body.ui-mobile .quick-presets {
+  gap: 4px;
+  margin: 2px 0;
+}
+
+body.ui-mobile .preset-label {
+  font-size: 0.68rem;
 }
 
 body.ui-mobile .preset-tag {
-  padding: 10px 12px;
+  min-height: 36px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+}
+
+body.ui-mobile .clear-btn {
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  min-width: 36px;
+}
+
+body.ui-mobile .strategy-toggle button {
+  min-height: 40px;
+  font-size: 0.72rem;
+  padding: 6px;
+}
+
+body.ui-mobile .routing-goal-section {
+  padding: 6px 8px;
+  gap: 4px;
 }
 
 body.ui-mobile .primary-btn {
-  min-height: 48px;
-  font-size: 1rem;
+  min-height: 42px;
+  font-size: 0.9rem;
   width: 100%;
+  padding: 8px;
+  margin-top: 2px;
 }
 
 body.ui-mobile #mapModeBanner {

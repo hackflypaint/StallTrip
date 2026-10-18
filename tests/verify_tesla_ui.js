@@ -182,6 +182,10 @@ async function runProfile(browser, profile) {
   const peekH = sheetH;
   await page.locator("#btnCarSheetHandle").click({ force: true });
   await page.waitForSelector('body[data-sheet="plan"]', { timeout: 5000 });
+  // Tabs (not brand) own the top of the expanded sheet
+  await page.waitForSelector(".tabs", { state: "visible", timeout: 5000 });
+  const brandGone = !(await page.locator(".sidebar-header").isVisible().catch(() => false));
+  if (!brandGone) throw new Error("sidebar-header must stay hidden when sheet expands");
   await page.waitForSelector("#originInput", { state: "visible", timeout: 5000 });
   // Poll height (CSP blocks waitForFunction predicates)
   let halfH = peekH;
