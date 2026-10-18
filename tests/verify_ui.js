@@ -157,23 +157,58 @@ async function runVerification() {
     await page.locator('#btnCloseDrawer').click();
     await page.waitForTimeout(500);
 
-    // 4. Test freehand outline Area Selection Tool on Map
-    console.log('4. Activating freehand outline Area Selection Tool...');
+    // 4a. Box area select (default mode)
+    console.log('4a. Activating Box area selection...');
+    await page.locator('#btnAreaModeBox').click();
+    if (!(await page.locator('#btnAreaModeBox').evaluate((el) => el.classList.contains('active')))) {
+      throw new Error('Box mode button should be active');
+    }
     await page.locator('#btnSelectArea').click();
     await page.waitForSelector('#mapModeBanner', { state: 'visible' });
-    console.log('Area select banner is visible.');
-    const bannerText = await page.locator('#mapModeBanner span').textContent();
-    if (!/freehand|outline/i.test(bannerText || '')) {
-      throw new Error(`Expected freehand/outline banner text, got: ${bannerText}`);
+    const boxBanner = await page.locator('#mapModeBannerText').textContent();
+    if (!/selection box|rectangle|box/i.test(boxBanner || '')) {
+      throw new Error(`Expected box banner text, got: ${boxBanner}`);
     }
 
-    // Draw a freehand loop (not a straight box) over Central Valley / SoCal corridor
     const mapBox = await page.locator('#map').boundingBox();
     if (mapBox) {
-      const cx = mapBox.x + mapBox.width * 0.55;
-      const cy = mapBox.y + mapBox.height * 0.55;
-      const rx = mapBox.width * 0.12;
-      const ry = mapBox.height * 0.14;
+      const startX = mapBox.x + mapBox.width * 0.45;
+      const startY = mapBox.y + mapBox.height * 0.45;
+      const endX = mapBox.x + mapBox.width * 0.65;
+      const endY = mapBox.y + mapBox.height * 0.65;
+      console.log(`Dragging box from (${startX}, ${startY}) to (${endX}, ${endY})...`);
+      await page.mouse.move(startX, startY);
+      await page.mouse.down();
+      await page.mouse.move(endX, endY, { steps: 10 });
+      await page.mouse.up();
+      await page.waitForTimeout(2500);
+    }
+    const boxForced = await page.locator('#forcedCountBadge').textContent();
+    console.log(`Forced count after box select: ${boxForced}`);
+    await page.screenshot({ path: path.join(MEDIA_DIR, '03_area_selected_route.png') });
+    console.log('Saved 03_area_selected_route.png');
+
+    // Clear and test freehand as additional option
+    console.log('4b. Switching to Freehand outline mode...');
+    await page.locator('#btnClearForced').click();
+    await page.waitForTimeout(500);
+    await page.locator('#btnAreaModeFreehand').click();
+    if (!(await page.locator('#btnAreaModeFreehand').evaluate((el) => el.classList.contains('active')))) {
+      throw new Error('Freehand mode button should be active');
+    }
+    await page.locator('#btnSelectArea').click();
+    await page.waitForSelector('#mapModeBanner', { state: 'visible' });
+    const freeBanner = await page.locator('#mapModeBannerText').textContent();
+    if (!/freehand|outline/i.test(freeBanner || '')) {
+      throw new Error(`Expected freehand/outline banner text, got: ${freeBanner}`);
+    }
+
+    const mapBox2 = await page.locator('#map').boundingBox();
+    if (mapBox2) {
+      const cx = mapBox2.x + mapBox2.width * 0.55;
+      const cy = mapBox2.y + mapBox2.height * 0.55;
+      const rx = mapBox2.width * 0.12;
+      const ry = mapBox2.height * 0.14;
       const steps = 24;
       console.log(`Drawing freehand outline centered near (${cx}, ${cy})...`);
       await page.mouse.move(cx + rx, cy);
@@ -187,10 +222,9 @@ async function runVerification() {
     }
 
     const updatedForcedBadge = await page.locator('#forcedCountBadge').textContent();
-    console.log(`Updated Forced Count after area select: ${updatedForcedBadge}`);
-
-    await page.screenshot({ path: path.join(MEDIA_DIR, '03_area_selected_route.png') });
-    console.log('Saved 03_area_selected_route.png');
+    console.log(`Updated Forced Count after freehand select: ${updatedForcedBadge}`);
+    await page.screenshot({ path: path.join(MEDIA_DIR, '03b_freehand_area_selected.png') });
+    console.log('Saved 03b_freehand_area_selected.png');
 
     // 5. Switch to Explore Tab and check filters
     console.log('5. Testing Explore Chargers tab...');
