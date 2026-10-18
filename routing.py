@@ -465,6 +465,8 @@ def find_superchargers_along_route(
 
     if not candidates:
         return []
+    if len(coordinates) < 2:
+        return []
 
     # Pre-calculate cumulative distance along polyline vertices
     cum_distances = [0.0]
@@ -481,6 +483,8 @@ def find_superchargers_along_route(
         step = len(coordinates) // 1000 + 1
 
     sampled_indices = list(range(0, len(coordinates) - 1, step))
+    if not sampled_indices:
+        return []
     if sampled_indices[-1] != len(coordinates) - 2:
         sampled_indices.append(len(coordinates) - 2)
 
@@ -679,34 +683,60 @@ def select_min_stops_for_range(
     reserve_range_km = (target_arrival_pct / 100.0) * max_range_km
     usable_initial_range_km = current_range_km - reserve_range_km
 
-    # If forced stops exist, include them and sequence
+    # Seed with forced stops (marked), then add only range-required chargers.
+    simulated_stops: List[Dict[str, Any]] = []
     if forced_stops:
-        all_stops = list(forced_stops)
-        # Check if additional range stops are needed between forced stops
-        # For simplicity in min_stops mode with forced stops:
-        return sequence_stops_efficiently(origin, destination, all_stops)
+        for fs in forced_stops:
+            entry = dict(fs)
+            entry["forced"] = True
+            simulated_stops.append(entry)
+        simulated_stops = sequence_stops_efficiently(origin, destination, simulated_stops)
 
-    if total_dist_km <= usable_initial_range_km:
+    if total_dist_km <= usable_initial_range_km and not simulated_stops:
         return []
 
     current_km = 0.0
     remaining_battery_km = current_range_km
-    simulated_stops = []
+    # Advance along forced stops first so range checks continue past them
+    if simulated_stops:
+        curr_lat, curr_lng = origin
+        for stop in simulated_stops:
+            leg = haversine_km(curr_lat, curr_lng, stop["lat"], stop["lng"])
+            remaining_battery_km = max(0.05 * max_range_km, remaining_battery_km - leg)
+            # Top-up at forced stop (same model as plan_trip quick charge)
+            remaining_battery_km = max(remaining_battery_km, 0.8 * max_range_km)
+            current_km += leg
+            curr_lat, curr_lng = stop["lat"], stop["lng"]
 
     while True:
         dist_to_dest = total_dist_km - current_km
         if remaining_battery_km - dist_to_dest >= reserve_range_km:
             break
 
+        selected_ids = {
+            s.get("id") for s in simulated_stops if s.get("id") is not None
+        }
         max_reachable_km = current_km + (remaining_battery_km - reserve_range_km)
-        reachable = [c for c in eligible_chargers if current_km + 30.0 < c.get("route_progress_km", 0) <= max_reachable_km]
+        reachable = [
+            c for c in eligible_chargers
+            if current_km + 30.0 < c.get("route_progress_km", 0) <= max_reachable_km
+            and c.get("id") not in selected_ids
+        ]
 
         if not reachable:
             emergency_reachable_km = current_km + (remaining_battery_km - (0.08 * max_range_km))
-            reachable = [c for c in eligible_chargers if current_km + 15.0 < c.get("route_progress_km", 0) <= emergency_reachable_km]
+            reachable = [
+                c for c in eligible_chargers
+                if current_km + 15.0 < c.get("route_progress_km", 0) <= emergency_reachable_km
+                and c.get("id") not in selected_ids
+            ]
 
         if not reachable:
-            future = [c for c in eligible_chargers if c.get("route_progress_km", 0) > current_km + 10.0]
+            future = [
+                c for c in eligible_chargers
+                if c.get("route_progress_km", 0) > current_km + 10.0
+                and c.get("id") not in selected_ids
+            ]
             if future:
                 reachable = [future[0]]
             else:
@@ -720,7 +750,9 @@ def select_min_stops_for_range(
             return (progress_ratio * 3.5) + power_bonus + stalls_bonus - detour_penalty
 
         best_charger = max(reachable, key=score_charger)
-        simulated_stops.append(dict(best_charger))
+        entry = dict(best_charger)
+        entry["forced"] = False
+        simulated_stops.append(entry)
 
         current_km = best_charger.get("route_progress_km", current_km + 200)
         remaining_battery_km = (0.80) * max_range_km
@@ -728,7 +760,7 @@ def select_min_stops_for_range(
         if len(simulated_stops) > 15:
             break
 
-    return simulated_stops
+    return sequence_stops_efficiently(origin, destination, simulated_stops) if simulated_stops else []
 
 def plan_trip(
     origin: Tuple[float, float],         # (lat, lng)
@@ -811,7 +843,8 @@ def plan_trip(
         candidate_pool = corridor_chargers
 
     # 4. Stop Selection based on Routing Mode
-    if routing_mode.upper() == "MIN_STOPS" and not resolved_forced:
+    # MIN_STOPS must honor forced chargers without silently switching to Maximizer.
+    if routing_mode.upper() == "MIN_STOPS":
         raw_stops = select_min_stops_for_range(
             eligible_chargers=candidate_pool,
             forced_stops=resolved_forced,

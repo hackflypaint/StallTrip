@@ -694,7 +694,7 @@
       }
 
       try {
-        const results = await Promise.all(jobs);
+        const settled = await Promise.allSettled(jobs);
         if (seq !== this._fetchSeq || !this._enabled) return;
 
         let parkN = 0;
@@ -702,12 +702,19 @@
         let authN = 0;
         let uasN = 0;
         let uasZeroN = 0;
+        let uasAuthN = 0;
         let stadiumN = 0;
+        let failedLayers = 0;
         const suaFc = { type: "FeatureCollection", features: [] };
         const tfrFc = { type: "FeatureCollection", features: [] };
 
-        for (const r of results) {
-          if (!r.gj) continue;
+        for (const outcome of settled) {
+          if (outcome.status !== "fulfilled") {
+            failedLayers += 1;
+            continue;
+          }
+          const r = outcome.value;
+          if (!r || !r.gj) continue;
           if (r.key === "parks") {
             this._layers.parks.clearLayers();
             this._layers.parks.addData(r.gj);
@@ -727,7 +734,8 @@
             this._layers.uasfmNoFly.addData(split.zero);
             this._layers.uasfmAuth.addData(split.auth);
             uasZeroN = split.zero.features.length;
-            uasN = uasZeroN + split.auth.features.length;
+            uasAuthN = split.auth.features.length;
+            uasN = uasZeroN + uasAuthN;
           } else if (r.key === "stadiums") {
             stadiumN = this._renderStadiums(r.gj);
           }
@@ -740,6 +748,7 @@
         });
         noFlyN =
           suaFc.features.length + tfrFc.features.length + stadiumN + uasZeroN;
+        authN += uasAuthN;
 
         if (zoom < MIN_ZOOM_POINTS && this._layers.points) {
           this._layers.points.clearLayers();
@@ -756,7 +765,12 @@
               ? `UASFM ${uasN}${uasZeroN ? ` (${uasZeroN} @0ft)` : ""}`
               : `UASFM @z≥${MIN_ZOOM_UASFM}`,
         };
-        this._setStatus(this._formatStatus(this._lastCounts));
+        const status = this._formatStatus(this._lastCounts);
+        this._setStatus(
+          failedLayers
+            ? `${status} · partial (${failedLayers} layer failed)`
+            : status
+        );
       } catch (err) {
         if (err && err.name === "AbortError") return;
         console.warn("[AirspaceModule] refresh failed", err);

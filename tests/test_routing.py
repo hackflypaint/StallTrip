@@ -146,5 +146,26 @@ class TestTeslaRouting(unittest.TestCase):
         self.assertLessEqual(len(sc_stops), 50)
         self.assertGreaterEqual(len(sc_stops), 1)
 
+    def test_corridor_single_coordinate_returns_empty(self):
+        self.assertEqual(
+            routing.find_superchargers_along_route([(-122.4, 37.7)], corridor_buffer_km=15.0),
+            [],
+        )
+
+    def test_min_stops_keeps_forced_without_maximizer_pack(self):
+        """MIN_STOPS + forced must stay in min-stops path (not Visit Maximizer packing)."""
+        plan = routing.plan_trip(
+            origin=(37.7749, -122.4194),
+            destination=(34.0522, -118.2437),
+            routing_mode="MIN_STOPS",
+            forced_charger_ids=[4298],  # Baker
+            max_stops=20,
+        )
+        self.assertEqual(plan["summary"]["routing_mode"], "MIN_STOPS")
+        sc_stops = [s for s in plan["stops"] if s["type"] == "SUPERCHARGER"]
+        self.assertTrue(any(s.get("id") == 4298 and s.get("forced") for s in sc_stops))
+        # Maximizer with max_stops=20 typically packs many; min+forced should stay leaner
+        self.assertLessEqual(len(sc_stops), 10)
+
 if __name__ == "__main__":
     unittest.main()
