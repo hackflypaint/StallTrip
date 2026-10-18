@@ -440,7 +440,7 @@ body.ui-mobile .map-weather-pill {
 
 body.ui-mobile.live-hud-visible .map-weather-pill,
 body.ui-mobile .map-container:has(#liveDriveHud:not([hidden])) .map-weather-pill {
-  top: calc(54px + var(--safe-top, 0px));
+  top: calc(88px + var(--safe-top, 0px));
 }
 
 body.ui-mobile.sheet-open .map-weather-pill {
@@ -449,7 +449,7 @@ body.ui-mobile.sheet-open .map-weather-pill {
 
 body.ui-mobile.sheet-open.live-hud-visible .map-weather-pill,
 body.ui-mobile.sheet-open .map-container:has(#liveDriveHud:not([hidden])) .map-weather-pill {
-  top: calc(108px + var(--safe-top, 0px));
+  top: calc(140px + var(--safe-top, 0px));
 }
 
 body.ui-mobile.sheet-open .weather-radar-pill {

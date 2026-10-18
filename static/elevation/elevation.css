@@ -290,7 +290,7 @@
 /* Lift desktop map legend, drone airspace legend, and weather radar pill above the elevation strip when active */
 body.elevation-strip-visible:not(.car-shell):not(.ui-mobile) .map-legend,
 body.elevation-strip-visible:not(.car-shell):not(.ui-mobile) .airspace-map-legend {
-  bottom: 164px;
+  bottom: 184px;
   transition: bottom 0.18s ease;
 }
 
@@ -300,7 +300,7 @@ body.elevation-strip-visible.elevation-strip-collapsed:not(.car-shell):not(.ui-m
 }
 
 body.elevation-strip-visible:not(.car-shell):not(.ui-mobile) .weather-radar-pill {
-  bottom: 164px;
+  bottom: 184px;
   transition: bottom 0.18s ease;
 }
 
@@ -339,12 +339,12 @@ body.car-shell .elev-vehicle-select {
 
 body.car-shell.elevation-strip-visible .weather-radar-pill,
 body.car-shell.elevation-strip-visible .airspace-map-legend {
-  bottom: calc(var(--car-sheet-h, 72px) + 140px);
+  bottom: calc(var(--car-sheet-h, 72px) + 162px);
 }
 
 body.car-shell.elevation-strip-visible.elevation-strip-collapsed .weather-radar-pill,
 body.car-shell.elevation-strip-visible.elevation-strip-collapsed .airspace-map-legend {
-  bottom: calc(var(--car-sheet-h, 72px) + 52px);
+  bottom: calc(var(--car-sheet-h, 72px) + 54px);
 }
 
 /* --------------------------------------------------------------------------
@@ -374,7 +374,7 @@ body.ui-mobile .elev-vehicle-select {
 body.ui-mobile.elevation-strip-visible .weather-radar-pill,
 body.ui-mobile.elevation-strip-visible .map-legend,
 body.ui-mobile.elevation-strip-visible .airspace-map-legend {
-  bottom: calc(var(--mobile-plan-h, 48px) + var(--mobile-fab-gap, 12px) + var(--mobile-chrome-bottom, 0px) + 132px);
+  bottom: calc(var(--mobile-plan-h, 48px) + var(--mobile-fab-gap, 12px) + var(--mobile-chrome-bottom, 0px) + 154px);
 }
 
 body.ui-mobile.elevation-strip-visible.elevation-strip-collapsed .weather-radar-pill,
