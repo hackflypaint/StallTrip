@@ -681,6 +681,8 @@ def plan_trip(
     load_superchargers()
     orig_lat, orig_lng = origin
     dest_lat, dest_lng = destination
+    # Clamp corridor stop budget to the same ceiling as the UI (1–50)
+    max_stops = max(1, min(50, int(max_stops)))
 
     # 1. Resolve forced chargers from IDs or objects
     resolved_forced: List[Dict[str, Any]] = []

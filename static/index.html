@@ -124,42 +124,29 @@
                   <option value="10">10 stops</option>
                   <option value="15" selected>15 stops (Recommended)</option>
                   <option value="20">20 stops</option>
-                  <option value="25">25 stops (Rally / Safari)</option>
+                  <option value="25">25 stops</option>
+                  <option value="30">30 stops</option>
+                  <option value="40">40 stops</option>
+                  <option value="50">50 stops (Rally / Safari)</option>
                 </select>
               </div>
             </div>
           </div>
 
-          <!-- Area Selection & Force-Included Chargers -->
+          <!-- Force-included stops (area tools live on the map toolbar) -->
           <div class="forced-section">
             <div class="forced-header">
-              <label><i class="fa-solid fa-vector-square"></i> Force-Include Area / Stops</label>
+              <label><i class="fa-solid fa-star"></i> Force-Included Stops</label>
               <span class="forced-count-badge" id="forcedCountBadge">0 selected</span>
             </div>
-            <p class="section-desc">Draw a box or freehand outline on the map to guarantee those Superchargers are visited. <strong>Clear selection</strong> removes the drawn area and chargers from that draw (individually pinned stops stay); <strong>Clear All</strong> removes every force-include.</p>
-            <div class="area-draw-toggle" role="group" aria-label="Area draw mode">
-              <button type="button" class="area-draw-btn active" id="btnAreaModeBox" title="Rectangle box selection">
-                <i class="fa-solid fa-vector-square"></i> Box
-              </button>
-              <button type="button" class="area-draw-btn" id="btnAreaModeFreehand" title="Freehand outline selection">
-                <i class="fa-solid fa-draw-polygon"></i> Freehand
-              </button>
-            </div>
+            <p class="section-desc">Use <strong>Box</strong> / <strong>Freehand</strong> on the map toolbar (top-right) to force-include stations, or pin any station from its drawer. <strong>Clear All</strong> removes every force-include.</p>
             <div class="forced-actions">
-              <button type="button" class="secondary-btn" id="btnSelectArea">
-                <i class="fa-solid fa-vector-square"></i> <span id="btnSelectAreaText">Select Area on Map</span>
-              </button>
-              <button type="button" class="secondary-btn text-danger" id="btnClearSelection" disabled
-                title="No active area selection to clear"
-                aria-label="Clear selection">
-                <i class="fa-solid fa-eraser"></i> Clear selection
-              </button>
               <button type="button" class="secondary-btn text-danger" id="btnClearForced" style="display:none;">
                 <i class="fa-solid fa-xmark"></i> Clear All
               </button>
             </div>
             <div class="forced-chips-list" id="forcedChipsList">
-              <div class="empty-forced-notice">No area selected. Choose Box or Freehand, then draw on the map — or click any station to force-include it.</div>
+              <div class="empty-forced-notice">No force-included stops. Use Box or Freehand on the map toolbar, or click a station to pin it.</div>
             </div>
           </div>
 
@@ -325,9 +312,23 @@
 
       <!-- Map Floating Controls & Overlays -->
       <div class="map-floating-bar">
-        <button class="map-btn" id="btnMapSelectArea" title="Select rectangle area to force-include Superchargers">
-          <i class="fa-solid fa-vector-square"></i>
-        </button>
+        <div class="map-area-tools" role="group" aria-label="Area selection tools">
+          <button type="button" class="map-btn area-mode-btn active" id="btnAreaModeBox"
+            title="Box area select — draw a rectangle to force-include Superchargers"
+            aria-pressed="true" aria-label="Box area select">
+            <i class="fa-solid fa-vector-square"></i>
+          </button>
+          <button type="button" class="map-btn area-mode-btn" id="btnAreaModeFreehand"
+            title="Freehand area select — draw an outline to force-include Superchargers"
+            aria-pressed="false" aria-label="Freehand area select">
+            <i class="fa-solid fa-draw-polygon"></i>
+          </button>
+          <button type="button" class="map-btn map-btn-danger" id="btnClearSelection" disabled
+            title="No active area selection to clear"
+            aria-label="Clear selection" aria-disabled="true">
+            <i class="fa-solid fa-eraser"></i>
+          </button>
+        </div>
         <button class="map-btn" id="btnMapReset" title="Reset View">
           <i class="fa-solid fa-expand"></i>
         </button>

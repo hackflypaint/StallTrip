@@ -473,45 +473,6 @@ body, html {
   line-height: 1.3;
 }
 
-.area-draw-toggle {
-  display: flex;
-  gap: 6px;
-  background: var(--bg-input);
-  padding: 3px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
-  margin-bottom: 8px;
-}
-
-.area-draw-btn {
-  flex: 1;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 0.74rem;
-  font-weight: 600;
-  padding: 7px 8px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  transition: all 0.2s;
-}
-
-.area-draw-btn:hover {
-  color: #fff;
-  background: var(--bg-tertiary);
-}
-
-.area-draw-btn.active {
-  background: var(--bg-card);
-  color: #fff;
-  border: 1px solid rgba(0, 180, 216, 0.35);
-  box-shadow: var(--shadow-sm);
-}
-
 .forced-actions {
   display: flex;
   flex-wrap: wrap;
@@ -522,12 +483,6 @@ body, html {
 .forced-actions .secondary-btn {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.forced-actions #btnClearSelection:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  pointer-events: none;
 }
 
 .text-danger {
@@ -1179,6 +1134,17 @@ body, html {
   z-index: 1000;
 }
 
+.map-area-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: rgba(26, 30, 36, 0.72);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
+}
+
 .map-btn {
   width: 38px;
   height: 38px;
@@ -1195,10 +1161,38 @@ body, html {
   transition: all 0.2s;
 }
 
+.map-area-tools .map-btn {
+  box-shadow: none;
+}
+
 .map-btn:hover {
   background: var(--tesla-red);
   color: #fff;
   border-color: var(--tesla-red);
+}
+
+.map-btn.area-mode-btn.active {
+  background: rgba(0, 180, 216, 0.2);
+  color: #7dd3fc;
+  border-color: rgba(0, 180, 216, 0.55);
+}
+
+.map-btn.area-mode-btn.drawing {
+  background: #00b4d8;
+  color: #fff;
+  border-color: #00b4d8;
+}
+
+.map-btn.map-btn-danger:hover:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+
+.map-btn:disabled,
+.map-btn[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* Map Legend */

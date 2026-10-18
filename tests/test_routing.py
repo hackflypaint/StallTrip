@@ -134,5 +134,17 @@ class TestTeslaRouting(unittest.TestCase):
         self.assertAlmostEqual(coords[0]["lat"], 37.7749)
         self.assertAlmostEqual(coords[0]["lng"], -122.4194)
 
+    def test_max_stops_clamped_to_fifty(self):
+        """max_stops above UI/backend ceiling (50) must clamp without error."""
+        plan = routing.plan_trip(
+            origin=(37.7749, -122.4194),
+            destination=(34.0522, -118.2437),
+            routing_mode="MAXIMIZE",
+            max_stops=999,
+        )
+        sc_stops = [s for s in plan["stops"] if s["type"] == "SUPERCHARGER"]
+        self.assertLessEqual(len(sc_stops), 50)
+        self.assertGreaterEqual(len(sc_stops), 1)
+
 if __name__ == "__main__":
     unittest.main()

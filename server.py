@@ -150,7 +150,8 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             corridor_buffer = float(data.get("corridor_buffer_km", 30.0))
             min_power = int(data.get("min_power", 0))
             routing_mode = str(data.get("routing_mode", "MAXIMIZE"))
-            max_stops = int(data.get("max_stops", 20))
+            # Ceiling matches UI max corridor stops (Rally / Safari)
+            max_stops = max(1, min(50, int(data.get("max_stops", 20))))
             forced_chargers = data.get("forced_chargers", [])
             forced_charger_ids = data.get("forced_charger_ids", [])
 
