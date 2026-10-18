@@ -210,11 +210,12 @@
   }
 
   function escapeHtml(s) {
-    return String(s)
+    return String(s ?? "")
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   function popupHtml(title, constraintKind, rows) {
@@ -268,6 +269,8 @@
       uasfmConstraint,
       uasfmStyle,
       suaConstraint,
+      escapeHtml,
+      popupHtml,
       buildQueryUrl,
       LAYERS,
       FAA_ORG,

@@ -13,3 +13,14 @@ services:
     environment:
       - PORT=8080
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    # Match non-root HI runtime USER 65532
+    user: "65532:65532"
+    mem_limit: 512m
+    pids_limit: 256

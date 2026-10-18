@@ -93,6 +93,21 @@ function run() {
   assert(suaUrl.includes("TYPE_CODE"), "SUA type filter encoded");
   assert(!decodeURIComponent(suaUrl).includes("MOA"), "MOA not requested");
 
+  const xss = t.popupHtml(
+    '<img src=x onerror=alert(1)>',
+    t.CONSTRAINT.noFly,
+    [["Class", "<script>alert(1)</script>"]]
+  );
+  assert(!xss.includes("<script>"), "popup escapes script tags");
+  assert(!xss.includes("<img"), "popup escapes img tags");
+  assert(xss.includes("&lt;script&gt;"), "popup encodes angle brackets");
+  assert(xss.includes("&lt;img"), "popup encodes img opener");
+  assert(t.escapeHtml('"') === "&quot;", "escapeHtml quotes");
+
+  // CSP allowlist for FAA + NPS must stay aligned with server.py connect-src
+  assert(t.FAA_ORG.startsWith("https://services6.arcgis.com"), "FAA host");
+  assert(t.NPS_ORG.startsWith("https://services1.arcgis.com"), "NPS host");
+
   console.log("test_airspace.js: OK");
 }
 
