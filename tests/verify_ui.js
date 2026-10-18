@@ -72,6 +72,45 @@ async function runVerification() {
     await page.screenshot({ path: path.join(MEDIA_DIR, '01_visit_maximizer_route.png') });
     console.log('Saved 01_visit_maximizer_route.png');
 
+    // 2a. Strategy toggle multiple times must replan (Max → Min → Max)
+    console.log('2a. Toggling route strategy Max → Min → Max and verifying replan...');
+    const stopsAfterMax = parseInt(await page.locator('#statStops').textContent(), 10);
+    await page.locator('#btnModeMinStops').click();
+    await page.waitForFunction(() => {
+      const btn = document.getElementById('btnPlanRoute');
+      return btn && !btn.disabled;
+    }, { timeout: 40000 });
+    await page.waitForTimeout(1500);
+    const modeMin = await page.evaluate(() => window.appState.routingMode);
+    if (modeMin !== 'MIN_STOPS') {
+      throw new Error(`Expected MIN_STOPS after toggle, got ${modeMin}`);
+    }
+    const stopsAfterMin = parseInt(await page.locator('#statStops').textContent(), 10);
+    console.log(`  Stops after Max: ${stopsAfterMax}, after Min: ${stopsAfterMin}`);
+    if (!(stopsAfterMin < stopsAfterMax)) {
+      throw new Error(`Min Stops should reduce stop count (${stopsAfterMin} vs Max ${stopsAfterMax})`);
+    }
+    await page.locator('#btnModeMaximize').click();
+    await page.waitForFunction(() => {
+      const btn = document.getElementById('btnPlanRoute');
+      return btn && !btn.disabled;
+    }, { timeout: 40000 });
+    await page.waitForTimeout(1500);
+    const modeMaxAgain = await page.evaluate(() => window.appState.routingMode);
+    if (modeMaxAgain !== 'MAXIMIZE') {
+      throw new Error(`Expected MAXIMIZE after toggle back, got ${modeMaxAgain}`);
+    }
+    const stopsBack = parseInt(await page.locator('#statStops').textContent(), 10);
+    if (stopsBack <= 1) {
+      throw new Error(`Expected multiple stops after returning to Maximize, got ${stopsBack}`);
+    }
+    // Max corridor stops ceiling includes 50
+    const maxOpt = await page.locator('#maxStopsSelect option[value="50"]').count();
+    if (maxOpt < 1) {
+      throw new Error('maxStopsSelect must include option value 50');
+    }
+    console.log('  Strategy toggle replan OK; maxStops=50 option present');
+
     // 2b. Open Layers panel → Topographic basemap
     console.log('2b. Opening Layers panel and selecting Topographic...');
     await page.locator('#btnToggleLayers').click();
@@ -157,14 +196,22 @@ async function runVerification() {
     await page.locator('#btnCloseDrawer').click();
     await page.waitForTimeout(500);
 
-    // 4a. Box area select (default mode)
-    console.log('4a. Activating Box area selection...');
+    // 4a. Box area select from top-right map toolbar
+    console.log('4a. Activating Box area selection from top-right toolbar...');
+    // Ensure area tools live on the floating bar (not left sidebar)
+    const areaToolsInBar = await page.locator('.map-floating-bar #btnAreaModeBox').count();
+    const areaToolsInSidebar = await page.locator('.sidebar #btnAreaModeBox').count();
+    if (areaToolsInBar < 1 || areaToolsInSidebar > 0) {
+      throw new Error('Box/Freehand area tools must be on map floating bar, not sidebar');
+    }
     await page.locator('#btnAreaModeBox').click();
+    await page.waitForSelector('#mapModeBanner', { state: 'visible' });
     if (!(await page.locator('#btnAreaModeBox').evaluate((el) => el.classList.contains('active')))) {
       throw new Error('Box mode button should be active');
     }
-    await page.locator('#btnSelectArea').click();
-    await page.waitForSelector('#mapModeBanner', { state: 'visible' });
+    if (!(await page.locator('#btnAreaModeBox').evaluate((el) => el.classList.contains('drawing')))) {
+      throw new Error('Box mode button should show drawing state');
+    }
     const boxBanner = await page.locator('#mapModeBannerText').textContent();
     if (!/selection box|rectangle|box/i.test(boxBanner || '')) {
       throw new Error(`Expected box banner text, got: ${boxBanner}`);
@@ -188,16 +235,47 @@ async function runVerification() {
     await page.screenshot({ path: path.join(MEDIA_DIR, '03_area_selected_route.png') });
     console.log('Saved 03_area_selected_route.png');
 
+    // 4a2. Clear selection (top-right) restores pan/zoom and drops area-forced chargers
+    console.log('4a2. Clicking Clear selection on map toolbar...');
+    const clearSel = page.locator('.map-floating-bar #btnClearSelection');
+    if (await clearSel.isDisabled()) {
+      // Still valid if box found no chargers — enable by entering draw mode
+      await page.locator('#btnAreaModeBox').click();
+      await page.waitForSelector('#mapModeBanner', { state: 'visible' });
+    }
+    await clearSel.click();
+    await page.waitForTimeout(800);
+    const afterClearBadge = await page.locator('#forcedCountBadge').textContent();
+    console.log(`Forced count after Clear selection: ${afterClearBadge}`);
+    const stillDrawing = await page.locator('#mapModeBanner').isVisible();
+    if (stillDrawing) {
+      throw new Error('mapModeBanner should be hidden after Clear selection');
+    }
+    const mapDragging = await page.evaluate(() => {
+      return !!(window.appState && window.appState.map && window.appState.map.dragging.enabled());
+    });
+    if (!mapDragging) {
+      throw new Error('Map dragging should be re-enabled after Clear selection');
+    }
+    const areaIdsLeft = await page.evaluate(() => window.appState.areaForcedIds.size);
+    if (areaIdsLeft !== 0) {
+      throw new Error(`Expected areaForcedIds empty after Clear selection, got ${areaIdsLeft}`);
+    }
+    await page.screenshot({ path: path.join(MEDIA_DIR, '03a_clear_selection.png') });
+    console.log('Saved 03a_clear_selection.png');
+
     // Clear and test freehand as additional option
     console.log('4b. Switching to Freehand outline mode...');
-    await page.locator('#btnClearForced').click();
-    await page.waitForTimeout(500);
+    const clearAllVisible = await page.locator('#btnClearForced').isVisible();
+    if (clearAllVisible) {
+      await page.locator('#btnClearForced').click();
+      await page.waitForTimeout(500);
+    }
     await page.locator('#btnAreaModeFreehand').click();
+    await page.waitForSelector('#mapModeBanner', { state: 'visible' });
     if (!(await page.locator('#btnAreaModeFreehand').evaluate((el) => el.classList.contains('active')))) {
       throw new Error('Freehand mode button should be active');
     }
-    await page.locator('#btnSelectArea').click();
-    await page.waitForSelector('#mapModeBanner', { state: 'visible' });
     const freeBanner = await page.locator('#mapModeBannerText').textContent();
     if (!/freehand|outline/i.test(freeBanner || '')) {
       throw new Error(`Expected freehand/outline banner text, got: ${freeBanner}`);
@@ -225,6 +303,28 @@ async function runVerification() {
     console.log(`Updated Forced Count after freehand select: ${updatedForcedBadge}`);
     await page.screenshot({ path: path.join(MEDIA_DIR, '03b_freehand_area_selected.png') });
     console.log('Saved 03b_freehand_area_selected.png');
+
+    // Mid-draw Clear selection cancels freehand without leaving draw mode stuck
+    console.log('4c. Starting freehand draw then Clear selection mid-stroke...');
+    await page.locator('#btnAreaModeFreehand').click();
+    await page.waitForSelector('#mapModeBanner', { state: 'visible' });
+    const mapBox3 = await page.locator('#map').boundingBox();
+    if (mapBox3) {
+      await page.mouse.move(mapBox3.x + mapBox3.width * 0.4, mapBox3.y + mapBox3.height * 0.4);
+      await page.mouse.down();
+      await page.mouse.move(mapBox3.x + mapBox3.width * 0.5, mapBox3.y + mapBox3.height * 0.45, { steps: 5 });
+      // Do not mouse.up — abandon with Clear selection on toolbar
+      await page.locator('.map-floating-bar #btnClearSelection').click();
+      await page.waitForTimeout(400);
+      await page.mouse.up().catch(() => {});
+    }
+    if (await page.locator('#mapModeBanner').isVisible()) {
+      throw new Error('Draw mode should end when Clear selection is clicked mid-stroke');
+    }
+    const shapeLeft = await page.evaluate(() => !!window.appState.selectionShape);
+    if (shapeLeft) {
+      throw new Error('selectionShape should be null after Clear selection mid-draw');
+    }
 
     // 5. Switch to Explore Tab and check filters
     console.log('5. Testing Explore Chargers tab...');
