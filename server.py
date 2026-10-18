@@ -631,7 +631,7 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             # OSM uses bare tile.openstreetmap.org (wildcard *.tile. does not match that host).
             "img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org "
             "https://*.tile.opentopomap.org https://unpkg.com https://www.explorefall.com; "
-            "connect-src 'self' https://services6.arcgis.com https://services1.arcgis.com https://*.arcgis.com; "
+            "connect-src 'self' https://services6.arcgis.com https://services1.arcgis.com https://*.arcgis.com https://api.open-meteo.com; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
             "form-action 'self'",

@@ -617,6 +617,9 @@ function initMap() {
   if (!isMobileShell()) {
     mountOptionalOverlays();
   }
+  if (window.ElevationModule) {
+    window.ElevationModule.mount({ map: state.map });
+  }
 
   setupLiveLocationLifecycle();
 
@@ -2053,6 +2056,9 @@ function renderRoutePlan(plan) {
 
   // 5. Render Timeline Itinerary
   renderTimeline(stops);
+
+  // 6. Notify optional modules (e.g. Elevation & Grade Profile Strip)
+  window.dispatchEvent(new CustomEvent("routePlanned", { detail: { plan } }));
 }
 
 function renderTimeline(stops) {
