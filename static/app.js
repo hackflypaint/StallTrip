@@ -6,6 +6,24 @@
  * Optional drone flight constraints: see static/airspace/ (AirspaceModule) — removable.
  */
 
+/**
+ * Destination arrival SOC tone vs min-arrival reserve (slider).
+ * ok ≥ target · warn ≥ half target (floor 5) · danger below that.
+ * Exported on window for unit tests.
+ */
+function destinationBatteryTone(pct, targetPct) {
+  const p = Number(pct);
+  if (!Number.isFinite(p)) return "unknown";
+  const tRaw = Number(targetPct);
+  const target = Number.isFinite(tRaw) && tRaw > 0 ? tRaw : 15;
+  if (p >= target) return "ok";
+  if (p >= Math.max(5, target * 0.5)) return "warn";
+  return "danger";
+}
+if (typeof window !== "undefined") {
+  window.destinationBatteryTone = destinationBatteryTone;
+}
+
 // Application State
 const state = {
   origin: null,        // { name, lat, lng }
@@ -2063,12 +2081,28 @@ function renderTimeline(stops) {
       });
     } else if (s.type === "DESTINATION") {
       item.className = "timeline-item dest";
+      const targetArrival = parseFloat(
+        document.getElementById("targetArrival")?.value || "15"
+      );
+      const tone = destinationBatteryTone(s.battery_pct, targetArrival);
+      const toneClass =
+        tone === "ok"
+          ? "battery-ok"
+          : tone === "warn"
+            ? "battery-warn"
+            : "battery-danger";
+      const toneIcon =
+        tone === "ok"
+          ? "fa-battery-full"
+          : tone === "warn"
+            ? "fa-battery-half"
+            : "fa-battery-quarter";
       item.innerHTML = `
         <div class="timeline-marker"><i class="fa-solid fa-flag-checkered"></i></div>
         <div class="timeline-content">
           <div class="item-top">
             <span class="item-name">${escapeHtml(state.destination.name)}</span>
-            <span class="item-badge" style="background:rgba(232,33,39,0.15); color:var(--tesla-red);"><i class="fa-solid fa-battery-half"></i> ~${s.battery_pct}%</span>
+            <span class="item-badge ${toneClass}" title="Arrival reserve target ${escapeHtml(targetArrival)}%"><i class="fa-solid ${toneIcon}"></i> ~${escapeHtml(s.battery_pct)}%</span>
           </div>
           <div class="item-details">
             <span>Trip destination</span>

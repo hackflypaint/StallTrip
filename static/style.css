@@ -818,6 +818,25 @@ body, html {
   font-weight: 600;
 }
 
+/* Destination arrival SOC — not always danger-red */
+.item-badge.battery-ok {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-green);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.item-badge.battery-warn {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--accent-orange);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.item-badge.battery-danger {
+  background: var(--tesla-red-subtle);
+  color: var(--tesla-red);
+  border: 1px solid rgba(232, 33, 39, 0.35);
+}
+
 .badge-charge {
   background: var(--tesla-red-subtle);
   color: var(--tesla-red);
