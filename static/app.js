@@ -21,7 +21,8 @@ const state = {
   forcedChargers: new Map(), // Map<id, charger>
   areaSelectMode: false,
   dragStartLatLng: null,
-  selectionRect: null,
+  selectionShape: null, // freehand polyline / finished polygon
+  freehandPoints: [],
   baseLayers: null,
   activeBasemap: "streets",
   layersPanelOpen: false,
@@ -338,62 +339,104 @@ function setRoutingMode(mode) {
   }
 }
 
-// Map Area Drag-Selection Implementation
-function setupMapAreaSelection() {
-  const mapContainer = document.getElementById("map");
+/** Ray-casting point-in-polygon (lat/lng rings as [lat, lng][]). */
+function pointInPolygon(lat, lng, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const yi = ring[i].lat;
+    const xi = ring[i].lng;
+    const yj = ring[j].lat;
+    const xj = ring[j].lng;
+    const intersect =
+      yi > lat !== yj > lat &&
+      lng < ((xj - xi) * (lat - yi)) / (yj - yi + 0.0) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
 
+function clearSelectionShape() {
+  if (state.selectionShape) {
+    state.map.removeLayer(state.selectionShape);
+    state.selectionShape = null;
+  }
+  state.freehandPoints = [];
+  state.dragStartLatLng = null;
+}
+
+// Freehand outline force-include (draw a path; closes to a polygon on mouseup)
+function setupMapAreaSelection() {
   state.map.on("mousedown", (e) => {
     if (!state.areaSelectMode) return;
-    if (e.originalEvent.button !== 0) return; // Left click only
+    if (e.originalEvent.button !== 0) return;
 
+    clearSelectionShape();
     state.dragStartLatLng = e.latlng;
-    if (state.selectionRect) {
-      state.map.removeLayer(state.selectionRect);
-      state.selectionRect = null;
+    state.freehandPoints = [e.latlng];
+    state.selectionShape = L.polyline(state.freehandPoints, {
+      color: "#00b4d8",
+      weight: 2.5,
+      dashArray: "4, 6",
+      opacity: 0.95,
+    }).addTo(state.map);
+  });
+
+  state.map.on("mousemove", (e) => {
+    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionShape) return;
+    const last = state.freehandPoints[state.freehandPoints.length - 1];
+    // Throttle: only add points that moved enough (~pixel-ish in geo degrees)
+    if (last && Math.abs(last.lat - e.latlng.lat) < 0.001 && Math.abs(last.lng - e.latlng.lng) < 0.001) {
+      return;
+    }
+    state.freehandPoints.push(e.latlng);
+    state.selectionShape.setLatLngs(state.freehandPoints);
+  });
+
+  state.map.on("mouseup", async (e) => {
+    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionShape) return;
+
+    if (e.latlng) state.freehandPoints.push(e.latlng);
+
+    // Need a real outline (not a click)
+    if (state.freehandPoints.length < 6) {
+      clearSelectionShape();
+      return;
     }
 
-    state.selectionRect = L.rectangle([e.latlng, e.latlng], {
+    // Close the ring and promote polyline → filled polygon
+    const ring = state.freehandPoints.slice();
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (first.lat !== last.lat || first.lng !== last.lng) {
+      ring.push(L.latLng(first.lat, first.lng));
+    }
+
+    state.map.removeLayer(state.selectionShape);
+    state.selectionShape = L.polygon(ring, {
       color: "#00b4d8",
       weight: 2,
       dashArray: "6, 6",
       fillColor: "#00b4d8",
       fillOpacity: 0.18,
     }).addTo(state.map);
-  });
 
-  state.map.on("mousemove", (e) => {
-    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionRect) return;
-    const bounds = L.latLngBounds(state.dragStartLatLng, e.latlng);
-    state.selectionRect.setBounds(bounds);
-  });
+    const bounds = state.selectionShape.getBounds();
+    const minLat = bounds.getSouth();
+    const maxLat = bounds.getNorth();
+    const minLng = bounds.getWest();
+    const maxLng = bounds.getEast();
 
-  state.map.on("mouseup", async (e) => {
-    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionRect) return;
-
-    const bounds = state.selectionRect.getBounds();
-    const minLat = Math.min(bounds.getSouth(), bounds.getNorth());
-    const maxLat = Math.max(bounds.getSouth(), bounds.getNorth());
-    const minLng = Math.min(bounds.getWest(), bounds.getEast());
-    const maxLng = Math.max(bounds.getWest(), bounds.getEast());
-
-    // Small click without drag: cancel or ignore
-    if (Math.abs(maxLat - minLat) < 0.005 && Math.abs(maxLng - minLng) < 0.005) {
-      if (state.selectionRect) {
-        state.map.removeLayer(state.selectionRect);
-        state.selectionRect = null;
-      }
-      state.dragStartLatLng = null;
-      return;
-    }
-
-    // Query chargers in this bounding box
     try {
-      const resp = await fetch(`/api/superchargers?min_lat=${minLat}&max_lat=${maxLat}&min_lng=${minLng}&max_lng=${maxLng}&status=OPEN&limit=500`);
+      const resp = await fetch(
+        `/api/superchargers?min_lat=${minLat}&max_lat=${maxLat}&min_lng=${minLng}&max_lng=${maxLng}&status=OPEN&limit=500`
+      );
       const data = await resp.json();
-      const chargers = data.superchargers || [];
+      const chargers = (data.superchargers || []).filter((c) =>
+        pointInPolygon(c.lat, c.lng, ring)
+      );
 
       if (chargers.length === 0) {
-        alert("No open Superchargers found inside the selected rectangle. Try selecting a wider area.");
+        alert("No open Superchargers found inside the drawn outline. Try a larger freehand area.");
       } else {
         chargers.forEach((c) => {
           state.forcedChargers.set(c.id, c);
@@ -424,7 +467,7 @@ function activateAreaSelectMode() {
   state.map.dragging.disable();
   document.getElementById("map").style.cursor = "crosshair";
   document.getElementById("mapModeBanner").style.display = "flex";
-  document.getElementById("btnSelectAreaText").innerText = "Drawing Box...";
+  document.getElementById("btnSelectAreaText").innerText = "Drawing Outline...";
   document.getElementById("btnMapSelectArea").style.background = "#00b4d8";
   document.getElementById("btnMapSelectArea").style.color = "#fff";
 }
@@ -435,7 +478,7 @@ function deactivateAreaSelectMode() {
   state.dragStartLatLng = null;
   document.getElementById("map").style.cursor = "";
   document.getElementById("mapModeBanner").style.display = "none";
-  document.getElementById("btnSelectAreaText").innerText = "Select Area on Map";
+  document.getElementById("btnSelectAreaText").innerText = "Draw Outline on Map";
   document.getElementById("btnMapSelectArea").style.background = "";
   document.getElementById("btnMapSelectArea").style.color = "";
 }
@@ -451,10 +494,7 @@ function toggleForcedCharger(charger) {
 
 function clearForcedChargers() {
   state.forcedChargers.clear();
-  if (state.selectionRect) {
-    state.map.removeLayer(state.selectionRect);
-    state.selectionRect = null;
-  }
+  clearSelectionShape();
   updateForcedChargersUI();
   if (state.origin && state.destination && state.activePlan) {
     planRoute();
@@ -470,7 +510,7 @@ function updateForcedChargersUI() {
   chipsList.innerHTML = "";
 
   if (count === 0) {
-    chipsList.innerHTML = `<div class="empty-forced-notice">No area selected. Click "Select Area on Map" to draw a box or click any station to force-include it.</div>`;
+    chipsList.innerHTML = `<div class="empty-forced-notice">No area selected. Click "Draw Outline on Map" to freehand-select stations, or click any station to force-include it.</div>`;
   } else {
     state.forcedChargers.forEach((c) => {
       const chip = document.createElement("div");
