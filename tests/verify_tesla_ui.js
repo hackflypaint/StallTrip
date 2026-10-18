@@ -108,12 +108,23 @@ async function runProfile(browser, profile) {
   await page.locator("#touchPad.hit").waitFor({ timeout: 5000 });
   await shot("probe");
 
-  console.log("1. Load planner — require CAR MODE...");
-  await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded", timeout: 20000 });
+  console.log("1. Load canonical /tesla — require CAR MODE...");
+  await page.goto(`${BASE}/tesla`, { waitUntil: "domcontentloaded", timeout: 20000 });
   await page.waitForSelector("body.car-shell", { timeout: 8000 });
   await page.waitForSelector('body[data-sheet="peek"]', { timeout: 5000 });
   await page.waitForSelector("#carModeBadge", { state: "visible", timeout: 5000 });
   await page.waitForSelector("#carPresetRow .preset-tag", { timeout: 5000 });
+
+  const onTeslaPath = await page.evaluate(() => {
+    try {
+      return typeof window.isTeslaPath === "function" && window.isTeslaPath();
+    } catch (_) {
+      return (location.pathname || "").replace(/\/+$/, "") === "/tesla";
+    }
+  });
+  if (!onTeslaPath) {
+    throw new Error("expected /tesla path for canonical car entry");
+  }
 
   const badgeText = (await page.locator("#carModeBadge").textContent()) || "";
   if (!/CAR MODE/i.test(badgeText)) {

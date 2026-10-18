@@ -183,15 +183,16 @@ node tests/verify_mobile.js
 Soft UA redirect (`MOBILE_UA_REDIRECT`) remains **disabled** in Docker compose unless explicitly set. Phones use **`/mobile`** (separate from desktop and Tesla car shell).
 
 ### Tesla landscape suite (in-car profiles)
-Chromium with `deviceScaleFactor: 1.53`, `hasTouch: true`, viewports **773×601** and **1254×784**. Smoke: probe page → preset plan → drawer → box select → layers. Screenshots go to the TESLA Project store `media/tesla-emulation/` when run:
+Chromium with `deviceScaleFactor: 1.53`, `hasTouch: true`, viewports **773×601** and **1254×784**. Smoke: **`/tesla`** (car mode) → preset plan → drawer → box select → layers (+ `/tesla-probe`). Screenshots go to the TESLA Project store `media/tesla-emulation/car-shell/` when run:
 ```bash
 # requires: npm install playwright && server on :8080 (or let the script start it)
 node tests/verify_tesla_ui.js
 ```
 
-### Tesla browser probe
-In-car fingerprint page (UA, Chromium major, viewport/screen, DPR, touch, hover/pointer MQs, geolocation attempt):
-- `GET /tesla-probe` (also `/tesla-probe.html`)
+### Tesla in-car entry + probe
+- **Canonical car planner:** `GET /tesla` — map-first car shell ON (bookmark over HTTPS/ngrok).
+- Optional on `/`: `?car=1`. Phone shell: `/mobile` (separate).
+- **Fingerprint probe:** `GET /tesla-probe` (also `/tesla-probe.html`) — UA, Chromium, viewport/screen, DPR, touch, MQs, geolocation.
 - Needs **public HTTPS** in the car — LAN/localhost are blocked (see Project store `docs/https-car-access.md`).
 
 ---

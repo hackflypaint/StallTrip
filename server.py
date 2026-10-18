@@ -128,6 +128,7 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "status": "healthy",
                 "service": "Tesla Supercharger Route Planner",
                 "mobile_shell": "/mobile",
+                "tesla_shell": "/tesla",
                 "cost_profile": "lean" if cost_profile_lean() else "default",
                 "limits": {
                     "geocode_per_min": GEOCODE_RATE_LIMIT,
@@ -192,8 +193,10 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         return False
 
     def _map_spa_path(self, path: str) -> None:
-        """Rewrite mobile + unknown paths onto index.html (same SPA)."""
-        if path in ("/mobile", "/mobile/", "/") or not self._static_file_exists(path):
+        """Rewrite mobile / tesla + unknown paths onto index.html (same SPA)."""
+        if path in ("/mobile", "/mobile/", "/tesla", "/tesla/", "/") or not self._static_file_exists(
+            path
+        ):
             self.path = "/index.html"
 
     def do_POST(self):
@@ -681,6 +684,8 @@ def run_server(port: int = PORT):
         print(f"  Tesla Supercharger Route Planner on port {port}")
         print(f"  Desktop:  http://localhost:{port}/")
         print(f"  Mobile:   http://localhost:{port}/mobile")
+        print(f"  Tesla:    http://localhost:{port}/tesla")
+        print(f"  Probe:    http://localhost:{port}/tesla-probe")
         print(f"  Cost:     profile={profile}  plans={PLAN_RATE_LIMIT}/min  "
               f"geocode={GEOCODE_RATE_LIMIT}/min  concurrent={MAX_CONCURRENT_PLANS}")
         print("============================================================")
