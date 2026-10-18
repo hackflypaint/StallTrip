@@ -1882,8 +1882,8 @@ body.ui-mobile {
   --vv-bottom: 0px;
   --mobile-chrome-bottom: calc(var(--safe-bottom) + var(--vv-bottom));
   --mobile-plan-h: 52px;
-  --mobile-fab-gap: 12px;
-  --mobile-sheet-h: min(48dvh, 400px);
+  --mobile-fab-gap: 16px;
+  --mobile-sheet-h: min(46dvh, 380px);
 }
 
 body.ui-mobile .app-container {
@@ -1895,6 +1895,7 @@ body.ui-mobile .app-container {
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
   box-sizing: border-box;
+  position: relative;
 }
 
 body.ui-mobile .map-container {
@@ -1926,12 +1927,13 @@ body.ui-mobile.sheet-open .sidebar {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  /* Keep Destination / CTAs above Safari bottom chrome while scrolling */
-  padding-bottom: calc(20px + var(--mobile-chrome-bottom));
+  /* Lift sheet above Safari toolbar so Destination is not clipped */
+  margin-bottom: var(--mobile-chrome-bottom);
+  padding-bottom: 28px;
   box-sizing: border-box;
 }
 
-/* Map-first: Plan sits above home indicator + Safari toolbar overlay */
+/* Map-first: Plan clears home indicator + Safari toolbar overlay */
 body.ui-mobile .mobile-sheet-toggle {
   display: inline-flex;
   align-items: center;

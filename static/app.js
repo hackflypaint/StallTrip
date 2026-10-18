@@ -105,7 +105,8 @@ function updateMobileViewportInsets() {
   if (vv) {
     overlay = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
   }
-  document.documentElement.style.setProperty("--vv-bottom", `${overlay}px`);
+  // Set on body — body.ui-mobile owns --vv-bottom; html inheritance loses to that rule.
+  document.body.style.setProperty("--vv-bottom", `${overlay}px`);
 }
 
 window.updateMobileViewportInsets = updateMobileViewportInsets;
