@@ -24,7 +24,7 @@ Open the **Layers** button (layer-group icon on the map toolbar) for basemaps an
 Lives in a **removable** module under `static/airspace/` (see that folder’s `README.md`).
 
 - **Purpose:** show whether flight is typically **no-fly**, **authorization required**, or unconstrained — not a LAANC approval tool.
-- **Class toggles:** under Drone flight, **No-fly**, **National park (no-fly)**, and **Auth required** are independently show/hide; Restricted (R) SUA is **hard no-fly**.
+- **Class toggles:** under Drone flight, **Do Not Fly**, **National park**, and **Fly with Approval** are independently show/hide; Restricted (R) SUA is **hard no-fly**. Visual language mirrors Autopylot (amber UASFM grids + ceiling labels, red blocking, purple→red parks) using public FAA/NPS data only.
 - **Sources:** FAA FeatureServers (`Class_Airspace` B/C/D, Prohibited/Restricted SUA, `National_Defense_Airspace_TFR_Areas`, `FAA_UAS_FacilityMap_Data`, `Stadiums`) plus official NPS Land Resources boundaries (`…/fBc8EJBxQRMcHlei/…/NPS_Land_Resources_Division_Boundary_and_Tract_Data_Service/FeatureServer/2`). Hubs: [ADDS](https://adds-faa.opendata.arcgis.com/) · [UDDS](https://udds-faa.opendata.arcgis.com/).
 - **Not used:** Autopylot private APIs; airport markers; MOA/Warning SUA chrome.
 - **Performance:** fetches only when master Show is on; min zoom 7 (parks/SUA/Class/TFRs), 9 (UASFM), 8 (stadium points); debounced + abortable.
@@ -173,6 +173,14 @@ Runs end-to-end automated UI checks including Visit Maximizer calculation, drawe
 ```bash
 node tests/verify_ui.js
 ```
+
+### Mobile shell smoke (`/mobile`)
+Phone viewport Playwright checks for map-first shell, Plan sheet, SF→LA plan, and default-off UA redirect:
+```bash
+# requires Chrome + playwright (npm install --no-save playwright)
+node tests/verify_mobile.js
+```
+Soft UA redirect (`MOBILE_UA_REDIRECT`) remains **disabled** in Docker compose unless explicitly set. Phones use **`/mobile`** (separate from desktop and Tesla car shell).
 
 ### Tesla landscape suite (in-car profiles)
 Chromium with `deviceScaleFactor: 1.53`, `hasTouch: true`, viewports **773×601** and **1254×784**. Smoke: probe page → preset plan → drawer → box select → layers. Screenshots go to the TESLA Project store `media/tesla-emulation/` when run:

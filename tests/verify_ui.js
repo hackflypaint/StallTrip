@@ -190,7 +190,7 @@ async function runVerification() {
       const el = document.getElementById('airspaceStatus');
       if (!el) return false;
       const t = el.textContent || '';
-      return /No-fly\s+\d+/.test(t) || /Auth\s+\d+/.test(t) || /Parks\s+\d+/.test(t) || /UASFM\s+\d+/.test(t);
+      return /Do Not Fly\s+\d+/.test(t) || /Approval\s+\d+/.test(t) || /No-fly\s+\d+/.test(t) || /Auth\s+\d+/.test(t) || /Parks\s+\d+/.test(t) || /UASFM\s+\d+/.test(t);
     }, { timeout: 25000 });
 
     const airspaceStatus = await page.locator('#airspaceStatus').textContent();

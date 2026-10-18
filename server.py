@@ -7,6 +7,7 @@ Zero extra third-party dependencies: Built with Python's high performance standa
 import http.server
 import json
 import os
+import re
 import socketserver
 import sys
 import threading
@@ -20,28 +21,22 @@ import routing
 PORT = int(os.environ.get("PORT", 8080))
 STATIC_DIR = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"))
 
-# Request / response hardening limits
-MAX_BODY_BYTES = 256 * 1024  # 256 KiB
-MAX_SUPERCHARGER_LIMIT = 500
-DEFAULT_SUPERCHARGER_LIMIT = 250
-MAX_FORCED_CHARGERS = 100
-MAX_ROUTE_COORDINATES = 2000
-MAX_GEOCODE_QUERY_LEN = 200
-GEOCODE_RATE_LIMIT = 30  # requests
-GEOCODE_RATE_WINDOW_SEC = 60.0
-MAX_CORRIDOR_BUFFER_KM = 100.0
-MAX_GEOCODE_TRACKED_IPS = 10_000
-PLAN_RATE_LIMIT = 10  # heavy OSRM plans per IP per window
-PLAN_RATE_WINDOW_SEC = 60.0
-MAX_CONCURRENT_PLANS = 4
-REQUEST_SOCKET_TIMEOUT_SEC = 30
+# Soft mobile UA redirect is OFF by default. Prefer explicit /mobile for tests & bookmarks.
+# Enable with MOBILE_UA_REDIRECT=1 only when you want phones on / to land on the mobile shell.
+_MOBILE_UA_RE = re.compile(r"Mobile|Android|iPhone|iPad|iPod", re.IGNORECASE)
 
-# Simple in-memory rate limiters: ip -> (window_start, count)
-_geocode_hits: Dict[str, Tuple[float, int]] = {}
-_plan_hits: Dict[str, Tuple[float, int]] = {}
-_geocode_lock = threading.Lock()
-_plan_lock = threading.Lock()
-_plan_semaphore = threading.Semaphore(MAX_CONCURRENT_PLANS)
+
+def mobile_ua_redirect_enabled() -> bool:
+    return os.environ.get("MOBILE_UA_REDIRECT", "").strip().lower() in ("1", "true", "yes")
+
+
+def looks_like_mobile_ua(user_agent: str) -> bool:
+    return bool(user_agent and _MOBILE_UA_RE.search(user_agent))
+
+
+def cost_profile_lean() -> bool:
+    """HI-friendly lean profile: tighter upstream geo/plan budgets."""
+    return os.environ.get("COST_PROFILE", "").strip().lower() in ("lean", "low", "cheap")
 
 
 def _clamp_int(value: Any, default: int, lo: int, hi: int) -> int:
@@ -58,6 +53,42 @@ def _clamp_float(value: Any, default: float, lo: float, hi: float) -> float:
     except (TypeError, ValueError):
         n = default
     return max(lo, min(hi, n))
+
+
+def _env_int(name: str, default: int, lo: int, hi: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return _clamp_int(default, default, lo, hi)
+    return _clamp_int(raw, default, lo, hi)
+
+
+# Request / response hardening limits
+MAX_BODY_BYTES = 256 * 1024  # 256 KiB
+MAX_SUPERCHARGER_LIMIT = 500
+DEFAULT_SUPERCHARGER_LIMIT = 250
+MAX_FORCED_CHARGERS = 100
+MAX_ROUTE_COORDINATES = 2000
+MAX_GEOCODE_QUERY_LEN = 200
+MAX_CORRIDOR_BUFFER_KM = 100.0
+MAX_GEOCODE_TRACKED_IPS = 10_000
+REQUEST_SOCKET_TIMEOUT_SEC = 30
+
+# Cost knobs (env-overridable). COST_PROFILE=lean tightens defaults for HI deploy.
+_LEAN = cost_profile_lean()
+GEOCODE_RATE_LIMIT = _env_int("GEOCODE_RATE_LIMIT", 12 if _LEAN else 30, 1, 120)
+GEOCODE_RATE_WINDOW_SEC = float(_env_int("GEOCODE_RATE_WINDOW_SEC", 60, 10, 600))
+PLAN_RATE_LIMIT = _env_int("PLAN_RATE_LIMIT", 4 if _LEAN else 10, 1, 60)
+PLAN_RATE_WINDOW_SEC = float(_env_int("PLAN_RATE_WINDOW_SEC", 60, 10, 600))
+MAX_CONCURRENT_PLANS = _env_int("MAX_CONCURRENT_PLANS", 2 if _LEAN else 4, 1, 16)
+# Browser cache for static assets (seconds) — cuts repeat egress; APIs stay no-store.
+STATIC_CACHE_MAX_AGE = _env_int("STATIC_CACHE_MAX_AGE", 300, 0, 86400)
+
+# Simple in-memory rate limiters: ip -> (window_start, count)
+_geocode_hits: Dict[str, Tuple[float, int]] = {}
+_plan_hits: Dict[str, Tuple[float, int]] = {}
+_geocode_lock = threading.Lock()
+_plan_lock = threading.Lock()
+_plan_semaphore = threading.Semaphore(MAX_CONCURRENT_PLANS)
 
 
 class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
@@ -78,6 +109,7 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_json_response({"error": "CORS not enabled"}, status=403)
 
     def do_GET(self):
+        self._api_response = False
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
@@ -92,7 +124,19 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_stats()
             return
         if path == "/api/health":
-            self.send_json_response({"status": "healthy", "service": "Tesla Supercharger Route Planner"})
+            self.send_json_response({
+                "status": "healthy",
+                "service": "Tesla Supercharger Route Planner",
+                "mobile_shell": "/mobile",
+                "cost_profile": "lean" if cost_profile_lean() else "default",
+                "limits": {
+                    "geocode_per_min": GEOCODE_RATE_LIMIT,
+                    "plan_per_min": PLAN_RATE_LIMIT,
+                    "max_concurrent_plans": MAX_CONCURRENT_PLANS,
+                    "static_cache_max_age": STATIC_CACHE_MAX_AGE,
+                    "mobile_ua_redirect": mobile_ua_redirect_enabled(),
+                },
+            })
             return
         if path.startswith("/api/"):
             self.send_json_response({"error": "Endpoint not found"}, status=404)
@@ -103,11 +147,54 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.path = "/tesla-probe.html"
             return super().do_GET()
 
-        # SPA fallback only for non-API GETs; path existence checked under STATIC_DIR only
-        if path == "/" or not self._static_file_exists(path):
-            self.path = "/index.html"
+        if self._maybe_mobile_ua_redirect(path):
+            return
 
+        self._map_spa_path(path)
         return super().do_GET()
+
+    def do_HEAD(self):
+        """Same SPA mapping as GET so probes like `curl -I /mobile` succeed."""
+        self._api_response = False
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path.startswith("/api/"):
+            # JSON APIs are GET/POST oriented; HEAD → 405 keeps surface small.
+            self.send_response(405)
+            self.send_header("Allow", "GET, POST, OPTIONS")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        if path in ("/tesla-probe", "/tesla-probe/"):
+            self.path = "/tesla-probe.html"
+            return super().do_HEAD()
+
+        if self._maybe_mobile_ua_redirect(path):
+            return
+
+        self._map_spa_path(path)
+        return super().do_HEAD()
+
+    def _maybe_mobile_ua_redirect(self, path: str) -> bool:
+        """Optional soft UA redirect (HTML entry only). Returns True if response sent."""
+        if (
+            path == "/"
+            and mobile_ua_redirect_enabled()
+            and looks_like_mobile_ua(self.headers.get("User-Agent", ""))
+        ):
+            self.send_response(302)
+            self.send_header("Location", "/mobile")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return True
+        return False
+
+    def _map_spa_path(self, path: str) -> None:
+        """Rewrite mobile + unknown paths onto index.html (same SPA)."""
+        if path in ("/mobile", "/mobile/", "/") or not self._static_file_exists(path):
+            self.path = "/index.html"
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
@@ -556,13 +643,24 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         if getattr(self, "close_connection", False):
             self.send_header("Connection", "close")
+        self._api_response = True
         self.end_headers()
         self.wfile.write(body)
 
     def end_headers(self):
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        if not getattr(self, "_api_response", False):
+            path = urllib.parse.urlparse(getattr(self, "path", "") or "").path.lower()
+            static_ext = (".js", ".css", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".ico")
+            if STATIC_CACHE_MAX_AGE > 0 and path.endswith(static_ext):
+                self.send_header(
+                    "Cache-Control",
+                    f"public, max-age={STATIC_CACHE_MAX_AGE}",
+                )
+            else:
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self._send_security_headers()
         super().end_headers()
 
@@ -578,9 +676,13 @@ def run_server(port: int = PORT):
         timeout = REQUEST_SOCKET_TIMEOUT_SEC
 
     with ThreadedReusableServer(("", port), SuperchargerRequestHandler) as httpd:
+        profile = "lean" if cost_profile_lean() else "default"
         print("============================================================")
-        print(f"  Tesla Supercharger Route Planner running on port {port}")
-        print(f"  Open http://localhost:{port} in your browser")
+        print(f"  Tesla Supercharger Route Planner on port {port}")
+        print(f"  Desktop:  http://localhost:{port}/")
+        print(f"  Mobile:   http://localhost:{port}/mobile")
+        print(f"  Cost:     profile={profile}  plans={PLAN_RATE_LIMIT}/min  "
+              f"geocode={GEOCODE_RATE_LIMIT}/min  concurrent={MAX_CONCURRENT_PLANS}")
         print("============================================================")
         try:
             httpd.serve_forever()

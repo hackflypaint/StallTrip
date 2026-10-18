@@ -25,6 +25,15 @@ docker compose up -d --build
 
 Local Python (no Docker): `python3 server.py 8080` — **stdlib only**, no `pip install`.
 
+**Mobile:** map-first web shell at **`/mobile`** (`COST_PROFILE=lean`) — separate from desktop `/` and Tesla car shell. Soft UA redirect stays **off**. Deploy notes: [mobile-deploy.md](./mobile-deploy.md). *(You may optionally tunnel with ngrok himself; agents do not run ngrok.)*
+
+### Mobile verify
+```bash
+python3 -m unittest tests.test_mobile tests.test_security -v
+COST_PROFILE=lean python3 server.py 8080
+# phones → http://localhost:8080/mobile
+```
+
 ## What’s in the box
 
 | Layer | Role |

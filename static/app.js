@@ -32,6 +32,12 @@ const state = {
   layersPanelOpen: false,
   /** Monotonic token so overlapping planRoute calls discard stale responses. */
   planRouteSeq: 0,
+  /** Foliage/airspace mounted (lazy on mobile until Layers opens). */
+  optionalOverlaysMounted: false,
+  /** Explore bounds fetch sequencing / debounce. */
+  exploreFetchSeq: 0,
+  exploreDebounceTimer: null,
+  invalidateSizeTimer: null,
   /** Tesla landscape bottom-sheet mode (not phone /mobile). */
   carShell: false,
   /** peek | plan | itinerary — default peek so map dominates on load */
@@ -41,6 +47,17 @@ const state = {
 // Expose for Playwright / debugging (cloud verification)
 window.appState = state;
 
+/**
+ * Mobile shell detection: explicit /mobile path or ?ui=mobile.
+ * Do not rely on User-Agent here — server may soft-redirect UA→/mobile behind an env flag.
+ */
+function isMobileShell() {
+  const path = (location.pathname || "/").replace(/\/+$/, "") || "/";
+  const params = new URLSearchParams(location.search || "");
+  return path === "/mobile" || params.get("ui") === "mobile";
+}
+
+window.isMobileShell = isMobileShell;
 
 /** Escape text for safe interpolation into HTML / Leaflet popups. */
 function escapeHtml(value) {
@@ -52,13 +69,162 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+/** Coalesce Leaflet invalidateSize — sheet toggles can fire back-to-back. */
+function scheduleMapInvalidate(delayMs) {
+  if (!state.map) return;
+  const delay = delayMs == null ? 80 : delayMs;
+  if (state.invalidateSizeTimer) clearTimeout(state.invalidateSizeTimer);
+  state.invalidateSizeTimer = setTimeout(() => {
+    state.invalidateSizeTimer = null;
+    if (state.map) state.map.invalidateSize();
+  }, delay);
+}
+
+window.scheduleMapInvalidate = scheduleMapInvalidate;
+
+function setMobileSheetOpen(open) {
+  if (!document.body.classList.contains("ui-mobile")) return;
+  const wasOpen = document.body.classList.contains("sheet-open");
+  const next = !!open;
+  if (wasOpen === next) return;
+  document.body.classList.toggle("sheet-open", next);
+  const toggle = document.getElementById("btnMobileSheet");
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", next ? "true" : "false");
+    const label = next ? "Hide planner" : "Show planner";
+    toggle.setAttribute("aria-label", label);
+    toggle.title = label;
+    const text = toggle.querySelector("span");
+    if (text) text.textContent = next ? "Map" : "Plan";
+  }
+  scheduleMapInvalidate(80);
+}
+
+function openMobileSheet() {
+  setMobileSheetOpen(true);
+}
+
+function closeMobileSheet() {
+  setMobileSheetOpen(false);
+}
+
+window.setMobileSheetOpen = setMobileSheetOpen;
+
+/**
+ * Normalize geolocation success / error into an origin place.
+ * On error (or missing coords), use the SF Ferry Building demo fallback.
+ */
+function resolveGeolocationPlace(position, error) {
+  if (!error && position && position.coords) {
+    const { latitude, longitude } = position.coords;
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      return {
+        name: "Current Location",
+        lat: latitude,
+        lng: longitude,
+        source: "geolocation",
+      };
+    }
+  }
+  return {
+    name: "San Francisco, CA (Default)",
+    lat: 37.7955,
+    lng: -122.3937,
+    source: "fallback",
+  };
+}
+
+window.resolveGeolocationPlace = resolveGeolocationPlace;
+
+/**
+ * Explore API limit — desktop fixed; mobile drops further when zoomed out.
+ * Pure zoom/mobile inputs kept testable via exploreFetchLimitFor(zoom, mobile).
+ */
+function exploreFetchLimitFor(zoom, mobileShell) {
+  if (!mobileShell) return 120;
+  const z = Number.isFinite(zoom) ? zoom : 6;
+  if (z < 7) return 25;
+  if (z < 9) return 40;
+  return 60;
+}
+
+function exploreFetchLimit() {
+  const zoom = state.map ? state.map.getZoom() : 6;
+  return exploreFetchLimitFor(zoom, isMobileShell());
+}
+
+window.exploreFetchLimit = exploreFetchLimit;
+window.exploreFetchLimitFor = exploreFetchLimitFor;
+
+/** Cap corridor yellow dots on mobile so plan renders stay light at low zoom. */
+function corridorMarkerCapFor(zoom, mobileShell) {
+  if (!mobileShell) return 500;
+  const z = Number.isFinite(zoom) ? zoom : 6;
+  if (z < 7) return 40;
+  if (z < 9) return 80;
+  return 120;
+}
+
+function corridorMarkerCap() {
+  const zoom = state.map ? state.map.getZoom() : 6;
+  return corridorMarkerCapFor(zoom, isMobileShell());
+}
+
+window.corridorMarkerCapFor = corridorMarkerCapFor;
+
+/** Evenly subsample a list down to `cap` (keeps first/last when possible). */
+function subsampleMarkers(items, cap) {
+  if (!Array.isArray(items) || items.length <= cap) return items || [];
+  if (cap <= 0) return [];
+  if (cap === 1) return [items[0]];
+  const out = [];
+  const last = items.length - 1;
+  for (let i = 0; i < cap; i++) {
+    const idx = Math.round((i * last) / (cap - 1));
+    out.push(items[idx]);
+  }
+  return out;
+}
+
+window.subsampleMarkers = subsampleMarkers;
+
+function initMobileShell() {
+  if (!isMobileShell()) return;
+
+  document.body.classList.add("ui-mobile");
+  document.documentElement.dataset.ui = "mobile";
+
+  const toggle = document.getElementById("btnMobileSheet");
+  if (toggle) {
+    toggle.hidden = false;
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.addEventListener("click", () => {
+      setMobileSheetOpen(!document.body.classList.contains("sheet-open"));
+    });
+  }
+
+  // Demo / QA: /mobile?sheet=1 opens the planner sheet on load
+  const params = new URLSearchParams(location.search || "");
+  if (params.get("sheet") === "1") {
+    setMobileSheetOpen(true);
+  }
+
+  if (state.map) {
+    scheduleMapInvalidate(100);
+  }
+}
+
 // Initialize Application
 document.addEventListener("DOMContentLoaded", () => {
   initMap();
+  initMobileShell();
   setupEventListeners();
   setupCarShell();
   loadStats();
-  loadNearbyChargers();
+  // Mobile: skip eager nearby list until Explore is opened (saves a boot fetch)
+  if (!isMobileShell()) {
+    loadNearbyChargers();
+  }
 });
 
 /**
@@ -72,6 +238,8 @@ document.addEventListener("DOMContentLoaded", () => {
  * Disable: ?car=0
  */
 function shouldUseCarShell() {
+  // Phone /mobile shell is a separate product path — never mix with car-shell
+  if (isMobileShell()) return false;
   const params = new URLSearchParams(window.location.search);
   const forced = params.get("car") || params.get("tesla");
   if (forced === "0" || forced === "false") {
@@ -285,16 +453,9 @@ function initMap() {
   state.forcedMarkersLayer = L.featureGroup().addTo(state.map);
   state.markersLayer = L.featureGroup().addTo(state.map);
 
-  // Optional removable foliage module (static/foliage/)
-  const foliageSlot = document.getElementById("foliageSlot");
-  if (window.FoliageModule && foliageSlot) {
-    window.FoliageModule.mount({ map: state.map, slotEl: foliageSlot });
-  }
-
-  // Optional removable airspace / UAS module (static/airspace/)
-  const airspaceSlot = document.getElementById("airspaceSlot");
-  if (window.AirspaceModule && airspaceSlot) {
-    window.AirspaceModule.mount({ map: state.map, slotEl: airspaceSlot });
+  // Desktop: mount optional overlays eagerly. Mobile: wait until Layers opens.
+  if (!isMobileShell()) {
+    mountOptionalOverlays();
   }
 
   // Map click handler for origin/destination when not in area selection mode
@@ -316,17 +477,36 @@ function initMap() {
     }
   });
 
-  // Re-query chargers when map moves in explore mode
+  // Re-query chargers when map moves in explore mode (debounced)
   state.map.on("moveend", () => {
     const exploreTab = document.getElementById("explore-tab");
-    if (exploreTab.style.display !== "none") {
-      loadMapBoundsChargers();
+    if (exploreTab && exploreTab.style.display !== "none") {
+      scheduleLoadMapBoundsChargers();
     }
   });
 
   // Setup Map Area Selection Drawing Handlers
   setupMapAreaSelection();
 }
+
+/** Mount foliage + airspace once (lazy on mobile). */
+function mountOptionalOverlays() {
+  if (state.optionalOverlaysMounted) return;
+
+  const foliageSlot = document.getElementById("foliageSlot");
+  if (window.FoliageModule && foliageSlot) {
+    window.FoliageModule.mount({ map: state.map, slotEl: foliageSlot });
+  }
+
+  const airspaceSlot = document.getElementById("airspaceSlot");
+  if (window.AirspaceModule && airspaceSlot) {
+    window.AirspaceModule.mount({ map: state.map, slotEl: airspaceSlot });
+  }
+
+  state.optionalOverlaysMounted = true;
+}
+
+window.mountOptionalOverlays = mountOptionalOverlays;
 
 function setBasemap(name) {
   if (!state.baseLayers || !state.map) return;
@@ -359,6 +539,8 @@ function toggleLayersPanel(force) {
     btn.classList.toggle("is-active", open);
     btn.setAttribute("aria-expanded", open ? "true" : "false");
   }
+  // Mobile: first open of Layers mounts heavy optional overlays
+  if (open) mountOptionalOverlays();
 }
 
 function setupEventListeners() {
@@ -366,7 +548,7 @@ function setupEventListeners() {
   document.getElementById("tabRoute").addEventListener("click", () => switchTab("route-tab"));
   document.getElementById("tabExplore").addEventListener("click", () => {
     switchTab("explore-tab");
-    loadMapBoundsChargers();
+    scheduleLoadMapBoundsChargers(0);
   });
 
   // Autocomplete for Origin
@@ -541,20 +723,16 @@ function setupEventListeners() {
     maybeReplan();
   });
 
-  // Explore search & filters
+  // Explore search & filters (shared debounced loader)
   const chargerSearchInput = document.getElementById("chargerSearchInput");
-  let debounceTimeout = null;
   chargerSearchInput.addEventListener("input", () => {
-    clearTimeout(debounceTimeout);
-    debounceTimeout = setTimeout(() => {
-      loadMapBoundsChargers();
-    }, 350);
+    scheduleLoadMapBoundsChargers(isMobileShell() ? 350 : 280);
   });
 
-  document.getElementById("filterStatus").addEventListener("change", loadMapBoundsChargers);
-  document.getElementById("filterMinPower").addEventListener("change", loadMapBoundsChargers);
-  document.getElementById("filterMinStalls").addEventListener("change", loadMapBoundsChargers);
-  document.getElementById("btnFilterMapArea").addEventListener("click", loadMapBoundsChargers);
+  document.getElementById("filterStatus").addEventListener("change", () => scheduleLoadMapBoundsChargers(0));
+  document.getElementById("filterMinPower").addEventListener("change", () => scheduleLoadMapBoundsChargers(0));
+  document.getElementById("filterMinStalls").addEventListener("change", () => scheduleLoadMapBoundsChargers(0));
+  document.getElementById("btnFilterMapArea").addEventListener("click", () => scheduleLoadMapBoundsChargers(0));
 
   // Global ESC: abort in-progress draw (same as banner Cancel); use Clear selection to drop finished area
   document.addEventListener("keydown", (e) => {
@@ -692,69 +870,118 @@ async function finishFreehandSelection(ring) {
   }
 }
 
-// Box rectangle + freehand outline force-include (user picks mode)
+function _areaPointerLatLng(e) {
+  if (e && e.latlng) return e.latlng;
+  return null;
+}
+
+function beginAreaPointer(latlng, originalEvent) {
+  if (!state.areaSelectMode || !latlng) return;
+  if (originalEvent && originalEvent.button != null && originalEvent.button !== 0) return;
+
+  // Prevent the page from scrolling while drawing on touch devices
+  if (originalEvent && originalEvent.cancelable && originalEvent.pointerType === "touch") {
+    originalEvent.preventDefault();
+  }
+
+  clearSelectionShape();
+  state.dragStartLatLng = latlng;
+
+  if (state.areaDrawMode === "freehand") {
+    state.freehandPoints = [latlng];
+    state.selectionShape = L.polyline(state.freehandPoints, {
+      color: "#00b4d8",
+      weight: 3,
+      dashArray: "4, 6",
+      opacity: 0.95,
+    }).addTo(state.map);
+  } else {
+    state.selectionShape = L.rectangle([latlng, latlng], {
+      color: "#00b4d8",
+      weight: 2,
+      dashArray: "6, 6",
+      fillColor: "#00b4d8",
+      fillOpacity: 0.18,
+    }).addTo(state.map);
+  }
+  updateClearSelectionButton();
+}
+
+function moveAreaPointer(latlng) {
+  if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionShape || !latlng) return;
+
+  if (state.areaDrawMode === "freehand") {
+    const last = state.freehandPoints[state.freehandPoints.length - 1];
+    // Slightly looser threshold on mobile so touch samples still build a ring
+    const thresh = isMobileShell() ? 0.0004 : 0.001;
+    if (last && Math.abs(last.lat - latlng.lat) < thresh && Math.abs(last.lng - latlng.lng) < thresh) {
+      return;
+    }
+    state.freehandPoints.push(latlng);
+    state.selectionShape.setLatLngs(state.freehandPoints);
+  } else {
+    state.selectionShape.setBounds(L.latLngBounds(state.dragStartLatLng, latlng));
+  }
+}
+
+async function endAreaPointer(latlng) {
+  if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionShape) return;
+
+  if (state.areaDrawMode === "freehand") {
+    if (latlng) state.freehandPoints.push(latlng);
+    // Mobile freehand often has fewer samples — allow a shorter ring
+    const minPts = isMobileShell() ? 4 : 6;
+    if (state.freehandPoints.length < minPts) {
+      clearSelectionShape();
+      return;
+    }
+    const ring = state.freehandPoints.slice();
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (first.lat !== last.lat || first.lng !== last.lng) {
+      ring.push(L.latLng(first.lat, first.lng));
+    }
+    await finishFreehandSelection(ring);
+  } else {
+    await finishBoxSelection(state.selectionShape.getBounds());
+  }
+}
+
+function _latLngFromTouchEvent(ev) {
+  if (!state.map || !ev) return null;
+  const t = (ev.touches && ev.touches[0]) || (ev.changedTouches && ev.changedTouches[0]);
+  if (!t) return null;
+  return state.map.mouseEventToLatLng(t);
+}
+
+// Box rectangle + freehand outline force-include (mouse + touch)
 function setupMapAreaSelection() {
   state.map.on("mousedown", (e) => {
-    if (!state.areaSelectMode) return;
-    if (e.originalEvent.button !== 0) return;
-
-    clearSelectionShape();
-    state.dragStartLatLng = e.latlng;
-
-    if (state.areaDrawMode === "freehand") {
-      state.freehandPoints = [e.latlng];
-      state.selectionShape = L.polyline(state.freehandPoints, {
-        color: "#00b4d8",
-        weight: 2.5,
-        dashArray: "4, 6",
-        opacity: 0.95,
-      }).addTo(state.map);
-    } else {
-      state.selectionShape = L.rectangle([e.latlng, e.latlng], {
-        color: "#00b4d8",
-        weight: 2,
-        dashArray: "6, 6",
-        fillColor: "#00b4d8",
-        fillOpacity: 0.18,
-      }).addTo(state.map);
-    }
-    updateClearSelectionButton();
+    beginAreaPointer(_areaPointerLatLng(e), e.originalEvent);
   });
 
   state.map.on("mousemove", (e) => {
-    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionShape) return;
-
-    if (state.areaDrawMode === "freehand") {
-      const last = state.freehandPoints[state.freehandPoints.length - 1];
-      if (last && Math.abs(last.lat - e.latlng.lat) < 0.001 && Math.abs(last.lng - e.latlng.lng) < 0.001) {
-        return;
-      }
-      state.freehandPoints.push(e.latlng);
-      state.selectionShape.setLatLngs(state.freehandPoints);
-    } else {
-      state.selectionShape.setBounds(L.latLngBounds(state.dragStartLatLng, e.latlng));
-    }
+    moveAreaPointer(_areaPointerLatLng(e));
   });
 
   state.map.on("mouseup", async (e) => {
-    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionShape) return;
+    await endAreaPointer(_areaPointerLatLng(e));
+  });
 
-    if (state.areaDrawMode === "freehand") {
-      if (e.latlng) state.freehandPoints.push(e.latlng);
-      if (state.freehandPoints.length < 6) {
-        clearSelectionShape();
-        return;
-      }
-      const ring = state.freehandPoints.slice();
-      const first = ring[0];
-      const last = ring[ring.length - 1];
-      if (first.lat !== last.lat || first.lng !== last.lng) {
-        ring.push(L.latLng(first.lat, first.lng));
-      }
-      await finishFreehandSelection(ring);
-    } else {
-      await finishBoxSelection(state.selectionShape.getBounds());
-    }
+  // Touch on the map container (Leaflet does not emit map 'touch*' events)
+  const container = state.map.getContainer();
+  L.DomEvent.on(container, "touchstart", (ev) => {
+    if (!state.areaSelectMode) return;
+    beginAreaPointer(_latLngFromTouchEvent(ev), ev);
+  });
+  L.DomEvent.on(container, "touchmove", (ev) => {
+    if (!state.areaSelectMode || !state.dragStartLatLng) return;
+    if (ev.cancelable) ev.preventDefault();
+    moveAreaPointer(_latLngFromTouchEvent(ev));
+  });
+  L.DomEvent.on(container, "touchend", async (ev) => {
+    if (!state.areaSelectMode || !state.dragStartLatLng) return;
+    await endAreaPointer(_latLngFromTouchEvent(ev));
   });
 }
 
@@ -803,10 +1030,17 @@ function updateAreaSelectActiveCopy() {
   const isFreehand = state.areaDrawMode === "freehand";
   const banner = document.getElementById("mapModeBannerText");
   const bannerIcon = document.querySelector("#mapModeBanner .pulse-icon");
+  const touchCopy = isMobileShell();
   if (banner) {
-    banner.textContent = isFreehand
-      ? "Click and drag to freehand-draw an outline around Superchargers. Release to force-include stations inside."
-      : "Click and drag on the map to draw a selection box around Superchargers.";
+    if (isFreehand) {
+      banner.textContent = touchCopy
+        ? "Drag with one finger to outline Superchargers. Lift to force-include stations inside."
+        : "Click and drag to freehand-draw an outline around Superchargers. Release to force-include stations inside.";
+    } else {
+      banner.textContent = touchCopy
+        ? "Drag with one finger to draw a selection box around Superchargers."
+        : "Click and drag on the map to draw a selection box around Superchargers.";
+    }
   }
   if (bannerIcon) {
     bannerIcon.className = isFreehand
@@ -819,6 +1053,11 @@ function updateAreaSelectActiveCopy() {
 function activateAreaSelectMode() {
   state.areaSelectMode = true;
   state.map.dragging.disable();
+  // Full map while drawing on mobile
+  if (isMobileShell()) {
+    closeMobileSheet();
+    document.body.classList.add("area-drawing");
+  }
   document.getElementById("map").style.cursor = "crosshair";
   document.getElementById("mapModeBanner").style.display = "flex";
   updateAreaSelectActiveCopy();
@@ -829,6 +1068,7 @@ function deactivateAreaSelectMode() {
   state.areaSelectMode = false;
   state.map.dragging.enable();
   state.dragStartLatLng = null;
+  document.body.classList.remove("area-drawing");
   document.getElementById("map").style.cursor = "";
   document.getElementById("mapModeBanner").style.display = "none";
   updateAreaToolDrawingState();
@@ -936,6 +1176,18 @@ function setupClearBtn(btnId, inputId, onClear) {
   });
 }
 
+function applyOriginFromGeolocation(place) {
+  setOrigin(place);
+  if (state.map) {
+    state.map.setView([place.lat, place.lng], 12);
+  }
+  // On mobile, open the planner so the user can set a destination next
+  if (isMobileShell()) openMobileSheet();
+  return place;
+}
+
+window.applyOriginFromGeolocation = applyOriginFromGeolocation;
+
 function detectCurrentLocation() {
   const resetLocateBtns = () => {
     const label = '<i class="fa-solid fa-location-crosshairs"></i> Use Current Location';
@@ -944,16 +1196,26 @@ function detectCurrentLocation() {
   };
 
   if (!navigator.geolocation) {
-    showToast("Location unavailable in this browser. Use a preset or type an address.");
-    if (state.carShell) setCarSheet("plan");
+    if (isMobileShell()) {
+      // Phone shell: keep demo fallback so trip UX stays testable without GPS
+      applyOriginFromGeolocation(resolveGeolocationPlace(null, { code: 0, message: "unsupported" }));
+    } else {
+      showToast("Location unavailable in this browser. Use a preset or type an address.");
+      if (state.carShell) setCarSheet("plan");
+    }
     return;
   }
+
   const btn = document.getElementById("btnUseCurrentLocation");
   if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Locating...';
 
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       resetLocateBtns();
+      if (isMobileShell()) {
+        applyOriginFromGeolocation(resolveGeolocationPlace(pos, null));
+        return;
+      }
       const coords = {
         name: "Current Location",
         lat: pos.coords.latitude,
@@ -962,16 +1224,20 @@ function detectCurrentLocation() {
       setOrigin(coords);
       state.map.setView([coords.lat, coords.lng], 12);
       showToast("Location set — pick a destination or preset.", 2800);
-      updateCarPeek();
+      if (typeof updateCarPeek === "function") updateCarPeek();
     },
     (err) => {
       resetLocateBtns();
       console.warn("Geolocation denied or error:", err);
-      // Fail soft: do NOT silently overwrite origin with a demo city.
+      if (isMobileShell()) {
+        applyOriginFromGeolocation(resolveGeolocationPlace(null, err));
+        return;
+      }
+      // Desktop / car: fail soft — do NOT silently overwrite origin with a demo city.
       showToast("Location unavailable in this browser. Use a preset or type an address.");
       if (state.carShell) setCarSheet("plan");
     },
-    { enableHighAccuracy: false, timeout: 8000, maximumAge: 0 }
+    { enableHighAccuracy: false, timeout: 8000, maximumAge: isMobileShell() ? 60_000 : 0 }
   );
 }
 
@@ -989,6 +1255,8 @@ function setDestination(place) {
   input.value = place.name;
   document.getElementById("clearDest").style.display = "block";
   updateMapMarkers();
+  // Both ends set on mobile → keep sheet open so Plan Route is one tap away
+  if (isMobileShell() && state.origin) openMobileSheet();
 }
 
 function setupAutocomplete(inputId, suggestionsId, onSelect) {
@@ -1146,9 +1414,11 @@ async function planRoute() {
     state.activePlan = plan;
     renderRoutePlan(plan);
     syncCarTestHooks();
-    if (state.carShell) {
+    // Phone: show route on the map. Car: collapse sheet to peek.
+    if (isMobileShell()) {
+      closeMobileSheet();
+    } else if (state.carShell) {
       updateCarPeek();
-      // Map-first after plan: collapse sheet so corridor dominates
       setCarSheet("peek");
     }
   } catch (err) {
@@ -1197,9 +1467,10 @@ function renderRoutePlan(plan) {
     state.map.fitBounds(geojsonLayer.getBounds(), { padding: [50, 50] });
   }
 
-  // 3. Render Corridor Chargers (Yellow dots)
+  // 3. Render Corridor Chargers (Yellow dots) — capped/subsampled on mobile
   if (plan.all_corridor_chargers) {
-    plan.all_corridor_chargers.forEach((c) => {
+    const capped = subsampleMarkers(plan.all_corridor_chargers, corridorMarkerCap());
+    capped.forEach((c) => {
       const circle = L.circleMarker([c.lat, c.lng], {
         radius: 5,
         fillColor: "#ffaa00",
@@ -1410,15 +1681,36 @@ async function loadNearbyChargers() {
   }
 }
 
+/** Debounce explore bounds fetches (pan/zoom spam). delayMs=0 runs ASAP. */
+function scheduleLoadMapBoundsChargers(delayMs) {
+  const delay =
+    delayMs != null
+      ? delayMs
+      : isMobileShell()
+        ? 280
+        : 150;
+  if (state.exploreDebounceTimer) clearTimeout(state.exploreDebounceTimer);
+  state.exploreDebounceTimer = setTimeout(() => {
+    state.exploreDebounceTimer = null;
+    loadMapBoundsChargers();
+  }, delay);
+}
+
+window.scheduleLoadMapBoundsChargers = scheduleLoadMapBoundsChargers;
+
 async function loadMapBoundsChargers() {
   if (!state.map) return;
+  const seq = ++state.exploreFetchSeq;
   const bounds = state.map.getBounds();
   const status = document.getElementById("filterStatus").value;
   const minPower = document.getElementById("filterMinPower").value;
   const minStalls = document.getElementById("filterMinStalls").value;
   const text = document.getElementById("chargerSearchInput").value.trim();
 
-  let url = `/api/superchargers?min_lat=${bounds.getSouth()}&max_lat=${bounds.getNorth()}&min_lng=${bounds.getWest()}&max_lng=${bounds.getEast()}&status=${status}&min_power=${minPower}&min_stalls=${minStalls}&limit=120`;
+  let url =
+    `/api/superchargers?min_lat=${bounds.getSouth()}&max_lat=${bounds.getNorth()}` +
+    `&min_lng=${bounds.getWest()}&max_lng=${bounds.getEast()}` +
+    `&status=${status}&min_power=${minPower}&min_stalls=${minStalls}&limit=${exploreFetchLimit()}`;
   if (text) {
     url += `&q=${encodeURIComponent(text)}`;
   }
@@ -1426,8 +1718,11 @@ async function loadMapBoundsChargers() {
   try {
     const res = await fetch(url);
     const data = await res.json();
+    // Drop stale responses from overlapping pans
+    if (seq !== state.exploreFetchSeq) return;
     renderExploreList(data.superchargers || []);
   } catch (e) {
+    if (seq !== state.exploreFetchSeq) return;
     console.error("Failed to query map chargers", e);
   }
 }

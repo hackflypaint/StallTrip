@@ -24,7 +24,21 @@
 </head>
 <body>
   <div class="app-container" id="appContainer">
-    
+    <!-- Phone shell only: shown when path is /mobile or ?ui=mobile (see app.js) -->
+    <button
+      type="button"
+      id="btnMobileSheet"
+      class="mobile-sheet-toggle"
+      hidden
+      aria-controls="sidebar"
+      aria-expanded="false"
+      aria-label="Show planner"
+      title="Show planner"
+    >
+      <i class="fa-solid fa-route" aria-hidden="true"></i>
+      <span>Plan</span>
+    </button>
+
     <!-- Sidebar / Control Panel (becomes bottom sheet in car-shell mode) -->
     <aside class="sidebar" id="sidebar">
       <!-- Car sheet chrome: compact peek + presets (visible only in body.car-shell) -->
