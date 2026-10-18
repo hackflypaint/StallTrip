@@ -1,0 +1,108 @@
+/* Removable Fall Foliage module styles — delete with static/foliage/ */
+
+.foliage-slot {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.foliage-slot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.foliage-slot-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.foliage-slot-title i {
+  color: #e8913a;
+}
+
+.foliage-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.foliage-toggle input {
+  accent-color: var(--tesla-red);
+}
+
+.foliage-slider-block {
+  display: none;
+  margin-top: 8px;
+}
+
+.foliage-slider-block.is-active {
+  display: block;
+}
+
+.foliage-date-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 4px;
+}
+
+.foliage-date-sub {
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.foliage-day-slider {
+  width: 100%;
+  accent-color: #e8913a;
+  cursor: pointer;
+}
+
+.foliage-legend-mini {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+  margin-top: 10px;
+  font-size: 0.6rem;
+  color: var(--text-dim);
+}
+
+.foliage-legend-mini span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.foliage-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.foliage-credit {
+  margin-top: 10px;
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.foliage-credit a {
+  color: #e8913a;
+  text-decoration: none;
+}
+
+.foliage-credit a:hover {
+  text-decoration: underline;
+}
