@@ -239,7 +239,6 @@ function setupEventListeners() {
     deactivateAreaSelectMode();
   });
   document.getElementById("btnClearSelection")?.addEventListener("click", clearSelection);
-  document.getElementById("btnClearForced").addEventListener("click", clearForcedChargers);
   document.getElementById("btnAreaModeBox")?.addEventListener("click", () => {
     selectAreaTool("box");
   });
@@ -653,18 +652,6 @@ function clearSelection() {
   }
 }
 
-function clearForcedChargers() {
-  const hadAny = state.forcedChargers.size > 0;
-  state.forcedChargers.clear();
-  state.areaForcedIds.clear();
-  clearSelectionShape();
-  deactivateAreaSelectMode();
-  updateForcedChargersUI();
-  if (hadAny) {
-    maybeReplan();
-  }
-}
-
 function updateClearSelectionButton() {
   const btn = document.getElementById("btnClearSelection");
   if (!btn) return;
@@ -680,39 +667,9 @@ function updateClearSelectionButton() {
 }
 
 function updateForcedChargersUI() {
-  const count = state.forcedChargers.size;
-  document.getElementById("forcedCountBadge").innerText = `${count} selected`;
-  document.getElementById("btnClearForced").style.display = count > 0 ? "inline-flex" : "none";
   updateClearSelectionButton();
 
-  const chipsList = document.getElementById("forcedChipsList");
-  chipsList.innerHTML = "";
-
-  if (count === 0) {
-    chipsList.innerHTML = `<div class="empty-forced-notice">No force-included stops. Use Box or Freehand on the map toolbar, or click a station to pin it.</div>`;
-  } else {
-    state.forcedChargers.forEach((c) => {
-      const chip = document.createElement("div");
-      chip.className = "forced-chip";
-      chip.innerHTML = `
-        <i class="fa-solid fa-star text-cyan" style="font-size:10px;"></i>
-        <span>${c.name}</span>
-        <button type="button" class="forced-chip-remove" title="Remove stop"><i class="fa-solid fa-xmark"></i></button>
-      `;
-      chip.querySelector(".forced-chip-remove").addEventListener("click", (e) => {
-        e.stopPropagation();
-        toggleForcedCharger(c);
-        maybeReplan();
-      });
-      chip.addEventListener("click", () => {
-        state.map.setView([c.lat, c.lng], 15);
-        showChargerDrawer(c);
-      });
-      chipsList.appendChild(chip);
-    });
-  }
-
-  // Render visual forced markers on the map
+  // Cyan map markers for force-included stops (sidebar chips removed)
   state.forcedMarkersLayer.clearLayers();
   state.forcedChargers.forEach((c) => {
     const forcedMarker = L.circleMarker([c.lat, c.lng], {
