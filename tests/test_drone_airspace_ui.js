@@ -33,12 +33,19 @@ async function main() {
   if (!/Drone flight/i.test(title || "")) {
     throw new Error(`Unexpected title: ${title}`);
   }
-  const legend = await page.locator(".airspace-legend-mini").textContent();
-  if (!/No-fly/i.test(legend || "") || !/Auth required/i.test(legend || "")) {
-    throw new Error(`Legend missing constraint classes: ${legend}`);
+
+  for (const id of ["airspaceClassNoFly", "airspaceClassParks", "airspaceClassAuth"]) {
+    const el = page.locator(`#${id}`);
+    if ((await el.count()) < 1) throw new Error(`Missing class toggle ${id}`);
+    if (!(await el.isChecked())) throw new Error(`${id} should default checked`);
   }
-  if (!/National park/i.test(legend || "")) {
-    throw new Error(`Legend missing park swatch: ${legend}`);
+
+  const toggles = await page.locator("#airspaceClassToggles").textContent();
+  if (!/No-fly/i.test(toggles || "") || !/Auth required/i.test(toggles || "")) {
+    throw new Error(`Class toggles missing labels: ${toggles}`);
+  }
+  if (!/National park/i.test(toggles || "")) {
+    throw new Error(`Class toggles missing park: ${toggles}`);
   }
 
   // Shenandoah / Mid-Atlantic — parks + Class airspace + SUA
@@ -54,10 +61,25 @@ async function main() {
   const status = await page.locator("#airspaceStatus").textContent();
   console.log("status:", status);
 
-  const shot1 = path.join(MEDIA_DIR, "drone_constraints_shenandoah.png");
-  const shot1a = path.join(ARTIFACTS, "drone_constraints_shenandoah.png");
-  await page.screenshot({ path: shot1, fullPage: false });
-  fs.copyFileSync(shot1, shot1a);
+  // Independent toggle: hide auth, keep no-fly + parks
+  await page.locator("#airspaceClassAuth").uncheck();
+  await page.waitForFunction(() => {
+    const vis = window.AirspaceModule && window.AirspaceModule.getClassVisibility();
+    const t = document.getElementById("airspaceStatus")?.textContent || "";
+    return vis && vis.auth === false && vis.noFly === true && /Auth off/.test(t);
+  }, { timeout: 5000 });
+  console.log("after auth off:", await page.locator("#airspaceStatus").textContent());
+
+  const shotToggles = path.join(MEDIA_DIR, "drone_class_toggles_auth_off.png");
+  const shotTogglesA = path.join(ARTIFACTS, "drone_class_toggles_auth_off.png");
+  await page.screenshot({ path: shotToggles, fullPage: false });
+  fs.copyFileSync(shotToggles, shotTogglesA);
+
+  await page.locator("#airspaceClassAuth").check();
+  await page.waitForFunction(() => {
+    const vis = window.AirspaceModule.getClassVisibility();
+    return vis && vis.auth === true;
+  }, { timeout: 5000 });
 
   // DC area — prohibited P-56, Class B/D, NPS units
   await page.evaluate(() => {
@@ -71,15 +93,15 @@ async function main() {
   const statusDc = await page.locator("#airspaceStatus").textContent();
   console.log("status DC:", statusDc);
 
-  const shot2 = path.join(MEDIA_DIR, "drone_constraints_dc.png");
-  const shot2a = path.join(ARTIFACTS, "drone_constraints_dc.png");
+  const shot2 = path.join(MEDIA_DIR, "drone_constraints_dc_toggles.png");
+  const shot2a = path.join(ARTIFACTS, "drone_constraints_dc_toggles.png");
   await page.screenshot({ path: shot2, fullPage: false });
   fs.copyFileSync(shot2, shot2a);
 
-  // Layers panel close-up
+  // Layers panel close-up with class toggles
   const panel = page.locator("#layersPanel");
-  const shot3 = path.join(MEDIA_DIR, "drone_layers_panel.png");
-  const shot3a = path.join(ARTIFACTS, "drone_layers_panel.png");
+  const shot3 = path.join(MEDIA_DIR, "drone_layers_panel_class_toggles.png");
+  const shot3a = path.join(ARTIFACTS, "drone_layers_panel_class_toggles.png");
   await panel.screenshot({ path: shot3 });
   fs.copyFileSync(shot3, shot3a);
 

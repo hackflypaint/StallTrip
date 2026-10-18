@@ -24,9 +24,10 @@ Open the **Layers** button (layer-group icon on the map toolbar) for basemaps an
 Lives in a **removable** module under `static/airspace/` (see that folder’s `README.md`).
 
 - **Purpose:** show whether flight is typically **no-fly**, **authorization required**, or unconstrained — not a LAANC approval tool.
+- **Class toggles:** under Drone flight, **No-fly**, **National park (no-fly)**, and **Auth required** are independently show/hide; Restricted (R) SUA is **hard no-fly**.
 - **Sources:** FAA FeatureServers (`Class_Airspace` B/C/D, Prohibited/Restricted SUA, `National_Defense_Airspace_TFR_Areas`, `FAA_UAS_FacilityMap_Data`, `Stadiums`) plus official NPS Land Resources boundaries (`…/fBc8EJBxQRMcHlei/…/NPS_Land_Resources_Division_Boundary_and_Tract_Data_Service/FeatureServer/2`). Hubs: [ADDS](https://adds-faa.opendata.arcgis.com/) · [UDDS](https://udds-faa.opendata.arcgis.com/).
 - **Not used:** Autopylot private APIs; airport markers; MOA/Warning SUA chrome.
-- **Performance:** fetches only when on; min zoom 7 (parks/SUA/Class/TFRs), 9 (UASFM), 8 (stadium points); debounced + abortable.
+- **Performance:** fetches only when master Show is on; min zoom 7 (parks/SUA/Class/TFRs), 9 (UASFM), 8 (stadium points); debounced + abortable.
 - **Attribution:** FAA AIS / ADDS · UDDS · NPS. Blank map ≠ legal clearance.
 
 **How to delete later:** remove `static/airspace/`, drop the `#airspaceSlot` + airspace CSS/JS includes from `index.html`, and remove the optional `AirspaceModule.mount` hook in `app.js`.
