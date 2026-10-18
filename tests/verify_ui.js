@@ -157,24 +157,31 @@ async function runVerification() {
     await page.locator('#btnCloseDrawer').click();
     await page.waitForTimeout(500);
 
-    // 4. Test Area Selection Tool on Map
-    console.log('4. Activating Area Selection Tool...');
+    // 4. Test freehand outline Area Selection Tool on Map
+    console.log('4. Activating freehand outline Area Selection Tool...');
     await page.locator('#btnSelectArea').click();
     await page.waitForSelector('#mapModeBanner', { state: 'visible' });
     console.log('Area select banner is visible.');
+    const bannerText = await page.locator('#mapModeBanner span').textContent();
+    if (!/freehand|outline/i.test(bannerText || '')) {
+      throw new Error(`Expected freehand/outline banner text, got: ${bannerText}`);
+    }
 
-    // Simulate drag bounding box in Central Valley / Southern California
+    // Draw a freehand loop (not a straight box) over Central Valley / SoCal corridor
     const mapBox = await page.locator('#map').boundingBox();
     if (mapBox) {
-      const startX = mapBox.x + mapBox.width * 0.45;
-      const startY = mapBox.y + mapBox.height * 0.45;
-      const endX = mapBox.x + mapBox.width * 0.65;
-      const endY = mapBox.y + mapBox.height * 0.65;
-
-      console.log(`Dragging selection box from (${startX}, ${startY}) to (${endX}, ${endY})...`);
-      await page.mouse.move(startX, startY);
+      const cx = mapBox.x + mapBox.width * 0.55;
+      const cy = mapBox.y + mapBox.height * 0.55;
+      const rx = mapBox.width * 0.12;
+      const ry = mapBox.height * 0.14;
+      const steps = 24;
+      console.log(`Drawing freehand outline centered near (${cx}, ${cy})...`);
+      await page.mouse.move(cx + rx, cy);
       await page.mouse.down();
-      await page.mouse.move(endX, endY, { steps: 10 });
+      for (let i = 1; i <= steps; i++) {
+        const ang = (Math.PI * 2 * i) / steps;
+        await page.mouse.move(cx + rx * Math.cos(ang), cy + ry * Math.sin(ang), { steps: 2 });
+      }
       await page.mouse.up();
       await page.waitForTimeout(3000);
     }
