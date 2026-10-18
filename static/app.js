@@ -134,6 +134,12 @@ function initMobileShell() {
     });
   }
 
+  // Demo / QA: /mobile?sheet=1 opens the planner sheet on load
+  const params = new URLSearchParams(location.search || "");
+  if (params.get("sheet") === "1") {
+    setMobileSheetOpen(true);
+  }
+
   if (state.map) {
     setTimeout(() => state.map.invalidateSize(), 100);
   }
