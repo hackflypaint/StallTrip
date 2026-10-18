@@ -665,6 +665,11 @@ function mountOptionalOverlays() {
     window.AirspaceModule.mount({ map: state.map, slotEl: airspaceSlot });
   }
 
+  const weatherSlot = document.getElementById("weatherSlot");
+  if (window.WeatherModule) {
+    window.WeatherModule.mount({ map: state.map, slotEl: weatherSlot });
+  }
+
   state.optionalOverlaysMounted = true;
 }
 
@@ -1940,6 +1945,10 @@ async function planRoute() {
 
     state.activePlan = plan;
     renderRoutePlan(plan);
+    if (window.WeatherModule) {
+      if (!state.optionalOverlaysMounted) mountOptionalOverlays();
+      else window.WeatherModule.analyzeRoutePlan(plan);
+    }
     syncCarTestHooks();
     // Phone: show route on the map. Car: collapse sheet to peek.
     if (isMobileShell()) {
