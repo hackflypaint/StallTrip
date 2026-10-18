@@ -182,13 +182,20 @@ async function runVerification() {
     const drawerTitle = await page.locator('#drawerTitle').textContent();
     console.log(`Opened drawer for: ${drawerTitle}`);
 
-    // Toggle Force Include
+    // Toggle Force Include (drawer pin — no sidebar Force-Included panel)
     console.log('Toggling "Force-Include in Route" button in drawer...');
     await page.locator('#btnAddStopToRoute').click();
     await page.waitForTimeout(2000);
 
-    const forcedBadge = await page.locator('#forcedCountBadge').textContent();
-    console.log(`Forced chargers count: ${forcedBadge}`);
+    const forcedAfterDrawer = await page.evaluate(() => window.appState.forcedChargers.size);
+    console.log(`Forced chargers count after drawer pin: ${forcedAfterDrawer}`);
+    if (forcedAfterDrawer < 1) {
+      throw new Error('Expected at least one force-included charger after drawer pin');
+    }
+    const sidebarForcedPanel = await page.locator('.sidebar .forced-section, .sidebar #forcedChipsList, .sidebar #forcedCountBadge').count();
+    if (sidebarForcedPanel > 0) {
+      throw new Error('Force-Included Stops sidebar panel must be removed');
+    }
 
     await page.screenshot({ path: path.join(MEDIA_DIR, '02_drawer_force_include.png') });
     console.log('Saved 02_drawer_force_include.png');
@@ -230,7 +237,7 @@ async function runVerification() {
       await page.mouse.up();
       await page.waitForTimeout(2500);
     }
-    const boxForced = await page.locator('#forcedCountBadge').textContent();
+    const boxForced = await page.evaluate(() => window.appState.forcedChargers.size);
     console.log(`Forced count after box select: ${boxForced}`);
     await page.screenshot({ path: path.join(MEDIA_DIR, '03_area_selected_route.png') });
     console.log('Saved 03_area_selected_route.png');
@@ -245,8 +252,11 @@ async function runVerification() {
     }
     await clearSel.click();
     await page.waitForTimeout(800);
-    const afterClearBadge = await page.locator('#forcedCountBadge').textContent();
-    console.log(`Forced count after Clear selection: ${afterClearBadge}`);
+    const afterClear = await page.evaluate(() => ({
+      forced: window.appState.forcedChargers.size,
+      areaIds: window.appState.areaForcedIds.size,
+    }));
+    console.log(`Forced count after Clear selection: ${afterClear.forced} (areaIds=${afterClear.areaIds})`);
     const stillDrawing = await page.locator('#mapModeBanner').isVisible();
     if (stillDrawing) {
       throw new Error('mapModeBanner should be hidden after Clear selection');
@@ -257,20 +267,14 @@ async function runVerification() {
     if (!mapDragging) {
       throw new Error('Map dragging should be re-enabled after Clear selection');
     }
-    const areaIdsLeft = await page.evaluate(() => window.appState.areaForcedIds.size);
-    if (areaIdsLeft !== 0) {
-      throw new Error(`Expected areaForcedIds empty after Clear selection, got ${areaIdsLeft}`);
+    if (afterClear.areaIds !== 0) {
+      throw new Error(`Expected areaForcedIds empty after Clear selection, got ${afterClear.areaIds}`);
     }
     await page.screenshot({ path: path.join(MEDIA_DIR, '03a_clear_selection.png') });
     console.log('Saved 03a_clear_selection.png');
 
-    // Clear and test freehand as additional option
+    // Test freehand as additional option (Clear selection already dropped area batch)
     console.log('4b. Switching to Freehand outline mode...');
-    const clearAllVisible = await page.locator('#btnClearForced').isVisible();
-    if (clearAllVisible) {
-      await page.locator('#btnClearForced').click();
-      await page.waitForTimeout(500);
-    }
     await page.locator('#btnAreaModeFreehand').click();
     await page.waitForSelector('#mapModeBanner', { state: 'visible' });
     if (!(await page.locator('#btnAreaModeFreehand').evaluate((el) => el.classList.contains('active')))) {
@@ -299,8 +303,8 @@ async function runVerification() {
       await page.waitForTimeout(3000);
     }
 
-    const updatedForcedBadge = await page.locator('#forcedCountBadge').textContent();
-    console.log(`Updated Forced Count after freehand select: ${updatedForcedBadge}`);
+    const updatedForced = await page.evaluate(() => window.appState.forcedChargers.size);
+    console.log(`Updated Forced Count after freehand select: ${updatedForced}`);
     await page.screenshot({ path: path.join(MEDIA_DIR, '03b_freehand_area_selected.png') });
     console.log('Saved 03b_freehand_area_selected.png');
 

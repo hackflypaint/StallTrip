@@ -133,38 +133,21 @@
             </div>
           </div>
 
-          <!-- Force-included stops (area tools live on the map toolbar) -->
-          <div class="forced-section">
-            <div class="forced-header">
-              <label><i class="fa-solid fa-star"></i> Force-Included Stops</label>
-              <span class="forced-count-badge" id="forcedCountBadge">0 selected</span>
-            </div>
-            <p class="section-desc">Use <strong>Box</strong> / <strong>Freehand</strong> on the map toolbar (top-right) to force-include stations, or pin any station from its drawer. <strong>Clear All</strong> removes every force-include.</p>
-            <div class="forced-actions">
-              <button type="button" class="secondary-btn text-danger" id="btnClearForced" style="display:none;">
-                <i class="fa-solid fa-xmark"></i> Clear All
-              </button>
-            </div>
-            <div class="forced-chips-list" id="forcedChipsList">
-              <div class="empty-forced-notice">No force-included stops. Use Box or Freehand on the map toolbar, or click a station to pin it.</div>
-            </div>
-          </div>
-
-          <!-- Advanced EV Settings Accordion -->
+          <!-- Advanced EV Settings Accordion (area force-include: map toolbar Box/Freehand/Clear + drawer pin) -->
           <details class="advanced-settings">
             <summary>
               <span><i class="fa-solid fa-sliders"></i> Vehicle & Charging Settings</span>
               <i class="fa-solid fa-chevron-down toggle-icon"></i>
             </summary>
             <div class="settings-grid">
-              <div class="setting-item">
+              <div class="setting-item setting-item-slider">
                 <label for="initialBattery">Starting Battery (%)</label>
                 <div class="range-display">
                   <input type="range" id="initialBattery" min="20" max="100" value="90">
                   <span id="initialBatteryVal">90%</span>
                 </div>
               </div>
-              <div class="setting-item">
+              <div class="setting-item setting-item-slider">
                 <label for="targetArrival">Min Arrival Reserve (%)</label>
                 <div class="range-display">
                   <input type="range" id="targetArrival" min="10" max="30" value="15">
