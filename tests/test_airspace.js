@@ -44,6 +44,11 @@ function run() {
   assert(t.LAYERS.npsParks.constraint === t.CONSTRAINT.noFly, "parks are no-fly");
   assert(t.LAYERS.suaNoFly.where.includes("'P'"), "SUA prohibited filter");
   assert(t.LAYERS.suaNoFly.where.includes("'R'"), "SUA restricted filter");
+  assert(t.LAYERS.suaNoFly.constraint === t.CONSTRAINT.noFly, "SUA P/R are no-fly");
+  assert(t.LAYERS.suaNoFly.restrictedIsHardNoFly === true, "R is hard no-fly");
+  assert(t.suaConstraint("R") === t.CONSTRAINT.noFly, "R SUA → no-fly");
+  assert(t.suaConstraint("P") === t.CONSTRAINT.noFly, "P SUA → no-fly");
+  assert(t.suaConstraint("R") !== t.CONSTRAINT.auth, "R must not be auth");
   assert(!t.LAYERS.suaNoFly.where.includes("MOA"), "MOA not in SUA filter");
   assert(t.LAYERS.defenseTfr.path.includes("National_Defense"), "defense TFR");
   assert(t.LAYERS.classAuth.where.includes("CLASS"), "class auth where");
@@ -51,6 +56,13 @@ function run() {
   assert(t.LAYERS.uasfm.path.includes("FAA_UAS_FacilityMap_Data"), "uasfm path");
   assert(t.LAYERS.stadiums.constraint === t.CONSTRAINT.noFly, "stadiums no-fly");
   assert(!t.LAYERS.airports, "airport markers removed");
+
+  assert(t.CLASS_KEYS.noFly === "noFly", "class key noFly");
+  assert(t.CLASS_KEYS.parks === "parks", "class key parks");
+  assert(t.CLASS_KEYS.auth === "auth", "class key auth");
+  assert(t.LAYERS.npsParks.classKey === t.CLASS_KEYS.parks, "parks classKey");
+  assert(t.LAYERS.suaNoFly.classKey === t.CLASS_KEYS.noFly, "sua classKey");
+  assert(t.LAYERS.classAuth.classKey === t.CLASS_KEYS.auth, "auth classKey");
 
   assert(t.constraintLabel(t.CONSTRAINT.noFly) === "No-fly", "no-fly label");
   assert(t.constraintLabel(t.CONSTRAINT.auth) === "Auth required", "auth label");

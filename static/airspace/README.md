@@ -8,9 +8,12 @@ Uses **official public FeatureServers only** (FAA AIS/UDDS + NPS Land Resources)
 
 | Visual class | Meaning (informational) | Data |
 | --- | --- | --- |
-| **No-fly** | Launch/operate generally blocked | NPS unit boundaries; FAA Prohibited + Restricted SUA; National Defense UAS TFRs; stadium NSFRs; UASFM cells with **0 ft** ceiling |
+| **No-fly** | Launch/operate generally blocked | FAA Prohibited + **Restricted (R) hard no-fly** SUA; National Defense UAS TFRs; stadium NSFRs; UASFM cells with **0 ft** ceiling |
+| **National park (no-fly)** | NPS unit boundaries (policy no-fly) | Official NPS Land Resources boundaries |
 | **Auth required** | Controlled airspace / UASFM — typically needs airspace authorization (e.g. LAANC or FAA approval) | FAA Class B/C/D; UASFM cells with ceiling &gt; 0 |
 | **Unconstrained** | No overlay in view | Absence of the above — **not** legal clearance (remote ID, NOTAMs, local rules still apply) |
+
+Each class above has an **independent checkbox** under **Drone flight** (master Show still loads data). Restricted (R) SUA is **hard no-fly**, never auth-required.
 
 **Auth** here means “airspace authorization is typically required,” not “this app issued LAANC.” Always verify with FAA / park rules before flying.
 
@@ -40,8 +43,8 @@ Queries use `geometry` + `esriGeometryEnvelope` + `f=geojson` + `outSR=4326`, CO
 
 ## Behavior / performance
 
-- Toggle **Drone flight** in the Layers panel.
-- Fetches only when enabled; debounced on `moveend` / `zoomend`.
+- Toggle **Drone flight** in the Layers panel, then toggle **No-fly** / **National park** / **Auth required** independently.
+- Fetches only when master Show is on; debounced on `moveend` / `zoomend`.
 - Min zoom **7** for parks / SUA / Class / defense TFRs; **9** for UASFM; **8** for stadium points.
 - Viewport-bounded with bbox pad; `resultRecordCount` caps; in-flight requests aborted on pan/zoom.
 

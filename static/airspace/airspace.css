@@ -58,19 +58,31 @@
   margin: 0 0 6px;
 }
 
-.airspace-legend-mini {
+.airspace-class-toggles {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  font-size: 0.62rem;
-  color: var(--text-dim);
+  flex-direction: column;
+  gap: 4px;
   margin-bottom: 6px;
 }
 
-.airspace-legend-mini span {
-  display: inline-flex;
+.airspace-class-toggle {
+  display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.airspace-class-toggle input {
+  accent-color: #e8b84a;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.airspace-class-toggle span {
+  line-height: 1.2;
 }
 
 .airspace-swatch {
