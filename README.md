@@ -25,7 +25,16 @@ docker compose up -d --build
 
 Local Python (no Docker): `python3 server.py 8080` — **stdlib only**, no `pip install`.
 
-**Mobile shell:** open `http://localhost:8080/mobile` (map-first UI). Same APIs as desktop. Optional soft UA redirect: `MOBILE_UA_REDIRECT=1`.
+**Mobile shell:** `http://localhost:8080/mobile` (map-first UI; `?sheet=1` opens the planner). Same `/api/*` as desktop. Soft UA redirect to `/mobile` stays **off** by default — set `MOBILE_UA_REDIRECT=1` only if you want phones on `/` redirected.
+
+### Mobile verify
+```bash
+python3 -m unittest tests.test_mobile tests.test_security -v
+node tests/test_mobile_touch.js && node tests/test_mobile_perf.js
+python3 server.py 8080
+# optional Playwright smoke (needs: npm install --no-save playwright)
+node tests/verify_mobile.js
+```
 
 ## What’s in the box
 

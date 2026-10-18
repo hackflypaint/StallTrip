@@ -124,6 +124,25 @@ class TestMobileShell(unittest.TestCase):
         self.assertIn(b"function subsampleMarkers", body)
         self.assertIn(b"optionalOverlaysMounted", body)
 
+    def test_phase4_compose_keeps_ua_redirect_off(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        compose = open(os.path.join(root, "docker-compose.yml"), encoding="utf-8").read()
+        active = "\n".join(
+            line for line in compose.splitlines() if line.strip() and not line.lstrip().startswith("#")
+        )
+        # Must not enable soft UA redirect in default (non-comment) compose lines
+        self.assertNotIn("MOBILE_UA_REDIRECT=1", active)
+        self.assertIn("MOBILE_UA_REDIRECT", compose)  # documented as optional
+
+    def test_phase4_verify_mobile_script_exists(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(root, "tests", "verify_mobile.js")
+        self.assertTrue(os.path.isfile(path))
+        body = open(path, encoding="utf-8").read()
+        self.assertIn("/mobile", body)
+        self.assertIn("ui-mobile", body)
+        self.assertIn("SF → LA", body)
+
     def test_phase2_mobile_css_touch_targets(self):
         status, _, body = self._get("/style.css")
         self.assertEqual(status, 200)
