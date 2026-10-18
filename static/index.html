@@ -136,17 +136,25 @@
               <label><i class="fa-solid fa-vector-square"></i> Force-Include Area / Stops</label>
               <span class="forced-count-badge" id="forcedCountBadge">0 selected</span>
             </div>
-            <p class="section-desc">Select an area on the map to guarantee those Superchargers are visited.</p>
+            <p class="section-desc">Draw a box or freehand outline on the map to guarantee those Superchargers are visited.</p>
+            <div class="area-draw-toggle" role="group" aria-label="Area draw mode">
+              <button type="button" class="area-draw-btn active" id="btnAreaModeBox" title="Rectangle box selection">
+                <i class="fa-solid fa-vector-square"></i> Box
+              </button>
+              <button type="button" class="area-draw-btn" id="btnAreaModeFreehand" title="Freehand outline selection">
+                <i class="fa-solid fa-draw-polygon"></i> Freehand
+              </button>
+            </div>
             <div class="forced-actions">
               <button type="button" class="secondary-btn" id="btnSelectArea">
-                <i class="fa-solid fa-draw-polygon"></i> <span id="btnSelectAreaText">Select Area on Map</span>
+                <i class="fa-solid fa-vector-square"></i> <span id="btnSelectAreaText">Select Area on Map</span>
               </button>
               <button type="button" class="secondary-btn text-danger" id="btnClearForced" style="display:none;">
                 <i class="fa-solid fa-xmark"></i> Clear All
               </button>
             </div>
             <div class="forced-chips-list" id="forcedChipsList">
-              <div class="empty-forced-notice">No area selected. Click "Select Area on Map" to draw a box or click any station to force-include it.</div>
+              <div class="empty-forced-notice">No area selected. Choose Box or Freehand, then draw on the map — or click any station to force-include it.</div>
             </div>
           </div>
 
@@ -312,7 +320,7 @@
 
       <!-- Map Floating Controls & Overlays -->
       <div class="map-floating-bar">
-        <button class="map-btn" id="btnMapSelectArea" title="Select Area on Map to Force-Include Superchargers">
+        <button class="map-btn" id="btnMapSelectArea" title="Select rectangle area to force-include Superchargers">
           <i class="fa-solid fa-vector-square"></i>
         </button>
         <button class="map-btn" id="btnMapReset" title="Reset View">
@@ -350,7 +358,7 @@
       <!-- Map Mode Notification Banner (Active during Area Selection) -->
       <div class="map-mode-banner" id="mapModeBanner" style="display: none;">
         <i class="fa-solid fa-vector-square pulse-icon"></i>
-        <span>Click and drag on the map to draw a selection box around Superchargers.</span>
+        <span id="mapModeBannerText">Click and drag on the map to draw a selection box around Superchargers.</span>
         <button type="button" class="cancel-banner-btn" id="btnCancelAreaSelect">
           <i class="fa-solid fa-xmark"></i> Cancel
         </button>

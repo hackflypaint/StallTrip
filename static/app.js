@@ -20,8 +20,10 @@ const state = {
   routingMode: "MAXIMIZE", // "MAXIMIZE" (default) or "MIN_STOPS"
   forcedChargers: new Map(), // Map<id, charger>
   areaSelectMode: false,
+  areaDrawMode: "box", // "box" | "freehand"
   dragStartLatLng: null,
-  selectionRect: null,
+  selectionShape: null, // rectangle, polyline, or finished polygon
+  freehandPoints: [],
   baseLayers: null,
   activeBasemap: "streets",
   layersPanelOpen: false,
@@ -221,6 +223,9 @@ function setupEventListeners() {
   document.getElementById("btnMapSelectArea").addEventListener("click", toggleAreaSelectMode);
   document.getElementById("btnCancelAreaSelect").addEventListener("click", deactivateAreaSelectMode);
   document.getElementById("btnClearForced").addEventListener("click", clearForcedChargers);
+  document.getElementById("btnAreaModeBox")?.addEventListener("click", () => setAreaDrawMode("box"));
+  document.getElementById("btnAreaModeFreehand")?.addEventListener("click", () => setAreaDrawMode("freehand"));
+  updateAreaSelectIdleCopy();
 
   // Plan Route button
   document.getElementById("btnPlanRoute").addEventListener("click", () => {
@@ -338,77 +343,211 @@ function setRoutingMode(mode) {
   }
 }
 
-// Map Area Drag-Selection Implementation
-function setupMapAreaSelection() {
-  const mapContainer = document.getElementById("map");
+/** Ray-casting point-in-polygon (Leaflet LatLng ring). */
+function pointInPolygon(lat, lng, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const yi = ring[i].lat;
+    const xi = ring[i].lng;
+    const yj = ring[j].lat;
+    const xj = ring[j].lng;
+    if (yi === yj) continue;
+    const intersect =
+      (yi > lat) !== (yj > lat) &&
+      lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
 
+function clearSelectionShape() {
+  if (state.selectionShape) {
+    state.map.removeLayer(state.selectionShape);
+    state.selectionShape = null;
+  }
+  state.freehandPoints = [];
+  state.dragStartLatLng = null;
+}
+
+async function applyForcedChargersFromSelection(chargers, emptyMessage) {
+  if (!chargers.length) {
+    alert(emptyMessage);
+  } else {
+    chargers.forEach((c) => {
+      state.forcedChargers.set(c.id, c);
+    });
+    updateForcedChargersUI();
+  }
+  deactivateAreaSelectMode();
+  if (state.origin && state.destination) {
+    planRoute();
+  }
+}
+
+async function finishBoxSelection(bounds) {
+  const minLat = Math.min(bounds.getSouth(), bounds.getNorth());
+  const maxLat = Math.max(bounds.getSouth(), bounds.getNorth());
+  const minLng = Math.min(bounds.getWest(), bounds.getEast());
+  const maxLng = Math.max(bounds.getWest(), bounds.getEast());
+
+  if (Math.abs(maxLat - minLat) < 0.005 && Math.abs(maxLng - minLng) < 0.005) {
+    clearSelectionShape();
+    return;
+  }
+
+  try {
+    const resp = await fetch(
+      `/api/superchargers?min_lat=${minLat}&max_lat=${maxLat}&min_lng=${minLng}&max_lng=${maxLng}&status=OPEN&limit=500`
+    );
+    const data = await resp.json();
+    await applyForcedChargersFromSelection(
+      data.superchargers || [],
+      "No open Superchargers found inside the selected rectangle. Try selecting a wider area."
+    );
+  } catch (err) {
+    console.error("Box area selection query error:", err);
+    deactivateAreaSelectMode();
+  }
+}
+
+async function finishFreehandSelection(ring) {
+  state.map.removeLayer(state.selectionShape);
+  state.selectionShape = L.polygon(ring, {
+    color: "#00b4d8",
+    weight: 2,
+    dashArray: "6, 6",
+    fillColor: "#00b4d8",
+    fillOpacity: 0.18,
+  }).addTo(state.map);
+
+  const bounds = state.selectionShape.getBounds();
+  try {
+    const resp = await fetch(
+      `/api/superchargers?min_lat=${bounds.getSouth()}&max_lat=${bounds.getNorth()}` +
+        `&min_lng=${bounds.getWest()}&max_lng=${bounds.getEast()}&status=OPEN&limit=500`
+    );
+    const data = await resp.json();
+    const chargers = (data.superchargers || []).filter((c) =>
+      pointInPolygon(c.lat, c.lng, ring)
+    );
+    await applyForcedChargersFromSelection(
+      chargers,
+      "No open Superchargers found inside the drawn outline. Try a larger freehand area."
+    );
+  } catch (err) {
+    console.error("Freehand area selection query error:", err);
+    deactivateAreaSelectMode();
+  }
+}
+
+// Box rectangle + freehand outline force-include (user picks mode)
+function setupMapAreaSelection() {
   state.map.on("mousedown", (e) => {
     if (!state.areaSelectMode) return;
-    if (e.originalEvent.button !== 0) return; // Left click only
+    if (e.originalEvent.button !== 0) return;
 
+    clearSelectionShape();
     state.dragStartLatLng = e.latlng;
-    if (state.selectionRect) {
-      state.map.removeLayer(state.selectionRect);
-      state.selectionRect = null;
-    }
 
-    state.selectionRect = L.rectangle([e.latlng, e.latlng], {
-      color: "#00b4d8",
-      weight: 2,
-      dashArray: "6, 6",
-      fillColor: "#00b4d8",
-      fillOpacity: 0.18,
-    }).addTo(state.map);
+    if (state.areaDrawMode === "freehand") {
+      state.freehandPoints = [e.latlng];
+      state.selectionShape = L.polyline(state.freehandPoints, {
+        color: "#00b4d8",
+        weight: 2.5,
+        dashArray: "4, 6",
+        opacity: 0.95,
+      }).addTo(state.map);
+    } else {
+      state.selectionShape = L.rectangle([e.latlng, e.latlng], {
+        color: "#00b4d8",
+        weight: 2,
+        dashArray: "6, 6",
+        fillColor: "#00b4d8",
+        fillOpacity: 0.18,
+      }).addTo(state.map);
+    }
   });
 
   state.map.on("mousemove", (e) => {
-    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionRect) return;
-    const bounds = L.latLngBounds(state.dragStartLatLng, e.latlng);
-    state.selectionRect.setBounds(bounds);
+    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionShape) return;
+
+    if (state.areaDrawMode === "freehand") {
+      const last = state.freehandPoints[state.freehandPoints.length - 1];
+      if (last && Math.abs(last.lat - e.latlng.lat) < 0.001 && Math.abs(last.lng - e.latlng.lng) < 0.001) {
+        return;
+      }
+      state.freehandPoints.push(e.latlng);
+      state.selectionShape.setLatLngs(state.freehandPoints);
+    } else {
+      state.selectionShape.setBounds(L.latLngBounds(state.dragStartLatLng, e.latlng));
+    }
   });
 
   state.map.on("mouseup", async (e) => {
-    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionRect) return;
+    if (!state.areaSelectMode || !state.dragStartLatLng || !state.selectionShape) return;
 
-    const bounds = state.selectionRect.getBounds();
-    const minLat = Math.min(bounds.getSouth(), bounds.getNorth());
-    const maxLat = Math.max(bounds.getSouth(), bounds.getNorth());
-    const minLng = Math.min(bounds.getWest(), bounds.getEast());
-    const maxLng = Math.max(bounds.getWest(), bounds.getEast());
-
-    // Small click without drag: cancel or ignore
-    if (Math.abs(maxLat - minLat) < 0.005 && Math.abs(maxLng - minLng) < 0.005) {
-      if (state.selectionRect) {
-        state.map.removeLayer(state.selectionRect);
-        state.selectionRect = null;
+    if (state.areaDrawMode === "freehand") {
+      if (e.latlng) state.freehandPoints.push(e.latlng);
+      if (state.freehandPoints.length < 6) {
+        clearSelectionShape();
+        return;
       }
-      state.dragStartLatLng = null;
-      return;
-    }
-
-    // Query chargers in this bounding box
-    try {
-      const resp = await fetch(`/api/superchargers?min_lat=${minLat}&max_lat=${maxLat}&min_lng=${minLng}&max_lng=${maxLng}&status=OPEN&limit=500`);
-      const data = await resp.json();
-      const chargers = data.superchargers || [];
-
-      if (chargers.length === 0) {
-        alert("No open Superchargers found inside the selected rectangle. Try selecting a wider area.");
-      } else {
-        chargers.forEach((c) => {
-          state.forcedChargers.set(c.id, c);
-        });
-        updateForcedChargersUI();
+      const ring = state.freehandPoints.slice();
+      const first = ring[0];
+      const last = ring[ring.length - 1];
+      if (first.lat !== last.lat || first.lng !== last.lng) {
+        ring.push(L.latLng(first.lat, first.lng));
       }
-    } catch (err) {
-      console.error("Area selection query error:", err);
-    } finally {
-      deactivateAreaSelectMode();
-      if (state.origin && state.destination) {
-        planRoute();
-      }
+      await finishFreehandSelection(ring);
+    } else {
+      await finishBoxSelection(state.selectionShape.getBounds());
     }
   });
+}
+
+function setAreaDrawMode(mode) {
+  state.areaDrawMode = mode === "freehand" ? "freehand" : "box";
+  document.getElementById("btnAreaModeBox")?.classList.toggle("active", state.areaDrawMode === "box");
+  document.getElementById("btnAreaModeFreehand")?.classList.toggle("active", state.areaDrawMode === "freehand");
+  updateAreaSelectIdleCopy();
+  if (state.areaSelectMode) {
+    // Refresh banner while drawing if mode changed mid-session
+    updateAreaSelectActiveCopy();
+  }
+}
+
+function updateAreaSelectIdleCopy() {
+  const isFreehand = state.areaDrawMode === "freehand";
+  const btnText = document.getElementById("btnSelectAreaText");
+  const btnIcon = document.querySelector("#btnSelectArea i");
+  const mapBtn = document.getElementById("btnMapSelectArea");
+  const mapIcon = mapBtn?.querySelector("i");
+  if (btnText) btnText.innerText = isFreehand ? "Draw Outline on Map" : "Select Area on Map";
+  if (btnIcon) btnIcon.className = isFreehand ? "fa-solid fa-draw-polygon" : "fa-solid fa-vector-square";
+  if (mapBtn) {
+    mapBtn.title = isFreehand
+      ? "Draw freehand outline to force-include Superchargers"
+      : "Select rectangle area to force-include Superchargers";
+  }
+  if (mapIcon) mapIcon.className = isFreehand ? "fa-solid fa-draw-polygon" : "fa-solid fa-vector-square";
+}
+
+function updateAreaSelectActiveCopy() {
+  const isFreehand = state.areaDrawMode === "freehand";
+  const btnText = document.getElementById("btnSelectAreaText");
+  const banner = document.getElementById("mapModeBannerText");
+  const bannerIcon = document.querySelector("#mapModeBanner .pulse-icon");
+  if (btnText) btnText.innerText = isFreehand ? "Drawing Outline..." : "Drawing Box...";
+  if (banner) {
+    banner.textContent = isFreehand
+      ? "Click and drag to freehand-draw an outline around Superchargers. Release to force-include stations inside."
+      : "Click and drag on the map to draw a selection box around Superchargers.";
+  }
+  if (bannerIcon) {
+    bannerIcon.className = isFreehand
+      ? "fa-solid fa-draw-polygon pulse-icon"
+      : "fa-solid fa-vector-square pulse-icon";
+  }
 }
 
 function toggleAreaSelectMode() {
@@ -424,7 +563,7 @@ function activateAreaSelectMode() {
   state.map.dragging.disable();
   document.getElementById("map").style.cursor = "crosshair";
   document.getElementById("mapModeBanner").style.display = "flex";
-  document.getElementById("btnSelectAreaText").innerText = "Drawing Box...";
+  updateAreaSelectActiveCopy();
   document.getElementById("btnMapSelectArea").style.background = "#00b4d8";
   document.getElementById("btnMapSelectArea").style.color = "#fff";
 }
@@ -435,7 +574,7 @@ function deactivateAreaSelectMode() {
   state.dragStartLatLng = null;
   document.getElementById("map").style.cursor = "";
   document.getElementById("mapModeBanner").style.display = "none";
-  document.getElementById("btnSelectAreaText").innerText = "Select Area on Map";
+  updateAreaSelectIdleCopy();
   document.getElementById("btnMapSelectArea").style.background = "";
   document.getElementById("btnMapSelectArea").style.color = "";
 }
@@ -451,10 +590,7 @@ function toggleForcedCharger(charger) {
 
 function clearForcedChargers() {
   state.forcedChargers.clear();
-  if (state.selectionRect) {
-    state.map.removeLayer(state.selectionRect);
-    state.selectionRect = null;
-  }
+  clearSelectionShape();
   updateForcedChargersUI();
   if (state.origin && state.destination && state.activePlan) {
     planRoute();
@@ -470,7 +606,7 @@ function updateForcedChargersUI() {
   chipsList.innerHTML = "";
 
   if (count === 0) {
-    chipsList.innerHTML = `<div class="empty-forced-notice">No area selected. Click "Select Area on Map" to draw a box or click any station to force-include it.</div>`;
+    chipsList.innerHTML = `<div class="empty-forced-notice">No area selected. Choose Box or Freehand, then draw on the map — or click any station to force-include it.</div>`;
   } else {
     state.forcedChargers.forEach((c) => {
       const chip = document.createElement("div");
