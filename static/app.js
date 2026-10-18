@@ -42,6 +42,22 @@ const state = {
   carShell: false,
   /** peek | plan | itinerary — default peek so map dominates on load */
   sheetMode: "peek",
+  /**
+   * Client-side live location (browser Geolocation only — never POSTed to our server).
+   * Shared by /mobile, /tesla, and desktop SPA.
+   */
+  liveLocation: {
+    watching: false,
+    follow: false,
+    watchId: null,
+    lat: null,
+    lng: null,
+    accuracy: null,
+    heading: null,
+    wakeLock: null,
+    startedAt: 0,
+  },
+  userLocationLayer: null,
 };
 
 // Expose for Playwright / debugging (cloud verification)
@@ -363,7 +379,7 @@ function setupCarShell() {
     });
   }
   if (locateBtn) {
-    locateBtn.addEventListener("click", () => detectCurrentLocation());
+    locateBtn.addEventListener("click", () => toggleLiveLocation());
   }
 }
 
@@ -567,11 +583,24 @@ function initMap() {
   state.corridorLayer = L.featureGroup().addTo(state.map);
   state.forcedMarkersLayer = L.featureGroup().addTo(state.map);
   state.markersLayer = L.featureGroup().addTo(state.map);
+  // Blue-dot / accuracy sit above route markers; never cleared by updateMapMarkers.
+  state.userLocationLayer = L.featureGroup().addTo(state.map);
+
+  // Dragging the map pauses auto-follow (watch continues; tap locate to resume).
+  state.map.on("dragstart", () => {
+    if (state.liveLocation.watching && state.liveLocation.follow) {
+      state.liveLocation.follow = false;
+      syncLiveLocationUi();
+      showToast("Follow paused — tap locate to resume.", 2400);
+    }
+  });
 
   // Desktop: mount optional overlays eagerly. Mobile: wait until Layers opens.
   if (!isMobileShell()) {
     mountOptionalOverlays();
   }
+
+  setupLiveLocationLifecycle();
 
   // Map click handler for origin/destination when not in area selection mode
   state.map.on("click", (e) => {
@@ -676,12 +705,13 @@ function setupEventListeners() {
     setDestination(place);
   });
 
-  // Current Location Button
+  // One-shot: set Origin from current GPS (sidebar form only).
   document.getElementById("btnUseCurrentLocation").addEventListener("click", () => {
     detectCurrentLocation();
   });
+  // Continuous follow-me while driving (map + car peek) — same SPA path everywhere.
   document.getElementById("btnLocateMe").addEventListener("click", () => {
-    detectCurrentLocation();
+    toggleLiveLocation();
   });
 
   // Swap Locations
@@ -1303,6 +1333,54 @@ function applyOriginFromGeolocation(place) {
 
 window.applyOriginFromGeolocation = applyOriginFromGeolocation;
 
+/** Geolocation requires a secure context (HTTPS or localhost). */
+function isSecureGeoContext() {
+  if (typeof window.isSecureContext === "boolean") return window.isSecureContext;
+  const host = (location.hostname || "").toLowerCase();
+  return location.protocol === "https:" || host === "localhost" || host === "127.0.0.1";
+}
+
+/**
+ * watchPosition options tuned for driving: GPS preferred, short cache, patient timeout
+ * (Tesla Chromium often needs more than 1s; Autopylot uses ~1s which is aggressive).
+ */
+function liveLocationWatchOptions() {
+  return {
+    enableHighAccuracy: true,
+    timeout: 12000,
+    maximumAge: 1500,
+  };
+}
+
+/** One-shot getCurrentPosition options (origin form). */
+function oneShotLocationOptions(mobileShell) {
+  return {
+    enableHighAccuracy: false,
+    timeout: 10000,
+    maximumAge: mobileShell ? 60_000 : 0,
+  };
+}
+
+/** Human-readable geolocation errors for toast / a11y. */
+function formatLiveLocationError(err) {
+  if (!err) return "Location unavailable.";
+  const code = err.code;
+  if (code === 1 || /denied/i.test(String(err.message || ""))) {
+    return "Location denied — allow location for this site, then tap locate again.";
+  }
+  if (code === 2) return "Location unavailable — GPS signal weak. Try again outdoors.";
+  if (code === 3) return "Location timed out — tap locate to retry.";
+  if (code === 0 || /unsupported/i.test(String(err.message || ""))) {
+    return "Location unsupported in this browser.";
+  }
+  return "Location unavailable — use a preset or type an address.";
+}
+
+window.isSecureGeoContext = isSecureGeoContext;
+window.liveLocationWatchOptions = liveLocationWatchOptions;
+window.oneShotLocationOptions = oneShotLocationOptions;
+window.formatLiveLocationError = formatLiveLocationError;
+
 function setLocateBusy(busy) {
   const mapBtn = document.getElementById("btnLocateMe");
   const carBtn = document.getElementById("btnCarSheetLocate");
@@ -1312,9 +1390,9 @@ function setLocateBusy(busy) {
     el.classList.toggle("is-locating", !!busy);
     el.setAttribute("aria-busy", busy ? "true" : "false");
     if (busy) {
-      el.dataset.prevHtml = el.innerHTML;
+      if (!el.dataset.prevHtml) el.dataset.prevHtml = el.innerHTML;
       el.innerHTML = '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>';
-    } else if (el.dataset.prevHtml) {
+    } else if (el.dataset.prevHtml && !state.liveLocation.watching) {
       el.innerHTML = el.dataset.prevHtml;
       delete el.dataset.prevHtml;
     }
@@ -1326,14 +1404,308 @@ function setLocateBusy(busy) {
   }
 }
 
+function syncLiveLocationUi() {
+  const live = state.liveLocation;
+  const mapBtn = document.getElementById("btnLocateMe");
+  const carBtn = document.getElementById("btnCarSheetLocate");
+  const following = !!(live.watching && live.follow);
+  const paused = !!(live.watching && !live.follow);
+  const awaitingFix = !!(live.watching && live.lat == null);
+  const title = !live.watching
+    ? "Follow my location while driving"
+    : awaitingFix
+      ? "Acquiring GPS…"
+      : following
+        ? "Stop following location"
+        : "Resume follow";
+  const icon = awaitingFix
+    ? '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>'
+    : following
+      ? '<i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>'
+      : paused
+        ? '<i class="fa-solid fa-location-arrow" aria-hidden="true"></i>'
+        : '<i class="fa-solid fa-crosshairs" aria-hidden="true"></i>';
+  [mapBtn, carBtn].forEach((el) => {
+    if (!el) return;
+    el.classList.toggle("is-active", following && !awaitingFix);
+    el.classList.toggle("is-live-follow", following && !awaitingFix);
+    el.classList.toggle("is-live-paused", paused);
+    el.classList.toggle("is-locating", awaitingFix);
+    el.setAttribute("aria-pressed", following ? "true" : "false");
+    el.setAttribute("aria-busy", awaitingFix ? "true" : "false");
+    el.title = title;
+    el.setAttribute("aria-label", title);
+    el.innerHTML = icon;
+    delete el.dataset.prevHtml;
+  });
+}
+
+/**
+ * Update the blue-dot + accuracy ring. Pure client-side; coords never leave the browser
+ * for this feature (routing still uses origin/dest only when the user plans).
+ */
+function updateUserLocationMarker(lat, lng, accuracyM, heading) {
+  if (!state.userLocationLayer || !state.map) return;
+  state.userLocationLayer.clearLayers();
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+  const acc = Number.isFinite(accuracyM) && accuracyM > 0 ? Math.min(accuracyM, 500) : null;
+  if (acc != null) {
+    L.circle([lat, lng], {
+      radius: acc,
+      className: "user-location-accuracy",
+      color: "#38bdf8",
+      weight: 1,
+      opacity: 0.55,
+      fillColor: "#38bdf8",
+      fillOpacity: 0.12,
+      interactive: false,
+    }).addTo(state.userLocationLayer);
+  }
+
+  const headingDeg = Number.isFinite(heading) ? heading : null;
+  const rotate =
+    headingDeg != null
+      ? ` style="transform:rotate(${headingDeg}deg)"`
+      : "";
+  const icon = L.divIcon({
+    className: "user-location-icon",
+    html:
+      `<div class="user-location-pulse" aria-hidden="true"></div>` +
+      `<div class="user-location-dot"${rotate}>` +
+      (headingDeg != null
+        ? '<span class="user-location-heading" aria-hidden="true"></span>'
+        : "") +
+      `</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+  L.marker([lat, lng], {
+    icon,
+    zIndexOffset: 1200,
+    interactive: false,
+    keyboard: false,
+  }).addTo(state.userLocationLayer);
+}
+
+function panMapToLiveLocation(lat, lng, { initial } = {}) {
+  if (!state.map || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  const zoom = state.map.getZoom();
+  const targetZoom = initial && zoom < 13 ? Math.max(zoom, 14) : zoom;
+  if (initial || targetZoom !== zoom) {
+    state.map.setView([lat, lng], targetZoom, { animate: true });
+  } else {
+    state.map.panTo([lat, lng], { animate: true, duration: 0.35 });
+  }
+}
+
+async function requestLiveWakeLock() {
+  const nav = typeof navigator !== "undefined" ? navigator : null;
+  if (!nav || !nav.wakeLock || typeof nav.wakeLock.request !== "function") return null;
+  try {
+    const lock = await nav.wakeLock.request("screen");
+    state.liveLocation.wakeLock = lock;
+    lock.addEventListener("release", () => {
+      if (state.liveLocation.wakeLock === lock) state.liveLocation.wakeLock = null;
+    });
+    return lock;
+  } catch (err) {
+    // Tesla / older Chromium often lack Wake Lock — degrade silently.
+    console.info("Wake Lock unavailable:", err && err.message ? err.message : err);
+    state.liveLocation.wakeLock = null;
+    return null;
+  }
+}
+
+async function releaseLiveWakeLock() {
+  const lock = state.liveLocation.wakeLock;
+  state.liveLocation.wakeLock = null;
+  if (!lock) return;
+  try {
+    await lock.release();
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function setupLiveLocationLifecycle() {
+  if (setupLiveLocationLifecycle._bound) return;
+  setupLiveLocationLifecycle._bound = true;
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && state.liveLocation.watching) {
+      // Re-acquire wake lock after tab/app returns (Wake Lock auto-releases on hide).
+      requestLiveWakeLock();
+    }
+  });
+
+  window.addEventListener("pagehide", () => {
+    // Keep watch if the browser allows background GPS; still drop wake lock.
+    releaseLiveWakeLock();
+  });
+}
+
+function onLivePositionSuccess(pos) {
+  if (!state.liveLocation.watching) return;
+  if (!pos || !pos.coords) return;
+  const { latitude, longitude, accuracy, heading } = pos.coords;
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+  const firstFix = state.liveLocation.lat == null;
+  state.liveLocation.lat = latitude;
+  state.liveLocation.lng = longitude;
+  state.liveLocation.accuracy = Number.isFinite(accuracy) ? accuracy : null;
+  state.liveLocation.heading = Number.isFinite(heading) ? heading : null;
+
+  updateUserLocationMarker(
+    latitude,
+    longitude,
+    state.liveLocation.accuracy,
+    state.liveLocation.heading
+  );
+
+  if (state.liveLocation.follow) {
+    panMapToLiveLocation(latitude, longitude, { initial: firstFix });
+  }
+
+  // First fix only: seed Origin when unset so Plan Route stays one tap away.
+  // Do NOT keep rewriting origin while driving — that would thrash an active plan.
+  if (firstFix && !state.origin) {
+    setOrigin({
+      name: "Current Location",
+      lat: latitude,
+      lng: longitude,
+      source: "geolocation",
+    });
+    if (typeof updateCarPeek === "function") updateCarPeek();
+  }
+
+  setLocateBusy(false);
+  syncLiveLocationUi();
+}
+
+function onLivePositionError(err) {
+  console.warn("Live geolocation error:", err);
+  // Transient timeout / position-unavailable: keep watching; only hard-stop on deny/unsupported.
+  const code = err && err.code;
+  if (code === 1) {
+    stopLiveLocation({ silent: true });
+    showToast(formatLiveLocationError(err));
+    return;
+  }
+  if (!state.liveLocation.lat) {
+    // Never got a fix — surface the error but leave follow armed for retry taps.
+    setLocateBusy(false);
+    syncLiveLocationUi();
+    showToast(formatLiveLocationError(err), 3600);
+  }
+}
+
+function startLiveLocation() {
+  if (state.liveLocation.watching) {
+    state.liveLocation.follow = true;
+    syncLiveLocationUi();
+    if (Number.isFinite(state.liveLocation.lat) && Number.isFinite(state.liveLocation.lng)) {
+      panMapToLiveLocation(state.liveLocation.lat, state.liveLocation.lng, { initial: false });
+    }
+    return;
+  }
+
+  if (!isSecureGeoContext()) {
+    showToast("Location needs HTTPS (or localhost). Open this app over a secure link.");
+    return;
+  }
+  if (!navigator.geolocation || typeof navigator.geolocation.watchPosition !== "function") {
+    showToast(formatLiveLocationError({ code: 0, message: "unsupported" }));
+    return;
+  }
+
+  state.liveLocation.watching = true;
+  state.liveLocation.follow = true;
+  state.liveLocation.startedAt = Date.now();
+  state.liveLocation.lat = null;
+  state.liveLocation.lng = null;
+  setLocateBusy(true);
+  syncLiveLocationUi();
+  showToast("Following your location…", 2200);
+  requestLiveWakeLock();
+
+  try {
+    state.liveLocation.watchId = navigator.geolocation.watchPosition(
+      onLivePositionSuccess,
+      onLivePositionError,
+      liveLocationWatchOptions()
+    );
+  } catch (err) {
+    console.warn("watchPosition threw:", err);
+    stopLiveLocation({ silent: true });
+    showToast(formatLiveLocationError(err));
+  }
+}
+
+function stopLiveLocation({ silent } = {}) {
+  const id = state.liveLocation.watchId;
+  if (id != null && navigator.geolocation && typeof navigator.geolocation.clearWatch === "function") {
+    try {
+      navigator.geolocation.clearWatch(id);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  state.liveLocation.watchId = null;
+  state.liveLocation.watching = false;
+  state.liveLocation.follow = false;
+  state.liveLocation.lat = null;
+  state.liveLocation.lng = null;
+  state.liveLocation.accuracy = null;
+  state.liveLocation.heading = null;
+  state.liveLocation.startedAt = 0;
+  if (state.userLocationLayer) state.userLocationLayer.clearLayers();
+  releaseLiveWakeLock();
+  setLocateBusy(false);
+  syncLiveLocationUi();
+  if (!silent) showToast("Stopped following location.", 2000);
+}
+
+/**
+ * Map / car locate control: start follow → (drag pauses) → tap resumes → tap stops.
+ * Shared implementation for phone browsers and Tesla in-car browser.
+ */
+function toggleLiveLocation() {
+  const live = state.liveLocation;
+  if (!live.watching) {
+    startLiveLocation();
+    return;
+  }
+  if (!live.follow) {
+    live.follow = true;
+    syncLiveLocationUi();
+    if (Number.isFinite(live.lat) && Number.isFinite(live.lng)) {
+      panMapToLiveLocation(live.lat, live.lng, { initial: false });
+    }
+    showToast("Following again.", 1800);
+    return;
+  }
+  stopLiveLocation();
+}
+
+window.toggleLiveLocation = toggleLiveLocation;
+window.startLiveLocation = startLiveLocation;
+window.stopLiveLocation = stopLiveLocation;
+window.syncLiveLocationUi = syncLiveLocationUi;
+
+/** One-shot GPS → Origin (sidebar "Use Current Location"). Does not start follow-me. */
 function detectCurrentLocation() {
+  if (!isSecureGeoContext()) {
+    showToast("Location needs HTTPS (or localhost). Open this app over a secure link.");
+    return;
+  }
   if (!navigator.geolocation) {
     if (isMobileShell()) {
       // Phone shell: keep demo fallback so trip UX stays testable without GPS
       applyOriginFromGeolocation(resolveGeolocationPlace(null, { code: 0, message: "unsupported" }));
     } else {
       showToast("Location unavailable. Use a preset or Edit to type an address.");
-      // Stay on current sheet — presets remain reachable in peek
     }
     return;
   }
@@ -1343,6 +1715,7 @@ function detectCurrentLocation() {
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       setLocateBusy(false);
+      syncLiveLocationUi();
       if (isMobileShell()) {
         applyOriginFromGeolocation(resolveGeolocationPlace(pos, null));
         return;
@@ -1351,28 +1724,26 @@ function detectCurrentLocation() {
         name: "Current Location",
         lat: pos.coords.latitude,
         lng: pos.coords.longitude,
+        source: "geolocation",
       };
       setOrigin(coords);
       if (state.map) state.map.setView([coords.lat, coords.lng], 12);
+      // Also show a static blue-dot for this one-shot (no watch).
+      updateUserLocationMarker(coords.lat, coords.lng, pos.coords.accuracy, pos.coords.heading);
       showToast("Location set — pick a destination or preset.", 2800);
       if (typeof updateCarPeek === "function") updateCarPeek();
     },
     (err) => {
       setLocateBusy(false);
+      syncLiveLocationUi();
       console.warn("Geolocation denied or error:", err);
       if (isMobileShell()) {
         applyOriginFromGeolocation(resolveGeolocationPlace(null, err));
         return;
       }
-      // Desktop / car: fail soft — do NOT overwrite origin; presets/manual still work.
-      const denied = err && (err.code === 1 || /denied/i.test(String(err.message || "")));
-      showToast(
-        denied
-          ? "Location denied — use a preset or Edit to type start/end."
-          : "Location unavailable — use a preset or Edit to type start/end."
-      );
+      showToast(formatLiveLocationError(err));
     },
-    { enableHighAccuracy: false, timeout: 10000, maximumAge: isMobileShell() ? 60_000 : 0 }
+    oneShotLocationOptions(isMobileShell())
   );
 }
 

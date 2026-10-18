@@ -1024,6 +1024,84 @@ body, html {
   border-color: var(--tesla-red);
 }
 
+/* Live follow-me (client-side geolocation) — cyan, not Tesla red */
+.map-btn.is-live-follow,
+.map-btn.is-active.is-live-follow {
+  background: rgba(14, 165, 233, 0.28);
+  color: #7dd3fc;
+  border-color: rgba(56, 189, 248, 0.75);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.25);
+}
+
+.map-btn.is-live-paused {
+  color: #7dd3fc;
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+/* Blue-dot user marker (driving follow-me) */
+.user-location-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+.user-location-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.35);
+  animation: user-loc-pulse 2.2s ease-out infinite;
+  pointer-events: none;
+}
+
+.user-location-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  background: #0ea5e9;
+  border: 2.5px solid #f8fafc;
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.55), 0 2px 8px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.user-location-heading {
+  position: absolute;
+  left: 50%;
+  top: -7px;
+  width: 0;
+  height: 0;
+  margin-left: -5px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 8px solid #e0f2fe;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+}
+
+@keyframes user-loc-pulse {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.7;
+  }
+  70% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .user-location-pulse {
+    animation: none;
+    opacity: 0.35;
+  }
+}
+
 @media (max-width: 720px) {
   .layers-panel {
     top: 12px;
@@ -1628,9 +1706,16 @@ body.car-shell .car-peek-btn.car-peek-locate {
 }
 
 body.car-shell .car-peek-btn.car-peek-locate.is-locating,
-body.car-shell #btnLocateMe.is-locating {
+body.car-shell #btnLocateMe.is-locating,
+body.car-shell .car-peek-btn.car-peek-locate.is-live-follow,
+body.car-shell .car-peek-btn.car-peek-locate.is-live-paused {
   color: #7dd3fc;
   border-color: rgba(0, 180, 216, 0.55);
+}
+
+body.car-shell .car-peek-btn.car-peek-locate.is-live-follow {
+  background: rgba(14, 165, 233, 0.22);
+  border-color: rgba(56, 189, 248, 0.7);
 }
 
 body.car-shell .car-peek-btn:active {
