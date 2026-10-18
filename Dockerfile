@@ -1,20 +1,48 @@
-FROM python:3.12-slim
+# Multi-stage build on Red Hat Hardened Images (HI).
+# Builder has dnf/shell for assemble+verify; runtime is minimal (no shell/package manager).
+# Catalog: https://images.redhat.com  |  Docs: Red Hat Hardened Images builder/runtime model
+#
+# Images are public (no Red Hat subscription required for HI pulls from registry.access.redhat.com).
 
-WORKDIR /app
+ARG PYTHON_HI_VERSION=3.12
 
-# Ensure unbuffered python output for clean container logs
-ENV PYTHONUNBUFFERED=1
-ENV PORT=8080
+# ---------------------------------------------------------------------------
+# Stage 1 — builder: stage app, byte-compile, import-check
+# ---------------------------------------------------------------------------
+FROM registry.access.redhat.com/hi/python:${PYTHON_HI_VERSION}-builder AS builder
 
-# Copy application files
+USER 0
+WORKDIR /build
+
 COPY routing.py server.py ./
 COPY data/ ./data/
 COPY static/ ./static/
 
+# Stdlib-only app: no pip install. Compile + import smoke to fail the build early.
+RUN ["python3", "-m", "compileall", "-q", "."]
+RUN ["python3", "-c", "import routing; import server"]
+
+# ---------------------------------------------------------------------------
+# Stage 2 — runtime: minimal HI Python (no shell)
+# ---------------------------------------------------------------------------
+FROM registry.access.redhat.com/hi/python:${PYTHON_HI_VERSION}
+
+USER 0
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8080
+
+COPY --from=builder --chown=65532:65532 /build/ /app/
+
+USER 65532
+
 EXPOSE 8080
 
+# Exec-form only — HI runtime has no /bin/sh
 HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
-  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/api/health')" || exit 1
+  CMD ["python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health')"]
 
 ENTRYPOINT ["python3", "server.py"]
 CMD ["8080"]

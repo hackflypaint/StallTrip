@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # Red Hat Hardened Images Python stream (builder + runtime multi-stage)
+      args:
+        PYTHON_HI_VERSION: "3.12"
+    image: tesla-supercharger-planner:hi-3.12
     container_name: tesla-supercharger-planner
     ports:
       - "8080:8080"
