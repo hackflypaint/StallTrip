@@ -234,7 +234,7 @@ async function runProfile(browser, profile) {
   await shot("01d_locate");
 
   console.log("2. Preset SF → LA...");
-  await page.locator('#carPresetRow .preset-tag:has-text("SF → LA")').tap();
+  await page.locator('#carPresetRow .preset-tag:has-text("SF→LA")').tap();
   await page.waitForSelector("html[data-plan-stops]", { timeout: 45000 });
   await page.waitForSelector('body[data-sheet="peek"]', { timeout: 8000 });
   const stops = parseInt((await page.getAttribute("html", "data-plan-stops")) || "0", 10);
