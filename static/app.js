@@ -19,6 +19,8 @@ const state = {
   selectedCharger: null,
   routingMode: "MAXIMIZE", // "MAXIMIZE" (default) or "MIN_STOPS"
   forcedChargers: new Map(), // Map<id, charger>
+  /** Charger IDs last added via box/freehand area select (not individual drawer/map toggles). */
+  areaForcedIds: new Set(),
   areaSelectMode: false,
   areaDrawMode: "box", // "box" | "freehand"
   dragStartLatLng: null,
@@ -221,11 +223,17 @@ function setupEventListeners() {
   // Area Selection Buttons
   document.getElementById("btnSelectArea").addEventListener("click", toggleAreaSelectMode);
   document.getElementById("btnMapSelectArea").addEventListener("click", toggleAreaSelectMode);
-  document.getElementById("btnCancelAreaSelect").addEventListener("click", deactivateAreaSelectMode);
+  document.getElementById("btnCancelAreaSelect").addEventListener("click", () => {
+    // Banner Cancel: abort in-progress draw and restore pan/zoom (keep finished overlays / forced stops)
+    clearSelectionShape();
+    deactivateAreaSelectMode();
+  });
+  document.getElementById("btnClearSelection")?.addEventListener("click", clearSelection);
   document.getElementById("btnClearForced").addEventListener("click", clearForcedChargers);
   document.getElementById("btnAreaModeBox")?.addEventListener("click", () => setAreaDrawMode("box"));
   document.getElementById("btnAreaModeFreehand")?.addEventListener("click", () => setAreaDrawMode("freehand"));
   updateAreaSelectIdleCopy();
+  updateClearSelectionButton();
 
   // Plan Route button
   document.getElementById("btnPlanRoute").addEventListener("click", () => {
@@ -324,9 +332,10 @@ function setupEventListeners() {
   document.getElementById("filterMinStalls").addEventListener("change", loadMapBoundsChargers);
   document.getElementById("btnFilterMapArea").addEventListener("click", loadMapBoundsChargers);
 
-  // Global ESC key to cancel area select
+  // Global ESC: abort in-progress draw (same as banner Cancel); use Clear selection to drop finished area
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && state.areaSelectMode) {
+      clearSelectionShape();
       deactivateAreaSelectMode();
     }
   });
@@ -367,18 +376,26 @@ function clearSelectionShape() {
   }
   state.freehandPoints = [];
   state.dragStartLatLng = null;
+  updateClearSelectionButton();
 }
 
 async function applyForcedChargersFromSelection(chargers, emptyMessage) {
   if (!chargers.length) {
     alert(emptyMessage);
   } else {
+    // Replace prior area-select batch so Clear selection undoes this draw only
+    state.areaForcedIds.forEach((id) => {
+      state.forcedChargers.delete(id);
+    });
+    state.areaForcedIds.clear();
     chargers.forEach((c) => {
       state.forcedChargers.set(c.id, c);
+      state.areaForcedIds.add(c.id);
     });
     updateForcedChargersUI();
   }
   deactivateAreaSelectMode();
+  updateClearSelectionButton();
   if (state.origin && state.destination) {
     planRoute();
   }
@@ -466,6 +483,7 @@ function setupMapAreaSelection() {
         fillOpacity: 0.18,
       }).addTo(state.map);
     }
+    updateClearSelectionButton();
   });
 
   state.map.on("mousemove", (e) => {
@@ -566,6 +584,7 @@ function activateAreaSelectMode() {
   updateAreaSelectActiveCopy();
   document.getElementById("btnMapSelectArea").style.background = "#00b4d8";
   document.getElementById("btnMapSelectArea").style.color = "#fff";
+  updateClearSelectionButton();
 }
 
 function deactivateAreaSelectMode() {
@@ -577,30 +596,70 @@ function deactivateAreaSelectMode() {
   updateAreaSelectIdleCopy();
   document.getElementById("btnMapSelectArea").style.background = "";
   document.getElementById("btnMapSelectArea").style.color = "";
+  updateClearSelectionButton();
 }
 
 function toggleForcedCharger(charger) {
   if (state.forcedChargers.has(charger.id)) {
     state.forcedChargers.delete(charger.id);
+    state.areaForcedIds.delete(charger.id);
   } else {
+    // Individual pin / drawer include — not tied to area geometry
     state.forcedChargers.set(charger.id, charger);
+    state.areaForcedIds.delete(charger.id);
   }
   updateForcedChargersUI();
 }
 
+/**
+ * Clear selection: cancel in-progress box/freehand draw, remove selection overlay,
+ * drop chargers added by the last area select, restore map pan/zoom.
+ * Individually force-included stops (drawer / station click) are kept.
+ */
+function clearSelection() {
+  const hadAreaForced = state.areaForcedIds.size > 0;
+  clearSelectionShape();
+  state.areaForcedIds.forEach((id) => {
+    state.forcedChargers.delete(id);
+  });
+  state.areaForcedIds.clear();
+  deactivateAreaSelectMode();
+  updateForcedChargersUI();
+  if (hadAreaForced && state.origin && state.destination && state.activePlan) {
+    planRoute();
+  }
+}
+
 function clearForcedChargers() {
   state.forcedChargers.clear();
+  state.areaForcedIds.clear();
   clearSelectionShape();
+  deactivateAreaSelectMode();
   updateForcedChargersUI();
   if (state.origin && state.destination && state.activePlan) {
     planRoute();
   }
 }
 
+function updateClearSelectionButton() {
+  const btn = document.getElementById("btnClearSelection");
+  if (!btn) return;
+  const hasWork =
+    state.areaSelectMode ||
+    !!state.selectionShape ||
+    state.areaForcedIds.size > 0;
+  btn.disabled = !hasWork;
+  btn.setAttribute("aria-disabled", hasWork ? "false" : "true");
+  btn.title = hasWork
+    ? "Clear drawn area and chargers added by area select; restore map pan/zoom"
+    : "No active area selection to clear";
+}
+
 function updateForcedChargersUI() {
   const count = state.forcedChargers.size;
   document.getElementById("forcedCountBadge").innerText = `${count} selected`;
   document.getElementById("btnClearForced").style.display = count > 0 ? "inline-flex" : "none";
+  updateClearSelectionButton();
 
   const chipsList = document.getElementById("forcedChipsList");
   chipsList.innerHTML = "";

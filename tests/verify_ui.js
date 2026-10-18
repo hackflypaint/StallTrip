@@ -188,10 +188,42 @@ async function runVerification() {
     await page.screenshot({ path: path.join(MEDIA_DIR, '03_area_selected_route.png') });
     console.log('Saved 03_area_selected_route.png');
 
+    // 4a2. Clear selection restores pan/zoom and drops area-forced chargers
+    console.log('4a2. Clicking Clear selection...');
+    const clearSel = page.locator('#btnClearSelection');
+    if (await clearSel.isDisabled()) {
+      // Still valid if box found no chargers — enable by entering draw mode
+      await page.locator('#btnSelectArea').click();
+      await page.waitForSelector('#mapModeBanner', { state: 'visible' });
+    }
+    await clearSel.click();
+    await page.waitForTimeout(800);
+    const afterClearBadge = await page.locator('#forcedCountBadge').textContent();
+    console.log(`Forced count after Clear selection: ${afterClearBadge}`);
+    const stillDrawing = await page.locator('#mapModeBanner').isVisible();
+    if (stillDrawing) {
+      throw new Error('mapModeBanner should be hidden after Clear selection');
+    }
+    const mapDragging = await page.evaluate(() => {
+      return !!(window.appState && window.appState.map && window.appState.map.dragging.enabled());
+    });
+    if (!mapDragging) {
+      throw new Error('Map dragging should be re-enabled after Clear selection');
+    }
+    const areaIdsLeft = await page.evaluate(() => window.appState.areaForcedIds.size);
+    if (areaIdsLeft !== 0) {
+      throw new Error(`Expected areaForcedIds empty after Clear selection, got ${areaIdsLeft}`);
+    }
+    await page.screenshot({ path: path.join(MEDIA_DIR, '03a_clear_selection.png') });
+    console.log('Saved 03a_clear_selection.png');
+
     // Clear and test freehand as additional option
     console.log('4b. Switching to Freehand outline mode...');
-    await page.locator('#btnClearForced').click();
-    await page.waitForTimeout(500);
+    const clearAllVisible = await page.locator('#btnClearForced').isVisible();
+    if (clearAllVisible) {
+      await page.locator('#btnClearForced').click();
+      await page.waitForTimeout(500);
+    }
     await page.locator('#btnAreaModeFreehand').click();
     if (!(await page.locator('#btnAreaModeFreehand').evaluate((el) => el.classList.contains('active')))) {
       throw new Error('Freehand mode button should be active');
@@ -225,6 +257,28 @@ async function runVerification() {
     console.log(`Updated Forced Count after freehand select: ${updatedForcedBadge}`);
     await page.screenshot({ path: path.join(MEDIA_DIR, '03b_freehand_area_selected.png') });
     console.log('Saved 03b_freehand_area_selected.png');
+
+    // Mid-draw Clear selection cancels freehand without leaving draw mode stuck
+    console.log('4c. Starting freehand draw then Clear selection mid-stroke...');
+    await page.locator('#btnSelectArea').click();
+    await page.waitForSelector('#mapModeBanner', { state: 'visible' });
+    const mapBox3 = await page.locator('#map').boundingBox();
+    if (mapBox3) {
+      await page.mouse.move(mapBox3.x + mapBox3.width * 0.4, mapBox3.y + mapBox3.height * 0.4);
+      await page.mouse.down();
+      await page.mouse.move(mapBox3.x + mapBox3.width * 0.5, mapBox3.y + mapBox3.height * 0.45, { steps: 5 });
+      // Do not mouse.up — abandon with Clear selection
+      await page.locator('#btnClearSelection').click();
+      await page.waitForTimeout(400);
+      await page.mouse.up().catch(() => {});
+    }
+    if (await page.locator('#mapModeBanner').isVisible()) {
+      throw new Error('Draw mode should end when Clear selection is clicked mid-stroke');
+    }
+    const shapeLeft = await page.evaluate(() => !!window.appState.selectionShape);
+    if (shapeLeft) {
+      throw new Error('selectionShape should be null after Clear selection mid-draw');
+    }
 
     // 5. Switch to Explore Tab and check filters
     console.log('5. Testing Explore Chargers tab...');

@@ -514,12 +514,20 @@ body, html {
 
 .forced-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
 
 .forced-actions .secondary-btn {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.forced-actions #btnClearSelection:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .text-danger {

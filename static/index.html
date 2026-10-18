@@ -136,7 +136,7 @@
               <label><i class="fa-solid fa-vector-square"></i> Force-Include Area / Stops</label>
               <span class="forced-count-badge" id="forcedCountBadge">0 selected</span>
             </div>
-            <p class="section-desc">Draw a box or freehand outline on the map to guarantee those Superchargers are visited.</p>
+            <p class="section-desc">Draw a box or freehand outline on the map to guarantee those Superchargers are visited. <strong>Clear selection</strong> removes the drawn area and chargers from that draw (individually pinned stops stay); <strong>Clear All</strong> removes every force-include.</p>
             <div class="area-draw-toggle" role="group" aria-label="Area draw mode">
               <button type="button" class="area-draw-btn active" id="btnAreaModeBox" title="Rectangle box selection">
                 <i class="fa-solid fa-vector-square"></i> Box
@@ -148,6 +148,11 @@
             <div class="forced-actions">
               <button type="button" class="secondary-btn" id="btnSelectArea">
                 <i class="fa-solid fa-vector-square"></i> <span id="btnSelectAreaText">Select Area on Map</span>
+              </button>
+              <button type="button" class="secondary-btn text-danger" id="btnClearSelection" disabled
+                title="No active area selection to clear"
+                aria-label="Clear selection">
+                <i class="fa-solid fa-eraser"></i> Clear selection
               </button>
               <button type="button" class="secondary-btn text-danger" id="btnClearForced" style="display:none;">
                 <i class="fa-solid fa-xmark"></i> Clear All
