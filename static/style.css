@@ -1041,6 +1041,61 @@ body, html {
   filter: brightness(0.85) contrast(1.1) saturate(0.9);
 }
 
+/* Topographic basemap: keep terrain colors readable under dark chrome */
+#map.basemap-topo .leaflet-tile-pane {
+  filter: brightness(0.95) contrast(1.05) saturate(1.05);
+}
+
+/* Dark Leaflet base-layer control (Streets / Topographic) */
+.leaflet-control-layers {
+  background: rgba(26, 30, 36, 0.94);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-main);
+  box-shadow: var(--shadow-md);
+  padding: 8px 12px;
+  line-height: 1.45;
+}
+
+.leaflet-control-layers-expanded {
+  padding: 10px 14px;
+}
+
+.leaflet-control-layers label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.leaflet-control-layers label:hover {
+  color: var(--text-main);
+}
+
+.leaflet-control-layers input.leaflet-control-layers-selector {
+  accent-color: var(--tesla-red);
+  margin: 0;
+}
+
+.leaflet-control-layers-separator {
+  border-top-color: var(--border-color);
+}
+
+.leaflet-control-attribution {
+  background: rgba(26, 30, 36, 0.85) !important;
+  color: var(--text-dim);
+  font-size: 0.65rem;
+}
+
+.leaflet-control-attribution a {
+  color: var(--text-muted);
+}
+
 /* Map Floating Tools */
 .map-floating-bar {
   position: absolute;

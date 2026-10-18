@@ -72,6 +72,29 @@ async function runVerification() {
     await page.screenshot({ path: path.join(MEDIA_DIR, '01_visit_maximizer_route.png') });
     console.log('Saved 01_visit_maximizer_route.png');
 
+    // 2b. Switch to Topographic basemap and capture screenshot
+    console.log('2b. Switching basemap to Topographic (OpenTopoMap)...');
+    const topoLabel = page.locator('.leaflet-control-layers label:has-text("Topographic")');
+    await topoLabel.waitFor({ state: 'visible', timeout: 5000 });
+    await topoLabel.click();
+    await page.waitForTimeout(2500);
+
+    const mapHasTopoClass = await page.locator('#map.basemap-topo').count();
+    if (mapHasTopoClass < 1) {
+      throw new Error('Expected #map.basemap-topo after selecting Topographic layer');
+    }
+    const topoRadioChecked = await page.locator('.leaflet-control-layers label:has-text("Topographic") input').isChecked();
+    if (!topoRadioChecked) {
+      throw new Error('Topographic radio was not checked after click');
+    }
+
+    await page.screenshot({ path: path.join(MEDIA_DIR, 'topo_layer.png') });
+    console.log('Saved topo_layer.png');
+
+    // Switch back to Streets so remaining overlays stay on familiar dark-filtered tiles
+    await page.locator('.leaflet-control-layers label:has-text("Streets")').click();
+    await page.waitForTimeout(800);
+
     // 3. Test Drawer and Force-Include toggle
     console.log('3. Clicking first Supercharger stop in timeline to view details...');
     const firstStop = page.locator('.timeline-item.supercharger .timeline-content').first();
