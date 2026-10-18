@@ -1,7 +1,7 @@
 /**
  * Tesla Supercharger Route Planner - Client Application
  * Includes Visit Maximizer routing, map area drag-selection for force-included chargers,
- * and intelligent multi-stop itinerary generation.
+ * Streets / Topographic (OpenTopoMap) basemap switching, and multi-stop itinerary generation.
  */
 
 // Application State
@@ -21,6 +21,8 @@ const state = {
   areaSelectMode: false,
   dragStartLatLng: null,
   selectionRect: null,
+  baseLayers: null,
+  activeBasemap: "streets",
 };
 
 // Initialize Application
