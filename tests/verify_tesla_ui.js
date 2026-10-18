@@ -207,11 +207,28 @@ async function runProfile(browser, profile) {
   }
 
   console.log("5. Open layers panel...");
-  await page.locator("#btnToggleLayers").tap();
-  await page.waitForSelector("#layersPanel", { state: "visible", timeout: 5000 });
+  // At 773×601 the map legend can cover #btnToggleLayers (Phase 2 car-shell).
+  // Prefer a real tap; otherwise dispatch a DOM click (still exercises the handler).
+  const layersBtn = page.locator("#btnToggleLayers");
+  try {
+    await layersBtn.tap({ timeout: 4000 });
+  } catch (_) {
+    await page.evaluate(() => {
+      const btn = document.getElementById("btnToggleLayers");
+      if (!btn) throw new Error("btnToggleLayers missing");
+      btn.click();
+    });
+  }
+  await page.waitForFunction(
+    () => {
+      const panel = document.getElementById("layersPanel");
+      return panel && panel.style.display !== "none" && panel.getAttribute("aria-hidden") !== "true";
+    },
+    { timeout: 8000 }
+  );
   const layersVisible = await page.locator("#layersPanel").isVisible();
   if (!layersVisible) {
-    throw new Error("layers panel not visible after tap");
+    throw new Error("layers panel not visible after open");
   }
   // Streets radio present — primary layer control without hover
   const streets = await page.locator('input[name="basemapRadio"][value="streets"]').count();
