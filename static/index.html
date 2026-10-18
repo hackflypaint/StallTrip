@@ -15,18 +15,19 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer">
   
-  <link rel="stylesheet" href="/style.css">
+  <!-- ?v= busts Tesla browser cache after car-shell deploys -->
+  <link rel="stylesheet" href="/style.css?v=car3">
   <!-- Removable foliage module CSS — delete with static/foliage/ -->
-  <link rel="stylesheet" href="/foliage/foliage.css">
+  <link rel="stylesheet" href="/foliage/foliage.css?v=car3">
   <!-- Removable drone flight module CSS — delete with static/airspace/ -->
-  <link rel="stylesheet" href="/airspace/airspace.css">
+  <link rel="stylesheet" href="/airspace/airspace.css?v=car3">
 </head>
 <body>
   <div class="app-container" id="appContainer">
     
     <!-- Sidebar / Control Panel (becomes bottom sheet in car-shell mode) -->
     <aside class="sidebar" id="sidebar">
-      <!-- Car sheet chrome: handle + peek summary (visible only in body.car-shell) -->
+      <!-- Car sheet chrome: compact peek + presets (visible only in body.car-shell) -->
       <div class="car-sheet-chrome" id="carSheetChrome" hidden>
         <button type="button" class="car-sheet-handle" id="btnCarSheetHandle" aria-label="Expand or collapse plan sheet">
           <span class="car-sheet-grip" aria-hidden="true"></span>
@@ -35,14 +36,21 @@
           <div class="car-peek-brand">
             <span class="logo-icon car-peek-logo" aria-hidden="true"><i class="fa-solid fa-bolt"></i></span>
             <div class="car-peek-text">
-              <strong>Supercharge</strong>
-              <span class="car-peek-summary" id="carPeekSummary">Tap a preset or enter places</span>
+              <strong>Supercharge <span class="car-mode-chip" id="carModeChip" title="Car layout active">CAR</span></strong>
+              <span class="car-peek-summary" id="carPeekSummary">Tap a preset — map stays big</span>
             </div>
           </div>
           <div class="car-peek-actions">
-            <button type="button" class="car-peek-btn" id="btnCarSheetPlan">Plan</button>
+            <button type="button" class="car-peek-btn" id="btnCarSheetPlan">Edit</button>
             <button type="button" class="car-peek-btn car-peek-btn-primary" id="btnCarSheetItinerary" hidden>Stops</button>
           </div>
+        </div>
+        <!-- Presets live in peek so  can plan without opening the tall form -->
+        <div class="car-preset-row" id="carPresetRow" role="group" aria-label="Popular routes">
+          <button type="button" class="preset-tag" data-orig="San Francisco, CA" data-dest="Los Angeles, CA">SF → LA</button>
+          <button type="button" class="preset-tag" data-orig="Los Angeles, CA" data-dest="Las Vegas, NV">LA → Vegas</button>
+          <button type="button" class="preset-tag" data-orig="New York, NY" data-dest="Washington, DC">NYC → DC</button>
+          <button type="button" class="preset-tag" data-orig="Seattle, WA" data-dest="Portland, OR">Seattle → Portland</button>
         </div>
       </div>
 
@@ -315,6 +323,9 @@
     <main class="map-container">
       <div id="map"></div>
 
+      <!-- Visible proof car-shell is ON (hidden unless body.car-shell) -->
+      <div class="car-mode-badge" id="carModeBadge" hidden aria-live="polite">CAR MODE</div>
+
       <!-- Map Floating Controls & Overlays -->
       <div class="map-floating-bar">
         <div class="map-area-tools" role="group" aria-label="Area selection tools">
@@ -432,9 +443,9 @@
   <div id="appToast" class="app-toast" role="status" aria-live="polite" hidden></div>
 
   <!-- Removable foliage module JS — delete with static/foliage/ -->
-  <script src="/foliage/foliage-overlay.js"></script>
+  <script src="/foliage/foliage-overlay.js?v=car3"></script>
   <!-- Removable drone flight module JS — delete with static/airspace/ -->
-  <script src="/airspace/airspace-overlay.js"></script>
-  <script src="/app.js"></script>
+  <script src="/airspace/airspace-overlay.js?v=car3"></script>
+  <script src="/app.js?v=car3"></script>
 </body>
 </html>

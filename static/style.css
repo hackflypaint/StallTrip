@@ -1286,20 +1286,20 @@ body, html {
   box-shadow: 0 2px 8px rgba(0,0,0,0.4);
 }
 
-/* Responsive — phone / narrow (not Tesla landscape car shell) */
+/* Responsive — phone / narrow (NOT when car-shell is active) */
 @media (max-width: 860px) {
-  .app-container {
+  body:not(.car-shell) .app-container {
     flex-direction: column;
   }
-  .sidebar {
+  body:not(.car-shell) .sidebar {
     width: 100%;
     min-width: unset;
     height: 50vh;
   }
-  .map-container {
+  body:not(.car-shell) .map-container {
     height: 50vh;
   }
-  .charger-drawer {
+  body:not(.car-shell) .charger-drawer {
     left: 12px;
     right: 12px;
     bottom: 12px;
@@ -1341,7 +1341,8 @@ body, html {
 }
 
 body.car-shell {
-  --car-sheet-h: 280px;
+  /* Default = peek height; map must dominate (incar photo ground truth) */
+  --car-sheet-h: 120px;
   --car-touch: 56px;
   --car-touch-lg: 64px;
 }
@@ -1350,8 +1351,8 @@ body.car-shell .car-sheet-chrome {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  gap: 0;
-  padding: 0 12px 8px;
+  gap: 6px;
+  padding: 0 10px 8px;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-secondary);
 }
@@ -1376,8 +1377,8 @@ body.car-shell .sidebar {
   bottom: 0;
   width: 100%;
   min-width: 0;
-  max-height: none;
-  height: var(--car-sheet-h);
+  height: var(--car-sheet-h) !important;
+  max-height: var(--car-sheet-h) !important;
   z-index: 1200;
   border-right: none;
   border-top: 1px solid var(--border-color);
@@ -1385,21 +1386,39 @@ body.car-shell .sidebar {
   box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.45);
   background: var(--bg-primary);
   transition: height 0.22s ease;
+  overflow: hidden;
+}
+
+body.car-shell[data-sheet="plan"] .sidebar,
+body.car-shell[data-sheet="itinerary"] .sidebar {
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 body.car-shell[data-sheet="peek"] {
-  --car-sheet-h: 88px;
+  /* Fit handle + peek row + preset chips without clipping */
+  --car-sheet-h: 148px;
 }
 
 body.car-shell[data-sheet="plan"] {
-  --car-sheet-h: min(300px, 50vh);
+  /* Keep form short — never 50% again (Note: top way too big) */
+  --car-sheet-h: min(200px, 34vh);
 }
 
 body.car-shell[data-sheet="itinerary"] {
-  --car-sheet-h: min(470px, 78vh);
+  --car-sheet-h: min(420px, 72vh);
 }
 
-body.car-shell[data-sheet="peek"] .sidebar-header,
+/* Brand header always gone in car mode — peek chip is enough */
+body.car-shell .sidebar-header {
+  display: none !important;
+}
+
+/* Duplicate presets in sidebar form — chrome row owns them */
+body.car-shell .route-form > .quick-presets {
+  display: none !important;
+}
+
 body.car-shell[data-sheet="peek"] .tabs,
 body.car-shell[data-sheet="peek"] .tab-content {
   display: none !important;
@@ -1407,6 +1426,33 @@ body.car-shell[data-sheet="peek"] .tab-content {
 
 body.car-shell[data-sheet="plan"] .route-results {
   display: none !important;
+}
+
+body.car-shell[data-sheet="plan"] .car-preset-row {
+  display: none; /* presets already used to get here; reclaim height for fields */
+}
+
+body.car-shell .car-preset-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 2px 2px;
+  scrollbar-width: none;
+}
+
+body.car-shell .car-preset-row::-webkit-scrollbar {
+  display: none;
+}
+
+body.car-shell .car-preset-row .preset-tag {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-radius: 12px;
 }
 
 body.car-shell .car-sheet-handle {
@@ -1440,62 +1486,104 @@ body.car-shell .car-peek-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  min-height: 52px;
+  gap: 8px;
+  min-height: 40px;
 }
 
 body.car-shell .car-peek-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
   flex: 1;
 }
 
 body.car-shell .car-peek-logo {
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   flex-shrink: 0;
-  font-size: 1rem;
+  font-size: 0.85rem;
+  border-radius: 8px;
 }
 
 body.car-shell .car-peek-text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   min-width: 0;
 }
 
 body.car-shell .car-peek-text strong {
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   color: #fff;
+  line-height: 1.15;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+body.car-shell .car-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--tesla-red);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+body.car-shell .car-mode-badge {
+  display: flex !important;
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1100;
+  min-height: 28px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(232, 33, 39, 0.92);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+}
+
+.car-mode-badge[hidden] {
+  display: none !important;
 }
 
 body.car-shell .car-peek-summary {
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 42vw;
+  max-width: 48vw;
+  line-height: 1.2;
 }
 
 body.car-shell .car-peek-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 body.car-shell .car-peek-btn {
-  min-height: 48px;
-  min-width: 64px;
-  padding: 10px 14px;
-  border-radius: 12px;
+  min-height: 44px;
+  min-width: 56px;
+  padding: 8px 12px;
+  border-radius: 10px;
   border: 1px solid var(--border-color);
   background: var(--bg-tertiary);
   color: var(--text-main);
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   cursor: pointer;
   touch-action: manipulation;
 }
@@ -1515,32 +1603,55 @@ body.car-shell .car-peek-btn-primary:active {
   background: var(--tesla-red-hover);
 }
 
-body.car-shell .sidebar-header {
-  padding: 10px 14px;
-}
-
-body.car-shell .brand h1 {
-  font-size: 1rem;
-}
-
 body.car-shell .subtitle {
   display: none;
 }
 
 body.car-shell .tab-btn {
-  min-height: 48px;
-  font-size: 0.9rem;
-  padding: 12px 8px;
+  min-height: 40px;
+  font-size: 0.78rem;
+  padding: 6px 6px;
+  gap: 4px;
 }
 
 body.car-shell .tab-content {
-  padding: 12px 14px 18px;
-  gap: 12px;
+  padding: 8px 12px 12px;
+  gap: 8px;
+}
+
+/* Compact compose: placeholders only — labels ate the map in the photo */
+body.car-shell[data-sheet="plan"] .input-header label {
+  display: none;
+}
+
+body.car-shell[data-sheet="plan"] .input-header {
+  justify-content: flex-end;
+  min-height: 0;
+  margin-bottom: 2px;
+}
+
+body.car-shell[data-sheet="plan"] .swap-container {
+  display: none;
+}
+
+body.car-shell[data-sheet="plan"] .advanced-settings {
+  display: none;
+}
+
+body.car-shell[data-sheet="plan"] .routing-goal-section {
+  padding: 6px 8px;
+  gap: 6px;
+}
+
+body.car-shell[data-sheet="plan"] .routing-goal-section .input-header {
+  display: none;
 }
 
 body.car-shell .input-wrapper input {
-  min-height: 48px;
-  font-size: 1rem;
+  min-height: 44px;
+  font-size: 0.95rem;
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 body.car-shell .clear-btn {
@@ -1573,24 +1684,20 @@ body.car-shell .preset-label {
   font-size: 0.78rem;
 }
 
-body.car-shell .preset-tag {
-  min-height: 44px;
-  padding: 10px 14px;
-  font-size: 0.85rem;
-  border-radius: 12px;
-  font-weight: 600;
-}
-
 body.car-shell .strategy-btn {
-  min-height: 48px;
-  font-size: 0.85rem;
-  padding: 10px 8px;
+  min-height: 44px;
+  font-size: 0.78rem;
+  padding: 8px 6px;
 }
 
 body.car-shell .primary-btn {
-  min-height: 52px;
-  font-size: 1rem;
-  padding: 14px;
+  min-height: 48px;
+  font-size: 0.95rem;
+  padding: 12px;
+}
+
+body.car-shell[data-sheet="plan"] .strategy-params {
+  display: none; /* max-stops stays at default; reclaim height */
 }
 
 body.car-shell .primary-btn:hover {
@@ -1611,19 +1718,23 @@ body.car-shell .map-floating-bar {
   top: 12px;
   right: 12px;
   gap: 10px;
-  /* Keep clear of bottom sheet */
-  max-height: calc(100% - var(--car-sheet-h) - 24px);
+  /* Do not max-height + flex-shrink the tools — that crushed 56px targets to ~20px */
   overflow: visible;
+  flex-shrink: 0;
 }
 
 body.car-shell .map-area-tools {
   gap: 8px;
   padding: 6px;
+  flex-shrink: 0;
 }
 
 body.car-shell .map-btn {
   width: var(--car-touch);
   height: var(--car-touch);
+  min-width: var(--car-touch);
+  min-height: var(--car-touch);
+  flex-shrink: 0;
   font-size: 1.15rem;
   border-radius: 14px;
 }
@@ -1738,12 +1849,15 @@ body.car-shell .suggestion-item:active {
   background: var(--bg-tertiary);
 }
 
-/* Taller car canvas (e.g. 1254×784): give plan sheet a bit more room */
+/* Taller car canvas (e.g. 1254×784): slightly roomier, still map-first */
 @media (min-height: 720px) {
+  body.car-shell[data-sheet="peek"] {
+    --car-sheet-h: 152px;
+  }
   body.car-shell[data-sheet="plan"] {
-    --car-sheet-h: min(340px, 46vh);
+    --car-sheet-h: min(220px, 30vh);
   }
   body.car-shell[data-sheet="itinerary"] {
-    --car-sheet-h: min(520px, 72vh);
+    --car-sheet-h: min(480px, 68vh);
   }
 }

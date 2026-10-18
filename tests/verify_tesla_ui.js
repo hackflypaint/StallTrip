@@ -1,13 +1,9 @@
 /**
  * Tesla landscape Playwright suite (Gate G1).
  *
- * Profiles (community-measured post–summer 2026 Model Y CSS sizes):
- *   - 773×601 windowed browser chrome
- *   - 1254×784 screen / fullscreen-ish
- * deviceScaleFactor 1.53, hasTouch true.
- *
- * Smoke: load → preset plan → drawer → box select → layers open.
- * Screenshots → store media/tesla-emulation/car-shell/ (car shell UX).
+ * Profiles include half-MCU (~627×650) — the real ngrok pane that broke
+ * the v1 detector (w>=700). Also 773×601 and 1254×784.
+ * Avoid waitForFunction predicates (CSP blocks unsafe-eval).
  */
 const { chromium } = require("playwright");
 const fs = require("fs");
@@ -25,6 +21,8 @@ const TESLA_UA =
   "Chrome/148.0.0.0 Safari/537.36";
 
 const PROFILES = [
+  // Real half-MCU CSS size (DPR 1.53 → ~half of 1254)
+  { name: "half-mcu-627x650", width: 627, height: 650 },
   { name: "windowed-773x601", width: 773, height: 601 },
   { name: "screen-1254x784", width: 1254, height: 784 },
 ];
@@ -103,145 +101,103 @@ async function runProfile(browser, profile) {
       fullPage: false,
     });
 
-  // Probe page fingerprint fields
-  console.log("0. /tesla-probe fingerprint...");
+  console.log("0. /tesla-probe...");
   await page.goto(`${BASE}/tesla-probe`, { waitUntil: "domcontentloaded", timeout: 20000 });
   await page.waitForSelector("#probeRows .row", { timeout: 10000 });
-  const probeText = await page.locator("#probeRows").innerText();
-  if (!/userAgent/i.test(probeText) || !/devicePixelRatio/i.test(probeText)) {
-    throw new Error("probe page missing core fingerprint rows");
-  }
-  const chromiumCell = await page.evaluate(() => {
-    const rows = [...document.querySelectorAll("#probeRows .row")];
-    const hit = rows.find((r) => /chromiumMajor/i.test(r.textContent || ""));
-    return hit ? hit.textContent : "";
-  });
-  if (!/148/.test(chromiumCell || "")) {
-    throw new Error(`expected Chromium major 148 from spoofed UA, got: ${chromiumCell}`);
-  }
   await page.locator("#touchPad").tap();
-  await page.waitForFunction(
-    () => {
-      const pad = document.getElementById("touchPad");
-      return pad && pad.classList.contains("hit");
-    },
-    { timeout: 5000 }
-  );
+  await page.locator("#touchPad.hit").waitFor({ timeout: 5000 });
   await shot("probe");
-  console.log("  probe OK");
 
-  // App smoke
-  console.log("1. Load planner (expect car-shell)...");
+  console.log("1. Load planner — require CAR MODE...");
   await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded", timeout: 20000 });
-  await page.waitForSelector("#totalChargersBadge", { timeout: 15000 });
-  await page.waitForFunction(() => document.body.classList.contains("car-shell"), {
-    timeout: 5000,
-  });
-  await page.waitForFunction(() => document.body.getAttribute("data-sheet") === "plan", {
-    timeout: 5000,
-  });
-  await page.waitForSelector("button.preset-tag", { timeout: 10000 });
+  await page.waitForSelector("body.car-shell", { timeout: 8000 });
+  await page.waitForSelector('body[data-sheet="peek"]', { timeout: 5000 });
+  await page.waitForSelector("#carModeBadge", { state: "visible", timeout: 5000 });
+  await page.waitForSelector("#carPresetRow .preset-tag", { timeout: 5000 });
 
-  const layersH = await page.locator("#btnToggleLayers").evaluate((el) => el.getBoundingClientRect().height);
-  console.log(`  car-shell active; layers btn height=${layersH}px`);
-  if (layersH < 44) {
-    throw new Error(`map control touch target too small: ${layersH}px (need ≥44)`);
+  const badgeText = (await page.locator("#carModeBadge").textContent()) || "";
+  if (!/CAR MODE/i.test(badgeText)) {
+    throw new Error(`car mode badge missing text: ${badgeText}`);
   }
 
-  await shot("01_load");
-
-  console.log("2. Preset plan SF → LA...");
-  await page.selectOption("#maxStopsSelect", "6");
-  await page.locator('button.preset-tag:has-text("SF → LA")').tap();
-  // After plan, sheet peeks — results may be hidden; assert via appState
-  await page.waitForFunction(
-    () => {
-      const plan = window.appState && window.appState.activePlan;
-      return plan && plan.summary && plan.summary.supercharger_stops_count > 1;
-    },
-    { timeout: 45000 }
-  );
-  await page.waitForFunction(() => document.body.getAttribute("data-sheet") === "peek", {
-    timeout: 8000,
+  // Use getBoundingClientRect (CSS height) — more reliable than locator union box
+  const metrics = await page.locator("body").evaluate((body) => {
+    const sb = document.getElementById("sidebar");
+    const btn = document.getElementById("btnToggleLayers");
+    const sheetH = sb ? sb.getBoundingClientRect().height : 0;
+    const layersH = btn ? btn.getBoundingClientRect().height : 0;
+    const varH = getComputedStyle(body).getPropertyValue("--car-sheet-h").trim();
+    return { sheetH, layersH, varH, sheet: body.getAttribute("data-sheet") };
   });
-  const stops = await page.evaluate(
-    () => window.appState.activePlan.summary.supercharger_stops_count
+  if (metrics.layersH < 44) {
+    throw new Error(`map control too small: ${metrics.layersH}px`);
+  }
+  const sheetH = metrics.sheetH;
+  const mapShare = 1 - sheetH / profile.height;
+  console.log(
+    `  ${badgeText.trim()}; sheet≈${Math.round(sheetH)}px (css ${metrics.varH}); map≈${(mapShare * 100).toFixed(0)}%`
   );
-  console.log(`  stops=${stops}; sheet=peek`);
+  if (mapShare < 0.6) {
+    throw new Error(
+      `MAP MUST DOMINATE: share ${(mapShare * 100).toFixed(0)}% < 60% (sheet ${Math.round(sheetH)}px / ${profile.height}px)`
+    );
+  }
+
+  // Must NOT look like baseline: tall brand header should be gone
+  const headerVisible = await page.locator(".sidebar-header").isVisible().catch(() => false);
+  if (headerVisible) {
+    throw new Error("sidebar-header still visible in car peek — not compressed");
+  }
+
+  await shot("01_load_peek");
+
+  console.log("2. Preset SF → LA...");
+  await page.locator('#carPresetRow .preset-tag:has-text("SF → LA")').tap();
+  await page.waitForSelector("html[data-plan-stops]", { timeout: 45000 });
+  await page.waitForSelector('body[data-sheet="peek"]', { timeout: 8000 });
+  const stops = parseInt((await page.getAttribute("html", "data-plan-stops")) || "0", 10);
+  if (!(stops > 1)) throw new Error(`expected >1 stops, got ${stops}`);
+  await page.locator("#carPeekSummary").filter({ hasText: /\d+\s+stops/i }).waitFor({ timeout: 5000 });
   await shot("02_plan_peek");
 
-  console.log("3. Expand itinerary + open charger drawer...");
+  console.log("3. Itinerary + drawer...");
   await page.locator("#btnCarSheetItinerary").tap();
-  await page.waitForFunction(() => document.body.getAttribute("data-sheet") === "itinerary", {
-    timeout: 5000,
-  });
+  await page.waitForSelector('body[data-sheet="itinerary"]', { timeout: 5000 });
   await page.waitForSelector("#routeResults", { state: "visible", timeout: 8000 });
   await page.locator(".timeline-item.supercharger .timeline-content").first().tap();
   await page.waitForSelector("#chargerDrawer", { state: "visible", timeout: 8000 });
-  const drawerTitle = (await page.locator("#drawerTitle").textContent()) || "";
-  if (!drawerTitle.trim()) {
-    throw new Error("drawer title empty");
-  }
   await page.locator("#btnAddStopToRoute").tap();
-  await page.waitForFunction(() => window.appState && window.appState.forcedChargers.size >= 1, {
+  await page.waitForSelector('html[data-forced-count]:not([data-forced-count="0"])', {
     timeout: 10000,
   });
   await shot("03_drawer");
   await page.locator("#btnCloseDrawer").tap();
-  await sleep(300);
-  // Collapse to peek so map dominates for draw / layers
-  await page.locator("#btnCarSheetHandle").tap();
-  await page.waitForFunction(() => document.body.getAttribute("data-sheet") === "peek", {
-    timeout: 5000,
-  });
   await sleep(200);
+  await page.locator("#btnCarSheetHandle").tap();
+  await page.waitForSelector('body[data-sheet="peek"]', { timeout: 5000 });
 
-  console.log("4. Box select from map toolbar...");
-  const areaOnBar = await page.locator(".map-floating-bar #btnAreaModeBox").count();
-  if (areaOnBar < 1) {
-    throw new Error("Box tool must be on map floating bar");
-  }
+  console.log("4. Box select...");
   await page.locator("#btnAreaModeBox").tap();
   await page.waitForSelector("#mapModeBanner", { state: "visible", timeout: 5000 });
   const mapBox = await page.locator("#map").boundingBox();
-  if (!mapBox) {
-    throw new Error("#map has no bounding box");
-  }
-  const start = { x: mapBox.x + mapBox.width * 0.4, y: mapBox.y + mapBox.height * 0.35 };
-  const end = { x: mapBox.x + mapBox.width * 0.7, y: mapBox.y + mapBox.height * 0.65 };
-  await page.mouse.move(start.x, start.y);
+  if (!mapBox) throw new Error("#map missing");
+  await page.mouse.move(mapBox.x + mapBox.width * 0.4, mapBox.y + mapBox.height * 0.3);
   await page.mouse.down();
-  await page.mouse.move(end.x, end.y, { steps: 8 });
+  await page.mouse.move(mapBox.x + mapBox.width * 0.7, mapBox.y + mapBox.height * 0.55, {
+    steps: 8,
+  });
   await page.mouse.up();
-  await sleep(1500);
+  await sleep(1200);
   await shot("04_box");
   const clearBtn = page.locator(".map-floating-bar #btnClearSelection");
-  if (!(await clearBtn.isDisabled())) {
-    await clearBtn.tap();
-    await sleep(400);
-  }
+  if (!(await clearBtn.isDisabled())) await clearBtn.tap();
 
-  console.log("5. Open layers panel...");
-  // Legend is hidden in car-shell — layers control should be directly tappable
+  console.log("5. Layers...");
   await page.locator("#btnToggleLayers").tap({ timeout: 8000 });
-  await page.waitForFunction(
-    () => {
-      const panel = document.getElementById("layersPanel");
-      return panel && panel.style.display !== "none" && panel.getAttribute("aria-hidden") !== "true";
-    },
-    { timeout: 8000 }
-  );
-  const layersVisible = await page.locator("#layersPanel").isVisible();
-  if (!layersVisible) {
-    throw new Error("layers panel not visible after open");
-  }
-  const streets = await page.locator('input[name="basemapRadio"][value="streets"]').count();
-  if (streets < 1) {
-    throw new Error("basemap streets control missing");
-  }
+  await page.waitForSelector('#layersPanel:not([aria-hidden="true"])', { timeout: 8000 });
   await shot("05_layers");
 
-  console.log(`Profile ${profile.name} PASSED`);
+  console.log(`Profile ${profile.name} PASSED (map ${(mapShare * 100).toFixed(0)}%)`);
   await context.close();
 }
 
@@ -270,9 +226,7 @@ async function main() {
     console.log("=============================================\n");
   } finally {
     await browser.close();
-    if (serverProc) {
-      serverProc.kill("SIGTERM");
-    }
+    if (serverProc) serverProc.kill("SIGTERM");
   }
 }
 

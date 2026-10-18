@@ -34,8 +34,8 @@ const state = {
   planRouteSeq: 0,
   /** Tesla landscape bottom-sheet mode (not phone /mobile). */
   carShell: false,
-  /** peek | plan | itinerary */
-  sheetMode: "plan",
+  /** peek | plan | itinerary — default peek so map dominates on load */
+  sheetMode: "peek",
 };
 
 // Expose for Playwright / debugging (cloud verification)
@@ -62,26 +62,60 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 /**
- * Tesla / short-landscape car shell: map-first + bottom plan sheet.
- * Primary target ~773×601; also 1254×784. Skips phone portrait.
- * Force: ?car=1  Disable: ?car=0
+ * Tesla / half-MCU car shell: map-first + bottom plan sheet.
+ *
+ * CRITICAL (2026-10-18 incar): browser is the RIGHT HALF of the MCU.
+ * At DPR~1.53, CSS width is often ~600–650 — NOT ≥700. The v1 detector
+ * required w>=700 and never engaged; ≤860px stack crushed the map.
+ *
+ * Fail OPEN for short/narrow landscape panes. Force: ?car=1 / ?tesla=1 / #car
+ * Disable: ?car=0
  */
 function shouldUseCarShell() {
   const params = new URLSearchParams(window.location.search);
-  const forced = params.get("car");
-  if (forced === "0" || forced === "false") return false;
-  if (forced === "1" || forced === "true") return true;
+  const forced = params.get("car") || params.get("tesla");
+  if (forced === "0" || forced === "false") {
+    try {
+      window.localStorage.setItem("teslaCarShell", "0");
+    } catch (_) {
+      /* ignore */
+    }
+    return false;
+  }
+  if (forced === "1" || forced === "true") {
+    try {
+      window.localStorage.setItem("teslaCarShell", "1");
+    } catch (_) {
+      /* ignore */
+    }
+    return true;
+  }
+  if (/#(?:car|tesla)\b/i.test(window.location.hash || "")) return true;
   try {
-    if (window.localStorage.getItem("teslaCarShell") === "1") return true;
+    const ls = window.localStorage.getItem("teslaCarShell");
+    if (ls === "1") return true;
+    if (ls === "0") return false;
   } catch (_) {
     /* ignore */
   }
+
   const w = window.innerWidth;
   const h = window.innerHeight;
-  // Phone portrait — keep existing narrow stack, not this shell
-  if (w < 600 && h > w) return false;
-  // Tesla windowed (~773×601) and landscape car canvases (~1254×784)
-  if (w >= 700 && w <= 1400 && h >= 500 && h <= 820) return true;
+  const touchy = (navigator.maxTouchPoints || 0) > 0;
+
+  // Phone portrait only — keep existing narrow stack / not this shell
+  if (w < 480 && h > w * 1.15) return false;
+
+  // Large desktop canvases keep the classic left sidebar
+  if (w >= 1280 && h >= 800) return false;
+
+  // FAIL OPEN: half-MCU (~600×650), windowed Tesla (~773×601), short panes.
+  // Matches ngrok half-screen reference photos.
+  if (h <= 900 && w >= 480 && w < 1280) return true;
+
+  // Touch + short height (fullscreen-ish car) even if slightly wider
+  if (touchy && h <= 850 && w <= 1400) return true;
+
   return false;
 }
 
@@ -120,20 +154,42 @@ function applyCarShell() {
     if (enable) chrome.removeAttribute("hidden");
     else chrome.setAttribute("hidden", "");
   }
+  const badge = document.getElementById("carModeBadge");
+  if (badge) {
+    if (enable) {
+      badge.hidden = false;
+      badge.textContent = `CAR MODE · ${window.innerWidth}×${window.innerHeight}`;
+    } else {
+      badge.hidden = true;
+    }
+  }
   if (enable) {
-    if (!was) setCarSheet(state.activePlan ? "peek" : "plan");
-    else setCarSheet(state.sheetMode || "plan");
+    if (!was) setCarSheet("peek");
+    else setCarSheet(state.sheetMode || "peek");
   } else {
     document.body.removeAttribute("data-sheet");
+    document.documentElement.removeAttribute("data-plan-stops");
+    document.documentElement.removeAttribute("data-forced-count");
   }
+  syncCarTestHooks();
   requestAnimationFrame(() => {
     if (state.map) state.map.invalidateSize({ animate: false });
   });
 }
 
+function syncCarTestHooks() {
+  const root = document.documentElement;
+  const stops = state.activePlan && state.activePlan.summary
+    ? state.activePlan.summary.supercharger_stops_count
+    : null;
+  if (stops != null) root.setAttribute("data-plan-stops", String(stops));
+  else root.removeAttribute("data-plan-stops");
+  root.setAttribute("data-forced-count", String(state.forcedChargers.size));
+}
+
 function setCarSheet(mode) {
   if (!state.carShell) return;
-  const next = mode === "peek" || mode === "plan" || mode === "itinerary" ? mode : "plan";
+  const next = mode === "peek" || mode === "plan" || mode === "itinerary" ? mode : "peek";
   state.sheetMode = next;
   document.body.setAttribute("data-sheet", next);
   if (next === "plan" || next === "itinerary") {
@@ -148,6 +204,7 @@ function setCarSheet(mode) {
     }
   }
   updateCarPeek();
+  syncCarTestHooks();
   requestAnimationFrame(() => {
     if (state.map) state.map.invalidateSize({ animate: false });
   });
@@ -788,6 +845,7 @@ function toggleForcedCharger(charger) {
     state.areaForcedIds.delete(charger.id);
   }
   updateForcedChargersUI();
+  syncCarTestHooks();
 }
 
 /**
@@ -803,6 +861,7 @@ function clearSelection() {
   });
   state.areaForcedIds.clear();
   deactivateAreaSelectMode();
+  syncCarTestHooks();
   updateForcedChargersUI();
   if (hadAreaForced) {
     maybeReplan();
@@ -1086,6 +1145,7 @@ async function planRoute() {
 
     state.activePlan = plan;
     renderRoutePlan(plan);
+    syncCarTestHooks();
     if (state.carShell) {
       updateCarPeek();
       // Map-first after plan: collapse sheet so corridor dominates
