@@ -142,21 +142,27 @@ async function runProfile(browser, profile) {
     const varH = getComputedStyle(body).getPropertyValue("--car-sheet-h").trim();
     return { sheetH, layersH, locateH, varH, sheet: body.getAttribute("data-sheet") };
   });
-  if (metrics.layersH < 44) {
+  if (metrics.layersH < 40) {
     throw new Error(`map control hit area too small: ${metrics.layersH}px`);
   }
-  if (metrics.locateH < 44) {
+  if (metrics.locateH < 40) {
     throw new Error(`locate control hit area too small: ${metrics.locateH}px`);
   }
   const sheetH = metrics.sheetH;
   const mapShare = 1 - sheetH / profile.height;
+  const peekPct = (sheetH / profile.height) * 100;
   console.log(
-    `  ${badgeText.trim()}; sheet≈${Math.round(sheetH)}px (css ${metrics.varH}); map≈${(mapShare * 100).toFixed(0)}%`
+    `  ${badgeText.trim()}; sheet≈${Math.round(sheetH)}px (${peekPct.toFixed(1)}% vh, css ${metrics.varH}); map≈${(mapShare * 100).toFixed(0)}%`
   );
-  // Dense peek target: ≥75% map (was sparse ~⅓ sheet on  photo)
-  if (mapShare < 0.75) {
+  // Peek ~12–18% vh (not 25–33%). Prior #28 peek was 88px/~15%; target ≤18%.
+  if (peekPct > 18.5) {
     throw new Error(
-      `PEEK TOO TALL: map ${(mapShare * 100).toFixed(0)}% < 75% (sheet ${Math.round(sheetH)}px / ${profile.height}px)`
+      `PEEK TOO TALL: ${peekPct.toFixed(1)}% > 18.5% (sheet ${Math.round(sheetH)}px / ${profile.height}px)`
+    );
+  }
+  if (mapShare < 0.8) {
+    throw new Error(
+      `MAP MUST DOMINATE: share ${(mapShare * 100).toFixed(0)}% < 80% (sheet ${Math.round(sheetH)}px / ${profile.height}px)`
     );
   }
 

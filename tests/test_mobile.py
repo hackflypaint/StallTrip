@@ -131,6 +131,7 @@ class TestMobileShell(unittest.TestCase):
         self.assertIn(b"function beginAreaPointer", body)
         self.assertIn(b"function setMobileSheetOpen", body)
         self.assertIn(b"closeMobileSheet()", body)
+        self.assertIn(b"function updateMobileViewportInsets", body)
 
     def test_phase3_perf_helpers_in_app_js(self):
         status, _, body = self._get("/app.js")
@@ -203,6 +204,22 @@ class TestMobileShell(unittest.TestCase):
         self.assertIn(b"min-height: 44px", body)
         self.assertIn(b"touch-action: none", body)
         self.assertIn(b"area-drawing", body)
+
+    def test_safari_safe_area_and_viewport_insets(self):
+        """iPhone Safari: Plan/sheet must clear bottom chrome via safe-area + vv inset."""
+        status, _, css = self._get("/style.css")
+        self.assertEqual(status, 200)
+        self.assertIn(b"safe-area-inset-bottom", css)
+        self.assertIn(b"--vv-bottom", css)
+        self.assertIn(b"--mobile-chrome-bottom", css)
+        self.assertIn(b"body.ui-mobile.sheet-open .map-legend", css)
+        status, _, js = self._get("/app.js")
+        self.assertEqual(status, 200)
+        self.assertIn(b"function updateMobileViewportInsets", js)
+        self.assertIn(b"visualViewport", js)
+        status, _, html = self._get("/mobile")
+        self.assertEqual(status, 200)
+        self.assertIn(b"viewport-fit=cover", html)
 
     def test_no_ua_redirect_by_default(self):
         prev = os.environ.pop("MOBILE_UA_REDIRECT", None)

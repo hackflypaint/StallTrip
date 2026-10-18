@@ -1342,18 +1342,19 @@ body, html {
 
 body.car-shell {
   /* peek → half(plan) → nearly-full(itinerary); map dominates in peek */
-  --car-sheet-h: 88px;
-  /* Hit area ≥44px; visual size stays near desktop 38px icons */
-  --car-touch: 44px;
-  --car-icon-font: 0.95rem;
+  --car-sheet-h: 72px;
+  /* Compact visual; hit ≥40px (smaller buttons/gaps, more map) */
+  --car-touch: 40px;
+  --car-icon-font: 0.85rem;
+  --car-gap: 3px;
 }
 
 body.car-shell .car-sheet-chrome {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  gap: 2px;
-  padding: 0 8px 6px;
+  gap: 0;
+  padding: 4px 6px 4px;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-secondary);
 }
@@ -1383,8 +1384,8 @@ body.car-shell .sidebar {
   z-index: 1200;
   border-right: none;
   border-top: 1px solid var(--border-color);
-  border-radius: 16px 16px 0 0;
-  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.45);
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.4);
   background: var(--bg-primary);
   /* Instant expand — animated height made taps feel “stuck” at peek */
   transition: none;
@@ -1398,18 +1399,18 @@ body.car-shell[data-sheet="itinerary"] .sidebar {
 }
 
 body.car-shell[data-sheet="peek"] {
-  /* One dense row: handle + brand/presets/actions — map ~85% at 601px */
-  --car-sheet-h: 88px;
+  /* Single row ≈12% @ 601px (was 88px/~15%, earlier ~148px/~25%) */
+  --car-sheet-h: 72px;
 }
 
 body.car-shell[data-sheet="plan"] {
-  /* Half sheet — origin/dest/Plan must be usable (was ~200px; felt stuck) */
-  --car-sheet-h: min(320px, 52vh);
+  /* Half sheet — denser form, still usable */
+  --car-sheet-h: min(280px, 48vh);
 }
 
 body.car-shell[data-sheet="itinerary"] {
   /* Nearly full under browser chrome; leave a map strip */
-  --car-sheet-h: min(540px, 88vh);
+  --car-sheet-h: min(520px, 86vh);
 }
 
 /* Brand header always gone in car mode — peek chip is enough */
@@ -1444,7 +1445,7 @@ body.car-shell[data-sheet="itinerary"] .car-preset-row {
 body.car-shell .car-preset-row {
   display: flex;
   flex-wrap: nowrap;
-  gap: 6px;
+  gap: var(--car-gap);
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   padding: 0;
@@ -1461,19 +1462,21 @@ body.car-shell .car-preset-row::-webkit-scrollbar {
 body.car-shell .car-preset-row .preset-tag {
   flex: 0 0 auto;
   min-height: 40px;
-  padding: 6px 10px;
-  font-size: 0.78rem;
+  height: 40px;
+  padding: 0 7px;
+  font-size: 0.68rem;
   font-weight: 600;
-  border-radius: 10px;
+  border-radius: 7px;
+  line-height: 1;
 }
 
 body.car-shell .car-sheet-handle {
-  align-self: center;
-  width: 100%;
-  max-width: 160px;
-  min-height: 22px;
-  margin: 2px 0 0;
-  padding: 4px 8px 2px;
+  flex: 0 0 auto;
+  width: 36px;
+  min-width: 36px;
+  min-height: 40px;
+  margin: 0;
+  padding: 2px 2px;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -1482,20 +1485,20 @@ body.car-shell .car-sheet-handle {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 1px;
 }
 
 body.car-shell .car-sheet-grip {
-  width: 40px;
-  height: 4px;
+  width: 22px;
+  height: 3px;
   border-radius: 999px;
   background: var(--text-dim);
 }
 
 body.car-shell .car-sheet-hint {
-  font-size: 0.62rem;
+  font-size: 0.5rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   color: var(--text-muted);
   line-height: 1;
@@ -1509,25 +1512,26 @@ body.car-shell .car-peek-bar {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
-  min-height: 44px;
+  gap: 4px;
+  min-height: 40px;
+  height: 40px;
 }
 
 body.car-shell .car-peek-brand {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
   flex: 0 1 auto;
-  max-width: 42%;
+  max-width: 34%;
 }
 
 body.car-shell .car-peek-logo {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
-  font-size: 0.75rem;
-  border-radius: 7px;
+  font-size: 0.65rem;
+  border-radius: 5px;
 }
 
 body.car-shell .car-peek-text {
@@ -1538,12 +1542,12 @@ body.car-shell .car-peek-text {
 }
 
 body.car-shell .car-peek-text strong {
-  font-size: 0.78rem;
+  font-size: 0.68rem;
   color: #fff;
-  line-height: 1.1;
+  line-height: 1.05;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 3px;
   white-space: nowrap;
 }
 
@@ -1551,28 +1555,28 @@ body.car-shell .car-mode-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 18px;
-  padding: 1px 6px;
-  border-radius: 4px;
+  min-height: 14px;
+  padding: 0 4px;
+  border-radius: 3px;
   background: var(--tesla-red);
   color: #fff;
-  font-size: 0.62rem;
+  font-size: 0.55rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
 }
 
 body.car-shell .car-mode-badge {
   display: flex !important;
   position: absolute;
-  top: 10px;
-  left: 10px;
+  top: 8px;
+  left: 8px;
   z-index: 1100;
-  min-height: 28px;
-  padding: 6px 10px;
-  border-radius: 8px;
+  min-height: 22px;
+  padding: 3px 7px;
+  border-radius: 6px;
   background: rgba(232, 33, 39, 0.92);
   color: #fff;
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 800;
   letter-spacing: 0.04em;
   box-shadow: var(--shadow-md);
@@ -1584,40 +1588,43 @@ body.car-shell .car-mode-badge {
 }
 
 body.car-shell .car-peek-summary {
-  font-size: 0.68rem;
+  font-size: 0.58rem;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 28vw;
-  line-height: 1.15;
+  max-width: 22vw;
+  line-height: 1.1;
 }
 
 body.car-shell .car-peek-actions {
   display: flex;
-  gap: 5px;
+  gap: var(--car-gap);
   flex-shrink: 0;
   margin-left: auto;
 }
 
 body.car-shell .car-peek-btn {
   min-height: 40px;
-  min-width: 44px;
-  padding: 6px 10px;
-  border-radius: 10px;
+  height: 40px;
+  min-width: 40px;
+  padding: 0 7px;
+  border-radius: 7px;
   border: 1px solid var(--border-color);
   background: var(--bg-tertiary);
   color: var(--text-main);
   font-weight: 700;
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   cursor: pointer;
   touch-action: manipulation;
+  line-height: 1;
 }
 
 body.car-shell .car-peek-btn.car-peek-locate {
   min-width: 40px;
-  padding: 6px 8px;
-  font-size: 0.95rem;
+  width: 40px;
+  padding: 0;
+  font-size: 0.8rem;
 }
 
 body.car-shell .car-peek-btn.car-peek-locate.is-locating,
@@ -1658,14 +1665,23 @@ body.car-shell .tab-btn {
 }
 
 body.car-shell .tab-content {
-  padding: 6px 10px 10px;
-  gap: 6px;
+  padding: 4px 8px 8px;
+  gap: 4px;
 }
 
 /* Ensure route form stays visible when expanded (tabs hidden) */
 body.car-shell[data-sheet="plan"] #route-tab,
 body.car-shell[data-sheet="itinerary"] #route-tab {
   display: flex !important;
+}
+
+body.car-shell .route-form {
+  gap: 4px;
+}
+
+body.car-shell .form-group {
+  margin: 0;
+  gap: 2px;
 }
 
 /* Compact compose: placeholders only — labels ate the map in the photo */
@@ -1676,7 +1692,8 @@ body.car-shell[data-sheet="plan"] .input-header label {
 body.car-shell[data-sheet="plan"] .input-header {
   justify-content: flex-end;
   min-height: 0;
-  margin-bottom: 2px;
+  margin-bottom: 0;
+  padding: 0;
 }
 
 body.car-shell[data-sheet="plan"] .swap-container {
@@ -1688,8 +1705,9 @@ body.car-shell[data-sheet="plan"] .advanced-settings {
 }
 
 body.car-shell[data-sheet="plan"] .routing-goal-section {
-  padding: 6px 8px;
-  gap: 6px;
+  padding: 4px 6px;
+  gap: 4px;
+  margin: 0;
 }
 
 body.car-shell[data-sheet="plan"] .routing-goal-section .input-header {
@@ -1697,25 +1715,26 @@ body.car-shell[data-sheet="plan"] .routing-goal-section .input-header {
 }
 
 body.car-shell .input-wrapper input {
-  min-height: 44px;
-  font-size: 0.95rem;
-  padding-top: 8px;
-  padding-bottom: 8px;
+  min-height: 40px;
+  height: 40px;
+  font-size: 0.85rem;
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 
 body.car-shell .clear-btn {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 body.car-shell .link-btn {
-  min-height: 44px;
-  padding: 8px 10px;
-  font-size: 0.85rem;
-  border-radius: 10px;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  border-radius: 7px;
   background: rgba(0, 180, 216, 0.12);
 }
 
@@ -1725,24 +1744,29 @@ body.car-shell .link-btn:active {
 }
 
 body.car-shell .quick-presets {
-  gap: 8px;
+  gap: 4px;
 }
 
 body.car-shell .preset-label {
   width: 100%;
-  font-size: 0.78rem;
+  font-size: 0.68rem;
+}
+
+body.car-shell .strategy-toggle {
+  gap: 4px;
 }
 
 body.car-shell .strategy-btn {
-  min-height: 44px;
-  font-size: 0.78rem;
-  padding: 8px 6px;
+  min-height: 40px;
+  font-size: 0.7rem;
+  padding: 4px 6px;
 }
 
 body.car-shell .primary-btn {
-  min-height: 48px;
-  font-size: 0.95rem;
-  padding: 12px;
+  min-height: 40px;
+  font-size: 0.85rem;
+  padding: 8px;
+  margin-top: 2px;
 }
 
 body.car-shell[data-sheet="plan"] .strategy-params {
@@ -1759,14 +1783,14 @@ body.car-shell .primary-btn:active {
 }
 
 body.car-shell .swap-btn {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
 }
 
 body.car-shell .map-floating-bar {
-  top: 10px;
-  right: 10px;
-  gap: 8px;
+  top: 8px;
+  right: 8px;
+  gap: 4px;
   /* Stay above the map, below drawer/sheet overlays */
   z-index: 1100;
   overflow: visible;
@@ -1774,20 +1798,20 @@ body.car-shell .map-floating-bar {
 }
 
 body.car-shell .map-area-tools {
-  gap: 6px;
-  padding: 4px;
+  gap: 3px;
+  padding: 3px;
   flex-shrink: 0;
 }
 
 body.car-shell .map-btn {
-  /* Visual ≈ desktop 38px; hit box 44px via padding box */
+  /* Familiar/small visual; 40px hit */
   width: var(--car-touch);
   height: var(--car-touch);
   min-width: var(--car-touch);
   min-height: var(--car-touch);
   flex-shrink: 0;
   font-size: var(--car-icon-font);
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   box-sizing: border-box;
 }
 
@@ -1812,12 +1836,12 @@ body.car-shell .leaflet-top.leaflet-right {
 }
 
 body.car-shell .leaflet-control-zoom a {
-  /* Match familiar Leaflet visual size; pad hit via control spacing */
-  width: 34px !important;
-  height: 34px !important;
-  line-height: 34px !important;
-  font-size: 16px !important;
-  padding: 5px !important; /* grows touchable area toward 44px */
+  /* Familiar Leaflet size; light pad toward 40px hit */
+  width: 30px !important;
+  height: 30px !important;
+  line-height: 30px !important;
+  font-size: 14px !important;
+  padding: 5px !important;
   box-sizing: content-box !important;
 }
 
@@ -1906,22 +1930,23 @@ body.car-shell .suggestion-item:active {
   background: var(--bg-tertiary);
 }
 
-/* Taller car canvas (e.g. 1254×784): same expand ratios, slightly roomier peek */
+/* Taller car canvas: keep peek ~12% of height */
 @media (min-height: 720px) {
   body.car-shell[data-sheet="peek"] {
-    --car-sheet-h: 92px;
+    --car-sheet-h: 78px;
   }
   body.car-shell[data-sheet="plan"] {
-    --car-sheet-h: min(360px, 50vh);
+    --car-sheet-h: min(300px, 46vh);
   }
   body.car-shell[data-sheet="itinerary"] {
-    --car-sheet-h: min(620px, 86vh);
+    --car-sheet-h: min(580px, 84vh);
   }
 }
 
 /* --------------------------------------------------------------------------
    Mobile shell (/mobile or ?ui=mobile) — map-first, planner as bottom sheet.
    Explicit entry preferred over User-Agent sniffing (see server MOBILE_UA_REDIRECT).
+   Safari: viewport-fit=cover + env(safe-area-inset-*) + --vv-bottom (visualViewport).
    -------------------------------------------------------------------------- */
 .mobile-sheet-toggle {
   display: none;
@@ -1930,20 +1955,37 @@ body.car-shell .suggestion-item:active {
 body.ui-mobile {
   /* Prefer dynamic viewport units on mobile browsers when available */
   height: 100%;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  /* JS updateMobileViewportInsets() sets --vv-bottom for Safari URL/toolbar overlay */
+  --vv-bottom: 0px;
+  --mobile-chrome-bottom: calc(var(--safe-bottom) + var(--vv-bottom));
+  --mobile-plan-h: 52px;
+  --mobile-fab-gap: 16px;
+  --mobile-sheet-h: min(46dvh, 380px);
 }
 
 body.ui-mobile .app-container {
   flex-direction: column;
-  height: 100dvh;
   height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  padding-top: var(--safe-top);
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+  box-sizing: border-box;
+  position: relative;
 }
 
 body.ui-mobile .map-container {
   flex: 1 1 auto;
   width: 100%;
   height: auto;
-  min-height: 58vh;
+  min-height: 42dvh;
   order: 1;
+  position: relative;
 }
 
 body.ui-mobile .sidebar {
@@ -1960,57 +2002,80 @@ body.ui-mobile .sidebar {
 }
 
 body.ui-mobile.sheet-open .sidebar {
-  height: min(52vh, 420px);
-  max-height: min(52vh, 420px);
+  height: var(--mobile-sheet-h);
+  max-height: var(--mobile-sheet-h);
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  /* Lift sheet above Safari toolbar so Destination is not clipped */
+  margin-bottom: var(--mobile-chrome-bottom);
+  padding-bottom: 28px;
+  box-sizing: border-box;
 }
 
+/* Map-first: Plan clears home indicator + Safari toolbar overlay */
 body.ui-mobile .mobile-sheet-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   position: absolute;
-  z-index: 1100;
+  z-index: 1200;
   left: 50%;
-  bottom: 18px;
+  bottom: calc(var(--mobile-fab-gap) + var(--mobile-chrome-bottom));
   transform: translateX(-50%);
-  min-height: 44px;
-  min-width: 44px;
-  padding: 10px 18px;
+  min-height: var(--mobile-plan-h);
+  min-width: 96px;
+  padding: 12px 22px;
   border: 1px solid var(--border-color);
   border-radius: 999px;
   background: var(--bg-card);
   color: var(--text-main);
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 600;
   box-shadow: var(--shadow-md);
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
+/* Sheet open: Map FAB top-left — never overlaps legend / sheet seam */
 body.ui-mobile.sheet-open .mobile-sheet-toggle {
-  bottom: calc(min(52vh, 420px) + 10px);
+  top: calc(10px + var(--safe-top));
+  bottom: auto;
+  left: calc(10px + var(--safe-left));
+  right: auto;
+  transform: none;
   background: var(--tesla-red);
   border-color: var(--tesla-red);
   color: #fff;
+  min-width: 88px;
 }
 
 body.ui-mobile .map-floating-bar {
-  top: 12px;
-  right: 12px;
+  top: calc(10px + var(--safe-top));
+  right: calc(10px + var(--safe-right));
 }
 
-/* Keep Plan CTA clear of the legend on the collapsed map */
+/*
+ * Legend sits above Plan (+ chrome). Cap width so it never fights the centered FAB.
+ * When sheet is open, hide legend — map strip is short; Map FAB owns that space.
+ */
 body.ui-mobile .map-legend {
-  left: 10px;
+  left: calc(10px + var(--safe-left));
   right: auto;
-  bottom: 72px;
-  max-width: calc(100vw - 20px);
+  bottom: calc(var(--mobile-plan-h) + var(--mobile-fab-gap) + var(--mobile-chrome-bottom) + 10px);
+  max-width: min(280px, calc(100vw - 24px));
   flex-wrap: wrap;
-  gap: 10px 12px;
+  gap: 8px 10px;
   padding: 8px 10px;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+body.ui-mobile.sheet-open .map-legend {
+  display: none;
 }
 
 body.ui-mobile .map-btn,
@@ -2020,20 +2085,27 @@ body.ui-mobile .map-area-tools .map-btn {
 }
 
 body.ui-mobile .charger-drawer {
-  left: 10px;
-  right: 10px;
-  bottom: 10px;
+  left: calc(10px + var(--safe-left));
+  right: calc(10px + var(--safe-right));
+  bottom: calc(10px + var(--mobile-chrome-bottom));
   width: auto;
-  max-height: 55vh;
+  max-height: 50dvh;
+}
+
+body.ui-mobile.sheet-open .charger-drawer {
+  bottom: calc(var(--mobile-sheet-h) + 8px + var(--mobile-chrome-bottom));
+  max-height: 36dvh;
 }
 
 body.ui-mobile .layers-panel {
   max-width: calc(100vw - 72px);
+  top: calc(10px + var(--safe-top));
 }
 
 /* Phase 2 — touch targets + sheet polish */
 body.ui-mobile .sidebar-header {
-  padding: 12px 14px;
+  padding: 10px 12px;
+  gap: 8px;
 }
 
 body.ui-mobile .brand h1 {
@@ -2044,6 +2116,15 @@ body.ui-mobile .brand .subtitle {
   font-size: 0.7rem;
 }
 
+/* Less chrome on short phones so Origin + Destination stay reachable */
+body.ui-mobile.sheet-open .brand .subtitle {
+  display: none;
+}
+
+body.ui-mobile.sheet-open .dataset-badge {
+  display: none;
+}
+
 body.ui-mobile .dataset-badge {
   font-size: 0.7rem;
   padding: 4px 8px;
@@ -2051,7 +2132,11 @@ body.ui-mobile .dataset-badge {
 
 body.ui-mobile .tabs {
   gap: 6px;
-  padding: 8px 10px 0;
+  padding: 6px 10px 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-secondary, var(--bg-card));
 }
 
 body.ui-mobile .tab-btn {
@@ -2064,6 +2149,7 @@ body.ui-mobile .route-form,
 body.ui-mobile .tab-content {
   padding-left: 12px;
   padding-right: 12px;
+  padding-bottom: 8px;
 }
 
 body.ui-mobile .input-wrapper input,
@@ -2094,9 +2180,9 @@ body.ui-mobile .primary-btn {
 }
 
 body.ui-mobile #mapModeBanner {
-  left: 10px;
-  right: 10px;
-  top: 10px;
+  left: calc(10px + var(--safe-left));
+  right: calc(10px + var(--safe-right));
+  top: calc(10px + var(--safe-top));
   width: auto;
   font-size: 0.82rem;
   padding: 10px 12px;
@@ -2111,4 +2197,14 @@ body.ui-mobile #map {
 body.ui-mobile.area-drawing .map-container,
 body.ui-mobile.area-drawing #map {
   touch-action: none;
+}
+
+/* Very short landscape / split Safari: keep sheet scrollable, map visible */
+@media (max-height: 560px) {
+  body.ui-mobile {
+    --mobile-sheet-h: min(55dvh, 320px);
+  }
+  body.ui-mobile .map-legend .legend-item:nth-child(n + 4) {
+    display: none;
+  }
 }
