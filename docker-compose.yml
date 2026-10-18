@@ -12,8 +12,15 @@ services:
       - "8080:8080"
     environment:
       - PORT=8080
-      # Soft phone→/mobile redirect stays OFF (unset). Enable only if desired:
+      # HI publish defaults — cost-conscious (no Amplify/Lambda/S3 app path)
+      - COST_PROFILE=lean
+      # Soft phone→/mobile redirect stays OFF. Phones use explicit /mobile.
       # - MOBILE_UA_REDIRECT=1
+      # Optional overrides (lean defaults: geocode 12/min, plan 4/min, concurrent 2):
+      # - GEOCODE_RATE_LIMIT=12
+      # - PLAN_RATE_LIMIT=4
+      # - MAX_CONCURRENT_PLANS=2
+      # - STATIC_CACHE_MAX_AGE=300
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -26,3 +33,15 @@ services:
     user: "65532:65532"
     mem_limit: 512m
     pids_limit: 256
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=2)",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

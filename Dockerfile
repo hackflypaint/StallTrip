@@ -32,7 +32,8 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8080
+    PORT=8080 \
+    COST_PROFILE=lean
 
 COPY --from=builder --chown=65532:65532 /build/ /app/
 
