@@ -35,6 +35,7 @@ Approximate sizes from the packaged app tree (~5k LOC excluding `data/` and foli
 | `app.js` | ~1242 | UI state, Leaflet map, plan/explore, area select, geocode UX |
 | `style.css` | ~1287 | Dark theme, sidebar, map controls, timeline, drawer |
 | `foliage/` | modular | Removable Explore Fall overlay (`foliage-overlay.js`, CSS, mid-Oct PNG cache) |
+| `airspace/` | modular | Removable FAA Class/SUA/UASFM overlay (`airspace-overlay.js`, CSS) |
 
 ### Tests
 
@@ -68,6 +69,7 @@ routing.py
 - **Single process, in-memory dataset** — fast corridor scans; not multi-tenant scaled.
 - **Public geo services** — no API keys; depends on OSRM / Photon / Nominatim availability and ToS.
 - **Foliage is optional** — mount via `FoliageModule`; delete `static/foliage/` to remove.
+- **Airspace / UAS is optional** — mount via `AirspaceModule`; delete `static/airspace/` to remove.
 
 ---
 
@@ -151,13 +153,13 @@ Fetches `https://supercharge.info/service/supercharge/allSites`, normalizes GPS/
 - CDN: Leaflet CSS/JS (SRI), Inter (Google Fonts), Font Awesome (no SRI).  
 - Left sidebar: Route vs Explore tabs, origin/destination, vehicle sliders, plan button.  
 - Map: layers control, **Box / Freehand / Clear selection** (top-right) — no Force-Included sidebar list.  
-- Drawer for station detail; optional `#foliageSlot`.
+- Drawer for station detail; optional `#foliageSlot`, `#airspaceSlot`.
 
 ### 4.2 `app.js` state machine
 
 `state` holds map, markers, origin/dest, `forcedChargers` Map, area-select mode, `planRouteSeq` (stale-response guard), routing mode, vehicle params.
 
-**Map:** OSM streets (dark filter) vs OpenTopoMap; nearby-station overlay; foliage mount.
+**Map:** OSM streets (dark filter) vs OpenTopoMap; nearby-station overlay; foliage + airspace mounts.
 
 **Area tools:** box bounds or freehand ring → `/api/superchargers` or client filter → force-include batch → optional auto-replan. **Clear selection** drops area batch only (manual pins kept).
 
@@ -170,6 +172,12 @@ Fetches `https://supercharge.info/service/supercharge/allSites`, normalizes GPS/
 - Daily CONUS PNG from Explore Fall (`maps/2026/{YYYYMMDD}.png`), georeferenced overlay.  
 - Mid-October dates cached under `foliage/cache/` for offline demos.  
 - Credit UI required. Removable: delete folder + slot/hooks (see foliage README).
+
+### 4.4 Airspace / UAS module (`static/airspace/`)
+
+- Viewport-bounded GeoJSON from FAA ArcGIS FeatureServers (`Class_Airspace`, `Special_Use_Airspace`, `FAA_UAS_FacilityMap_Data`, `Stadiums`, `US_Airport`).  
+- Debounced fetch on map move; zoom gates; no Autopylot private APIs.  
+- Removable: delete folder + slot/hooks (see airspace README).
 
 ---
 

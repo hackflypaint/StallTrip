@@ -1,0 +1,189 @@
+/* Removable Airspace / UAS module styles — delete with static/airspace/ */
+
+.airspace-slot {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.airspace-slot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.airspace-slot-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.airspace-slot-title i {
+  color: #9b6bff;
+  font-size: 0.75rem;
+}
+
+.airspace-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.airspace-toggle input {
+  accent-color: #9b6bff;
+  margin: 0;
+}
+
+.airspace-detail-block {
+  display: none;
+  margin-top: 8px;
+}
+
+.airspace-detail-block.is-active {
+  display: block;
+}
+
+.airspace-legend-mini {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.airspace-legend-mini span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.airspace-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+
+.airspace-swatch-b {
+  background: rgba(122, 79, 214, 0.55);
+  border-color: #9b6bff;
+}
+
+.airspace-swatch-c {
+  background: rgba(143, 122, 184, 0.45);
+  border-color: #c4a8ff;
+}
+
+.airspace-swatch-d {
+  background: rgba(110, 117, 133, 0.4);
+  border-color: #a8b0c0;
+}
+
+.airspace-swatch-r {
+  background: rgba(42, 111, 214, 0.45);
+  border-color: #3d8bfd;
+}
+
+.airspace-swatch-p {
+  background: rgba(192, 57, 43, 0.5);
+  border-color: #e85d5d;
+}
+
+.airspace-swatch-uas {
+  background: linear-gradient(135deg, #4a1f66 0%, #9aa0b0 100%);
+}
+
+.airspace-status {
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  min-height: 1em;
+}
+
+.airspace-credit {
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.airspace-credit a {
+  color: var(--text-muted);
+  text-decoration: underline;
+}
+
+.airspace-credit a:hover {
+  color: var(--text-main);
+}
+
+/* Map markers */
+.airspace-marker {
+  background: transparent;
+  border: none;
+}
+
+.airspace-marker-stadium {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px !important;
+  height: 22px !important;
+  border-radius: 50%;
+  background: rgba(26, 30, 36, 0.88);
+  border: 1px solid #e8b84a;
+  color: #e8b84a;
+  font-size: 10px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.airspace-marker-airport .airspace-apt-code {
+  display: inline-block;
+  padding: 1px 4px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #e8ecf4;
+  background: rgba(26, 30, 36, 0.9);
+  border: 1px solid #9b6bff;
+  border-radius: 3px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.airspace-popup {
+  font-size: 0.75rem;
+  min-width: 140px;
+}
+
+.airspace-popup-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #1a1e24;
+}
+
+.airspace-popup-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 2px 0;
+  color: #3a4250;
+}
+
+.airspace-popup-row span {
+  color: #6a7384;
+}
+
+/* Slightly wider layers panel when airspace slot is present */
+.layers-panel {
+  width: 260px;
+}
