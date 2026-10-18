@@ -72,6 +72,9 @@ const state = {
     lng: null,
     accuracy: null,
     heading: null,
+    speedMps: null,
+    nextStop: null,
+    offCorridor: false,
     wakeLock: null,
     startedAt: 0,
   },
@@ -730,6 +733,12 @@ function setupEventListeners() {
   // Continuous follow-me while driving (map + car peek) — same SPA path everywhere.
   document.getElementById("btnLocateMe").addEventListener("click", () => {
     toggleLiveLocation();
+  });
+  document.getElementById("btnLiveRecenter")?.addEventListener("click", () => {
+    resumeLiveFollow();
+  });
+  document.getElementById("btnLiveReplanHere")?.addEventListener("click", () => {
+    replanFromLiveLocation();
   });
 
   // Swap Locations
@@ -1397,10 +1406,134 @@ function formatLiveLocationError(err) {
   return "Location unavailable — use a preset or type an address.";
 }
 
+/**
+ * Pure client-side Haversine distance in miles between two coordinates.
+ * Used for live distance-to-next-Supercharger HUD & off-corridor check (zero server calls).
+ */
+function haversineDistanceMiles(lat1, lng1, lat2, lng2) {
+  if (
+    !Number.isFinite(lat1) ||
+    !Number.isFinite(lng1) ||
+    !Number.isFinite(lat2) ||
+    !Number.isFinite(lng2)
+  ) {
+    return null;
+  }
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const R_MILES = 3958.7613;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+  return R_MILES * c;
+}
+
+/** Convert compass heading in degrees (0-360) to 8-wind cardinal label. */
+function headingToCardinal(headingDeg) {
+  if (!Number.isFinite(headingDeg) || headingDeg < 0) return null;
+  const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  const normalized = ((headingDeg % 360) + 360) % 360;
+  return dirs[Math.round(normalized / 45) % 8];
+}
+
+/** Format GPS speed (m/s) + heading (deg) into a compact HUD label. */
+function formatLiveTelemetryLabel(speedMps, headingDeg) {
+  const parts = [];
+  if (Number.isFinite(speedMps) && speedMps >= 0) {
+    const mph = Math.round(speedMps * 2.236936);
+    parts.push(`${mph} mph`);
+  }
+  const card = headingToCardinal(headingDeg);
+  if (card) {
+    parts.push(`${card} ${Math.round(((headingDeg % 360) + 360) % 360)}°`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : "LIVE GPS";
+}
+
+/**
+ * Find the nearest planned Supercharger stop (or destination fallback) and distance in miles.
+ * Pure function over (lat, lng, plan) for easy unit testing.
+ */
+function computeNextPlannedStopTelemetry(lat, lng, plan) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !plan || !Array.isArray(plan.stops)) {
+    return null;
+  }
+  let best = null;
+  for (const stop of plan.stops) {
+    if (!stop || (stop.type !== "SUPERCHARGER" && stop.type !== "DESTINATION")) continue;
+    const d = haversineDistanceMiles(lat, lng, Number(stop.lat), Number(stop.lng));
+    if (d == null) continue;
+    if (stop.type === "SUPERCHARGER") {
+      if (!best || best.type !== "SUPERCHARGER" || d < best.distanceMiles) {
+        best = {
+          name: stop.name || `Stop #${stop.stop_index || ""}`,
+          stopIndex: stop.stop_index || null,
+          type: "SUPERCHARGER",
+          distanceMiles: Math.round(d * 10) / 10,
+          lat: Number(stop.lat),
+          lng: Number(stop.lng),
+        };
+      }
+    } else if (!best) {
+      best = {
+        name: stop.name || "Destination",
+        stopIndex: null,
+        type: "DESTINATION",
+        distanceMiles: Math.round(d * 10) / 10,
+        lat: Number(stop.lat),
+        lng: Number(stop.lng),
+      };
+    }
+  }
+  return best;
+}
+
+/**
+ * Check if the vehicle is significantly off the planned route corridor (> thresholdMiles from any
+ * corridor polyline point or stop). Never auto-calls the server — only surfaces a manual replan button.
+ */
+function isOffRouteCorridor(lat, lng, plan, thresholdMiles = 25) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !plan) return false;
+  let minMiles = Infinity;
+  const geom = plan.geometry;
+  const coords =
+    geom && geom.type === "LineString" && Array.isArray(geom.coordinates)
+      ? geom.coordinates
+      : geom &&
+          geom.type === "Feature" &&
+          geom.geometry &&
+          Array.isArray(geom.geometry.coordinates)
+        ? geom.geometry.coordinates
+        : null;
+  if (coords && coords.length > 0) {
+    const step = Math.max(1, Math.floor(coords.length / 80));
+    for (let i = 0; i < coords.length; i += step) {
+      const pt = coords[i];
+      if (Array.isArray(pt) && pt.length >= 2) {
+        const d = haversineDistanceMiles(lat, lng, Number(pt[1]), Number(pt[0]));
+        if (d != null && d < minMiles) minMiles = d;
+      }
+    }
+  } else if (Array.isArray(plan.stops)) {
+    for (const s of plan.stops) {
+      const d = haversineDistanceMiles(lat, lng, Number(s.lat), Number(s.lng));
+      if (d != null && d < minMiles) minMiles = d;
+    }
+  }
+  return Number.isFinite(minMiles) && minMiles > thresholdMiles;
+}
+
 window.isSecureGeoContext = isSecureGeoContext;
 window.liveLocationWatchOptions = liveLocationWatchOptions;
 window.oneShotLocationOptions = oneShotLocationOptions;
 window.formatLiveLocationError = formatLiveLocationError;
+window.haversineDistanceMiles = haversineDistanceMiles;
+window.headingToCardinal = headingToCardinal;
+window.formatLiveTelemetryLabel = formatLiveTelemetryLabel;
+window.computeNextPlannedStopTelemetry = computeNextPlannedStopTelemetry;
+window.isOffRouteCorridor = isOffRouteCorridor;
 
 function setLocateBusy(busy) {
   const mapBtn = document.getElementById("btnLocateMe");
@@ -1459,6 +1592,60 @@ function syncLiveLocationUi() {
     el.innerHTML = icon;
     delete el.dataset.prevHtml;
   });
+
+  // Update floating Live Driving HUD (speed/heading, next stop distance, Re-center & off-corridor Replan pills)
+  const hud = document.getElementById("liveDriveHud");
+  const speedEl = document.getElementById("liveHudSpeed");
+  const sepEl = document.getElementById("liveHudSep");
+  const nextEl = document.getElementById("liveHudNextStop");
+  const recenterBtn = document.getElementById("btnLiveRecenter");
+  const replanBtn = document.getElementById("btnLiveReplanHere");
+  if (!hud) return;
+
+  if (!live.watching) {
+    hud.hidden = true;
+    return;
+  }
+
+  hud.hidden = false;
+  if (speedEl) {
+    speedEl.textContent = awaitingFix
+      ? "Acquiring GPS…"
+      : formatLiveTelemetryLabel(live.speedMps, live.heading);
+  }
+
+  const nextInfo =
+    !awaitingFix && live.lat != null && live.lng != null
+      ? computeNextPlannedStopTelemetry(live.lat, live.lng, state.activePlan)
+      : null;
+  live.nextStop = nextInfo;
+
+  if (nextEl && sepEl) {
+    if (nextInfo) {
+      const prefix = nextInfo.stopIndex ? `Stop #${nextInfo.stopIndex}` : "Next";
+      nextEl.textContent = `${prefix} ${nextInfo.name}: ${nextInfo.distanceMiles} mi`;
+      nextEl.hidden = false;
+      sepEl.hidden = false;
+    } else {
+      nextEl.textContent = "";
+      nextEl.hidden = true;
+      sepEl.hidden = true;
+    }
+  }
+
+  if (recenterBtn) {
+    recenterBtn.hidden = !(paused && !awaitingFix);
+  }
+
+  const offCorridor =
+    !awaitingFix &&
+    live.lat != null &&
+    live.lng != null &&
+    isOffRouteCorridor(live.lat, live.lng, state.activePlan, 25);
+  live.offCorridor = offCorridor;
+  if (replanBtn) {
+    replanBtn.hidden = !offCorridor;
+  }
 }
 
 /**
@@ -1569,7 +1756,7 @@ function setupLiveLocationLifecycle() {
 function onLivePositionSuccess(pos) {
   if (!state.liveLocation.watching) return;
   if (!pos || !pos.coords) return;
-  const { latitude, longitude, accuracy, heading } = pos.coords;
+  const { latitude, longitude, accuracy, heading, speed } = pos.coords;
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
 
   const firstFix = state.liveLocation.lat == null;
@@ -1577,6 +1764,7 @@ function onLivePositionSuccess(pos) {
   state.liveLocation.lng = longitude;
   state.liveLocation.accuracy = Number.isFinite(accuracy) ? accuracy : null;
   state.liveLocation.heading = Number.isFinite(heading) ? heading : null;
+  state.liveLocation.speedMps = Number.isFinite(speed) && speed >= 0 ? speed : null;
 
   updateUserLocationMarker(
     latitude,
@@ -1680,6 +1868,9 @@ function stopLiveLocation({ silent } = {}) {
   state.liveLocation.lng = null;
   state.liveLocation.accuracy = null;
   state.liveLocation.heading = null;
+  state.liveLocation.speedMps = null;
+  state.liveLocation.nextStop = null;
+  state.liveLocation.offCorridor = false;
   state.liveLocation.startedAt = 0;
   if (state.userLocationLayer) state.userLocationLayer.clearLayers();
   releaseLiveWakeLock();
@@ -1710,10 +1901,46 @@ function toggleLiveLocation() {
   stopLiveLocation();
 }
 
+function resumeLiveFollow() {
+  const live = state.liveLocation;
+  if (!live.watching) {
+    startLiveLocation();
+    return;
+  }
+  live.follow = true;
+  syncLiveLocationUi();
+  if (Number.isFinite(live.lat) && Number.isFinite(live.lng)) {
+    panMapToLiveLocation(live.lat, live.lng, { initial: false });
+  }
+  showToast("Following again.", 1800);
+}
+
+/**
+ * Threshold-gated manual replan when vehicle is significantly off-corridor.
+ * Never triggers automatically on GPS ticks — only when user taps "Replan from here".
+ */
+function replanFromLiveLocation() {
+  const live = state.liveLocation;
+  if (!Number.isFinite(live.lat) || !Number.isFinite(live.lng)) return;
+  setOrigin({
+    name: "Current Location (Live)",
+    lat: live.lat,
+    lng: live.lng,
+    source: "geolocation",
+  });
+  live.follow = true;
+  syncLiveLocationUi();
+  if (state.destination) {
+    planRoute();
+  }
+}
+
 window.toggleLiveLocation = toggleLiveLocation;
 window.startLiveLocation = startLiveLocation;
 window.stopLiveLocation = stopLiveLocation;
 window.syncLiveLocationUi = syncLiveLocationUi;
+window.resumeLiveFollow = resumeLiveFollow;
+window.replanFromLiveLocation = replanFromLiveLocation;
 
 /** One-shot GPS → Origin (sidebar "Use Current Location"). Does not start follow-me. */
 function detectCurrentLocation() {
@@ -2053,6 +2280,7 @@ function renderRoutePlan(plan) {
 
   // 5. Render Timeline Itinerary
   renderTimeline(stops);
+  syncLiveLocationUi();
 }
 
 function renderTimeline(stops) {
