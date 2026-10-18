@@ -134,6 +134,28 @@ class TestSecurityHardening(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"parseChromiumMajor", body)
 
+    def test_tesla_path_serves_planner_spa(self):
+        """Canonical /tesla car entry serves the planner SPA (not probe, not mobile)."""
+        for path in ("/tesla", "/tesla/"):
+            status, headers, body = self._get(path)
+            self.assertEqual(status, 200, path)
+            lower = {k.lower(): v for k, v in headers.items()}
+            self.assertIn("text/html", lower.get("content-type", ""))
+            self.assertIn(b'id="btnPlanRoute"', body)
+            self.assertIn(b"carModeBadge", body)
+            self.assertNotIn(b"Tesla browser probe", body)
+        # Client helper lives in app.js (not inlined in HTML — CSP)
+        status, _, js = self._get("/app.js")
+        self.assertEqual(status, 200)
+        self.assertIn(b"function isTeslaPath", js)
+        self.assertIn(b'path === "/tesla"', js)
+        # Health advertises the car entry
+        status, _, body = self._get("/api/health")
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertEqual(data.get("tesla_shell"), "/tesla")
+        self.assertEqual(data.get("mobile_shell"), "/mobile")
+
     def test_superchargers_limit_clamped(self):
         status, _, body = self._get("/api/superchargers?limit=99999&status=OPEN")
         self.assertEqual(status, 200)

@@ -59,6 +59,17 @@ function isMobileShell() {
 
 window.isMobileShell = isMobileShell;
 
+/**
+ * Canonical in-car entry: /tesla (bookmark-friendly; car mode ON by default).
+ * Distinct from /tesla-probe (fingerprint page).
+ */
+function isTeslaPath() {
+  const path = (location.pathname || "/").replace(/\/+$/, "") || "/";
+  return path === "/tesla";
+}
+
+window.isTeslaPath = isTeslaPath;
+
 /** Escape text for safe interpolation into HTML / Leaflet popups. */
 function escapeHtml(value) {
   return String(value ?? "")
@@ -230,12 +241,13 @@ document.addEventListener("DOMContentLoaded", () => {
 /**
  * Tesla / half-MCU car shell: map-first + bottom plan sheet.
  *
+ * Canonical entry: /tesla (car mode ON; no query needed).
+ * Optional on `/`: ?car=1 / ?tesla=1 / #car. Disable: ?car=0
+ *
  * CRITICAL (2026-10-18 incar): browser is the RIGHT HALF of the MCU.
  * At DPR~1.53, CSS width is often ~600–650 — NOT ≥700. The v1 detector
  * required w>=700 and never engaged; ≤860px stack crushed the map.
- *
- * Fail OPEN for short/narrow landscape panes. Force: ?car=1 / ?tesla=1 / #car
- * Disable: ?car=0
+ * Fail OPEN for short/narrow landscape panes when not on an explicit path.
  */
 function shouldUseCarShell() {
   // Phone /mobile shell is a separate product path — never mix with car-shell
@@ -250,6 +262,8 @@ function shouldUseCarShell() {
     }
     return false;
   }
+  // Bookmark path: /tesla always enables car shell (unless ?car=0 above)
+  if (isTeslaPath()) return true;
   if (forced === "1" || forced === "true") {
     try {
       window.localStorage.setItem("teslaCarShell", "1");

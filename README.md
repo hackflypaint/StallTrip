@@ -44,11 +44,13 @@ COST_PROFILE=lean python3 server.py 8080
 | `data/superchargers.json` | ~11k stations (bundled) |
 | `Dockerfile` | Multi-stage **HI** Python 3.12 build |
 
-## Tesla in-car probe
+## Tesla in-car
 
-`GET /tesla-probe` — fingerprint page for car browser (viewport, DPR, touch, geolocation). The car cannot hit LAN/localhost; use a public HTTPS tunnel or deploy (Project store runbook `docs/https-car-access.md`).
-
-Tesla Playwright profiles: `node tests/verify_tesla_ui.js` (773×601 & 1254×784, DPR 1.53, touch).
+- **Canonical car entry:** `GET /tesla` — planner with car mode ON (map-first sheet). Bookmark this over ngrok.
+- Optional force on desktop `/`: `?car=1`. Phone shell stays `/mobile` (separate).
+- **Probe:** `GET /tesla-probe` — fingerprint (UA, DPR, touch, geolocation). Not the planner.
+- Car cannot hit LAN/localhost — public HTTPS (Project store `docs/https-car-access.md`).
+- Playwright: `node tests/verify_tesla_ui.js` hits `/tesla` at 773×601 / half-MCU / 1254×784.
 
 ## Docs
 
