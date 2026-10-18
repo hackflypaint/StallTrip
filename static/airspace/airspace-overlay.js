@@ -24,6 +24,8 @@
   const MIN_ZOOM_UASFM = 9;
   /** Stadium / NSFR point markers. */
   const MIN_ZOOM_POINTS = 8;
+  /** Autopylot uasfm:label minzoom (their Mapbox layer uses 12; we allow 11 for Leaflet density). */
+  const MIN_ZOOM_LABELS = 11;
 
   const DEBOUNCE_MS = 350;
   const BBOX_PAD_DEG = 0.08;
@@ -49,45 +51,67 @@
     auth: "auth",
   };
 
+  /**
+   * Autopylot-parity palette from public SPA paint tokens
+   * (app.autopylot.io assets — not private APIs):
+   *   UASFM >0 fill/line #FD9104 @ 0.2; blocking #F60726; parks/other #7C1C8D→#F60726
+   */
+  const AP = {
+    laancAmber: "#FD9104",
+    blockRed: "#F60726",
+    parkPurple: "#7C1C8D",
+    lineInactive: "#CCCCD9",
+    success: "#23ae09",
+    danger: "#db163d",
+    lightBg: "#F4F5FA",
+  };
+
   const STYLES = {
     noFly: {
-      color: "#e85d5d",
-      weight: 1.6,
-      opacity: 0.95,
-      fillColor: "#c0392b",
-      fillOpacity: 0.32,
-    },
-    /** NPS parks — same legality class, distinct hue so parks read clearly. */
-    park: {
-      color: "#d35400",
-      weight: 1.5,
+      color: AP.blockRed,
+      weight: 1.25,
       opacity: 0.9,
-      fillColor: "#a04000",
-      fillOpacity: 0.3,
+      fillColor: AP.blockRed,
+      fillOpacity: 0.18,
+    },
+    /** NPS / other-blocking: Autopylot purple at overview, red when close. */
+    park: {
+      color: AP.parkPurple,
+      weight: 1,
+      opacity: 0.85,
+      fillColor: AP.parkPurple,
+      fillOpacity: 0.12,
+    },
+    parkClose: {
+      color: AP.blockRed,
+      weight: 1.25,
+      opacity: 0.9,
+      fillColor: AP.blockRed,
+      fillOpacity: 0.12,
     },
     auth: {
-      color: "#e8b84a",
-      weight: 1.4,
-      opacity: 0.85,
-      fillColor: "#c9942e",
-      fillOpacity: 0.18,
-      dashArray: "4 3",
+      color: AP.laancAmber,
+      weight: 1.5,
+      opacity: 0.75,
+      fillColor: AP.laancAmber,
+      fillOpacity: 0.08,
+      dashArray: null,
     },
-    /** UASFM cells with a published ceiling > 0 ft — still auth-required. */
+    /** UASFM ceiling > 0 — Autopylot uasfm:fill / uasfm:line:laanc */
     uasfmAuth: {
-      color: "#d4a84b",
-      weight: 0.35,
-      opacity: 0.55,
-      fillColor: "#c9942e",
-      fillOpacity: 0.22,
+      color: AP.laancAmber,
+      weight: 1,
+      opacity: 0.95,
+      fillColor: AP.laancAmber,
+      fillOpacity: 0.2,
     },
-    /** UASFM ceiling 0 — no LAANC grid authorization; treat as no-fly. */
+    /** UASFM ceiling 0 — Autopylot blocking red */
     uasfmZero: {
-      color: "#c0392b",
-      weight: 0.4,
-      opacity: 0.65,
-      fillColor: "#922b21",
-      fillOpacity: 0.4,
+      color: AP.blockRed,
+      weight: 1,
+      opacity: 0.95,
+      fillColor: AP.blockRed,
+      fillOpacity: 0.22,
     },
   };
 
@@ -157,8 +181,8 @@
   };
 
   function constraintLabel(kind) {
-    if (kind === CONSTRAINT.noFly) return "No-fly";
-    if (kind === CONSTRAINT.auth) return "Auth required";
+    if (kind === CONSTRAINT.noFly) return "Do Not Fly";
+    if (kind === CONSTRAINT.auth) return "Fly with Approval";
     return "Constraint";
   }
 
@@ -245,8 +269,11 @@
       authPoly: null,
       uasfmNoFly: null,
       uasfmAuth: null,
+      uasfmLabels: null,
       points: null,
     },
+    _lightBasemap: null,
+    _savedBasemapClass: null,
     /** Independent visibility for each shown constraint class. */
     _classOn: {
       noFly: true,
@@ -263,6 +290,7 @@
     // Exported for unit tests
     _test: {
       STYLES,
+      AP,
       CONSTRAINT,
       CLASS_KEYS,
       constraintLabel,
@@ -278,6 +306,7 @@
       MIN_ZOOM,
       MIN_ZOOM_UASFM,
       MIN_ZOOM_POINTS,
+      MIN_ZOOM_LABELS,
     },
 
     /**
@@ -305,8 +334,11 @@
         authPoly: null,
         uasfmNoFly: null,
         uasfmAuth: null,
+        uasfmLabels: null,
         points: null,
       };
+      this._lightBasemap = null;
+      this._savedBasemapClass = null;
       this._classOn = { noFly: true, parks: true, auth: true };
       this._lastCounts = null;
     },
@@ -331,22 +363,22 @@
             </label>
           </div>
           <div class="airspace-detail-block" id="airspaceDetailBlock">
-            <p class="airspace-blurb">Constraints for whether recreational / Part&nbsp;107 flight is typically blocked, needs airspace authorization, or unconstrained. Not a LAANC approval tool. Restricted (R) SUA is hard no-fly.</p>
+            <p class="airspace-blurb">Autopylot-style traffic-light map (public FAA/NPS data): <strong>Do Not Fly</strong>, <strong>Fly with Approval</strong>, or clear. Not a LAANC tool. Restricted (R) SUA is hard no-fly.</p>
             <div class="airspace-class-toggles" id="airspaceClassToggles" role="group" aria-label="Constraint classes">
               <label class="airspace-class-toggle">
                 <input type="checkbox" id="airspaceClassNoFly" data-class="noFly" checked />
                 <i class="airspace-swatch airspace-swatch-nofly"></i>
-                <span>No-fly</span>
+                <span>Do Not Fly</span>
               </label>
               <label class="airspace-class-toggle">
                 <input type="checkbox" id="airspaceClassParks" data-class="parks" checked />
                 <i class="airspace-swatch airspace-swatch-park"></i>
-                <span>National park (no-fly)</span>
+                <span>National park</span>
               </label>
               <label class="airspace-class-toggle">
                 <input type="checkbox" id="airspaceClassAuth" data-class="auth" checked />
                 <i class="airspace-swatch airspace-swatch-auth"></i>
-                <span>Auth required</span>
+                <span>Fly with Approval</span>
               </label>
             </div>
             <div class="airspace-status" id="airspaceStatus">Zoom in (≥${MIN_ZOOM}) for constraints</div>
@@ -389,9 +421,9 @@
       if (!c) return null;
       const vis = this._classOn;
       const parts = [];
-      parts.push(vis.noFly ? `No-fly ${c.noFly}` : "No-fly off");
+      parts.push(vis.noFly ? `Do Not Fly ${c.noFly}` : "Do Not Fly off");
       parts.push(vis.parks ? `Parks ${c.parks}` : "Parks off");
-      parts.push(vis.auth ? `Auth ${c.auth}` : "Auth off");
+      parts.push(vis.auth ? `Approval ${c.auth}` : "Approval off");
       if (c.uasfmNote) parts.push(c.uasfmNote);
       return parts.join(" · ");
     },
@@ -418,6 +450,98 @@
       return [];
     },
 
+    /** Ceiling labels follow whichever UASFM class toggles are on. */
+    _applyLabelVisibility() {
+      if (!this._group || !this._layers.uasfmLabels) return;
+      const show =
+        !!this._classOn.auth || !!this._classOn.noFly;
+      const has = this._group.hasLayer(this._layers.uasfmLabels);
+      if (show && !has) this._group.addLayer(this._layers.uasfmLabels);
+      if (!show && has) this._group.removeLayer(this._layers.uasfmLabels);
+    },
+
+    _setLightBasemap(on) {
+      const mapEl = document.getElementById("map");
+      if (!mapEl) return;
+      if (on) {
+        mapEl.classList.add("basemap-airspace-light");
+      } else {
+        mapEl.classList.remove("basemap-airspace-light");
+      }
+    },
+
+    _parkStyle() {
+      const z = this._map ? this._map.getZoom() : 7;
+      // Autopylot other-blocking: purple below z9, red at z≥9
+      return Object.assign({}, z >= 9 ? STYLES.parkClose : STYLES.park);
+    },
+
+    _featureCentroid(feat) {
+      const g = feat && feat.geometry;
+      if (!g) return null;
+      let ring = null;
+      if (g.type === "Polygon" && g.coordinates && g.coordinates[0]) {
+        ring = g.coordinates[0];
+      } else if (
+        g.type === "MultiPolygon" &&
+        g.coordinates &&
+        g.coordinates[0] &&
+        g.coordinates[0][0]
+      ) {
+        ring = g.coordinates[0][0];
+      }
+      if (!ring || !ring.length) return null;
+      let x = 0;
+      let y = 0;
+      let n = 0;
+      for (const c of ring) {
+        if (!c || c.length < 2) continue;
+        x += c[0];
+        y += c[1];
+        n += 1;
+      }
+      if (!n) return null;
+      return [y / n, x / n]; // Leaflet lat,lng
+    },
+
+    _renderUasfmLabels(split, zoom) {
+      if (!this._layers.uasfmLabels) return;
+      this._layers.uasfmLabels.clearLayers();
+      if (zoom < MIN_ZOOM_LABELS) return;
+      // Autopylot labels all UASFM cells (incl. 0), not only above-zero fills
+      const features = [
+        ...((split && split.auth && split.auth.features) || []),
+        ...((split && split.zero && split.zero.features) || []),
+      ];
+      // Declutter: denser labels only at closer zooms
+      const stride = zoom >= 14 ? 1 : zoom >= 13 ? 2 : zoom >= 12 ? 3 : 4;
+      let i = 0;
+      let placed = 0;
+      for (const f of features) {
+        i += 1;
+        if (i % stride !== 0) continue;
+        const p = f.properties || {};
+        const ceiling = p.CEILING;
+        if (ceiling == null || ceiling === "") continue;
+        const ll = this._featureCentroid(f);
+        if (!ll || !Number.isFinite(ll[0]) || !Number.isFinite(ll[1])) continue;
+        const icon = L.divIcon({
+          className: "airspace-uasfm-label",
+          html: `<span>${escapeHtml(String(ceiling))}</span>`,
+          iconSize: [28, 16],
+          iconAnchor: [14, 8],
+        });
+        L.marker(ll, {
+          icon,
+          interactive: false,
+          keyboard: false,
+          zIndexOffset: 400,
+        }).addTo(this._layers.uasfmLabels);
+        placed += 1;
+        if (placed >= 400) break;
+      }
+    },
+
     _applyClassVisibility() {
       if (!this._group || !this._enabled) return;
       for (const key of Object.keys(this._classOn)) {
@@ -429,6 +553,7 @@
           if (!on && has) this._group.removeLayer(layer);
         }
       }
+      this._applyLabelVisibility();
     },
 
     _ensureLayers() {
@@ -443,7 +568,7 @@
               ["Class", p.CLASS],
               ["Floor", p.LOWER_DESC || p.LOWER_VAL],
               ["Ceiling", p.UPPER_DESC || p.UPPER_VAL],
-              ["Note", "Class B/C/D — airspace authorization typically required"],
+              ["Note", "Controlled airspace — Fly with Approval (e.g. LAANC) typically required"],
             ])
           );
         },
@@ -459,7 +584,7 @@
             popupHtml("UAS Facility Map cell", CONSTRAINT.auth, [
               ["Ceiling", `${p.CEILING != null ? p.CEILING : "—"} ${p.UNIT || "ft"}`],
               ["Airport", apt],
-              ["Note", "UASFM ceiling — authorization typically required below/near airport"],
+              ["Note", "UAS Facility Map — Fly with Approval up to this ceiling (informational)"],
             ])
           );
         },
@@ -523,7 +648,7 @@
       });
 
       this._layers.parks = L.geoJSON(null, {
-        style: () => Object.assign({}, STYLES.park),
+        style: () => this._parkStyle(),
         onEachFeature: (feat, layer) => {
           const p = feat.properties || {};
           layer.bindPopup(
@@ -546,15 +671,17 @@
       });
 
       this._layers.points = L.layerGroup();
+      this._layers.uasfmLabels = L.layerGroup();
 
-      // Start with all class layers in the group; visibility applied after.
+      // Draw order: auth grids under blocking red under parks; labels on top
       this._group = L.layerGroup([
-        this._layers.uasfmAuth,
         this._layers.authPoly,
+        this._layers.uasfmAuth,
         this._layers.uasfmNoFly,
         this._layers.noFlyPoly,
         this._layers.parks,
         this._layers.points,
+        this._layers.uasfmLabels,
       ]);
     },
 
@@ -569,6 +696,7 @@
 
       if (this._enabled) {
         this._ensureLayers();
+        this._setLightBasemap(true);
         this._group.addTo(this._map);
         this._applyClassVisibility();
         this._onMoveEnd = () => this._scheduleRefresh();
@@ -589,6 +717,7 @@
           this._map.removeLayer(this._group);
         }
         this._clearLayerData();
+        this._setLightBasemap(false);
         this._lastCounts = null;
         this._setStatus("Overlay off");
       }
@@ -600,6 +729,7 @@
       if (this._layers.authPoly) this._layers.authPoly.clearLayers();
       if (this._layers.uasfmNoFly) this._layers.uasfmNoFly.clearLayers();
       if (this._layers.uasfmAuth) this._layers.uasfmAuth.clearLayers();
+      if (this._layers.uasfmLabels) this._layers.uasfmLabels.clearLayers();
       if (this._layers.points) this._layers.points.clearLayers();
     },
 
@@ -683,6 +813,7 @@
       } else {
         if (this._layers.uasfmNoFly) this._layers.uasfmNoFly.clearLayers();
         if (this._layers.uasfmAuth) this._layers.uasfmAuth.clearLayers();
+        if (this._layers.uasfmLabels) this._layers.uasfmLabels.clearLayers();
       }
       if (zoom >= MIN_ZOOM_POINTS) {
         jobs.push(
@@ -733,6 +864,7 @@
             this._layers.uasfmAuth.clearLayers();
             this._layers.uasfmNoFly.addData(split.zero);
             this._layers.uasfmAuth.addData(split.auth);
+            this._renderUasfmLabels(split, zoom);
             uasZeroN = split.zero.features.length;
             uasAuthN = split.auth.features.length;
             uasN = uasZeroN + uasAuthN;
@@ -746,12 +878,17 @@
           type: "FeatureCollection",
           features: [...suaFc.features, ...tfrFc.features],
         });
+        // Restyle parks for Autopylot purple→red zoom step
+        if (this._layers.parks) this._layers.parks.setStyle(() => this._parkStyle());
         noFlyN =
           suaFc.features.length + tfrFc.features.length + stadiumN + uasZeroN;
         authN += uasAuthN;
 
         if (zoom < MIN_ZOOM_POINTS && this._layers.points) {
           this._layers.points.clearLayers();
+        }
+        if (zoom < MIN_ZOOM_UASFM && this._layers.uasfmLabels) {
+          this._layers.uasfmLabels.clearLayers();
         }
 
         this._applyClassVisibility();

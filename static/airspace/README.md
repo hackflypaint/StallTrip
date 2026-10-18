@@ -6,17 +6,16 @@ Uses **official public FeatureServers only** (FAA AIS/UDDS + NPS Land Resources)
 
 ## Legality mapping
 
-| Visual class | Meaning (informational) | Data |
-| --- | --- | --- |
-| **No-fly** | Launch/operate generally blocked | FAA Prohibited + **Restricted (R) hard no-fly** SUA; National Defense UAS TFRs; stadium NSFRs; UASFM cells with **0 ft** ceiling |
-| **National park (no-fly)** | NPS unit boundaries (policy no-fly) | Official NPS Land Resources boundaries |
-| **Auth required** | Controlled airspace / UASFM — typically needs airspace authorization (e.g. LAANC or FAA approval) | FAA Class B/C/D; UASFM cells with ceiling &gt; 0 |
-| **Unconstrained** | No overlay in view | Absence of the above — **not** legal clearance (remote ID, NOTAMs, local rules still apply) |
+| Visual class (Autopylot language) | Meaning (informational) | Draw style (public-bundle tokens) | Data |
+| --- | --- | --- | --- |
+| **Do Not Fly** | Launch/operate generally blocked | Fill/stroke `#F60726` ~0.18–0.22 | FAA P + **R hard no-fly** SUA; defense TFRs; stadiums; UASFM **0 ft** |
+| **National park** | NPS unit boundaries (policy no-fly) | `#7C1C8D` (&lt;z9) → `#F60726` (≥z9), opacity ~0.12 | NPS Land Resources boundaries |
+| **Fly with Approval** | Controlled / UASFM — typically needs authorization | `#FD9104` fill @ **0.2**; ceiling labels ≥z12 | Class B/C/D; UASFM ceiling &gt; 0 |
+| **Clear** | No overlay tint | — | Absence of above — **not** legal clearance |
 
-Each class above has an **independent checkbox** under **Drone flight** (master Show still loads data). Restricted (R) SUA is **hard no-fly**, never auth-required.
+Each class has an **independent checkbox** under **Drone flight**. Master Show loads data and enables Autopylot-like **light basemap** (lifts dark tile filter). Restricted (R) SUA is **hard no-fly**.
 
-**Auth** here means “airspace authorization is typically required,” not “this app issued LAANC.” Always verify with FAA / park rules before flying.
-
+**Fly with Approval** ≠ LAANC grant. Visual language mirrors Autopylot’s public map paint; data is FAA/NPS only — never Autopylot private APIs.
 ## Data sources & attribution
 
 | Layer | Source |

@@ -64,18 +64,24 @@ function run() {
   assert(t.LAYERS.suaNoFly.classKey === t.CLASS_KEYS.noFly, "sua classKey");
   assert(t.LAYERS.classAuth.classKey === t.CLASS_KEYS.auth, "auth classKey");
 
-  assert(t.constraintLabel(t.CONSTRAINT.noFly) === "No-fly", "no-fly label");
-  assert(t.constraintLabel(t.CONSTRAINT.auth) === "Auth required", "auth label");
+  assert(t.constraintLabel(t.CONSTRAINT.noFly) === "Do Not Fly", "do-not-fly label");
+  assert(t.constraintLabel(t.CONSTRAINT.auth) === "Fly with Approval", "approval label");
 
   assert(t.uasfmConstraint(0) === t.CONSTRAINT.noFly, "0ft UASFM = no-fly");
   assert(t.uasfmConstraint(200) === t.CONSTRAINT.auth, "200ft UASFM = auth");
   const zeroStyle = t.uasfmStyle(0);
   const hiStyle = t.uasfmStyle(400);
-  assert(zeroStyle.fillOpacity > hiStyle.fillOpacity, "0ft darker than auth cell");
+  assert(zeroStyle.fillColor.toUpperCase() === "#F60726", "Autopylot block red");
+  assert(hiStyle.fillColor.toUpperCase() === "#FD9104", "Autopylot LAANC amber");
+  assert(Math.abs(hiStyle.fillOpacity - 0.2) < 0.001, "UASFM auth opacity 0.2");
+  assert(t.AP.laancAmber.toUpperCase() === "#FD9104", "AP laanc token");
+  assert(t.AP.blockRed.toUpperCase() === "#F60726", "AP block token");
+  assert(t.AP.parkPurple.toUpperCase() === "#7C1C8D", "AP park token");
+  assert(t.MIN_ZOOM_LABELS === 11, "label minzoom (Autopylot uses 12; Leaflet 11)");
 
-  assert(t.STYLES.noFly.fillColor, "no-fly style");
-  assert(t.STYLES.park.fillColor, "park style");
-  assert(t.STYLES.auth.fillColor, "auth style");
+  assert(t.STYLES.noFly.fillColor.toUpperCase() === "#F60726", "no-fly style");
+  assert(t.STYLES.park.fillColor.toUpperCase() === "#7C1C8D", "park style");
+  assert(t.STYLES.auth.fillColor.toUpperCase() === "#FD9104", "auth style");
 
   const npsUrl = t.buildQueryUrl(t.LAYERS.npsParks, "-77.5,38.0,-75.5,39.5");
   assert(npsUrl.startsWith(t.NPS_ORG), "NPS query base");

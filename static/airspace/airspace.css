@@ -1,4 +1,11 @@
-/* Removable drone flight-constraint module — delete with static/airspace/ */
+/* Removable drone flight-constraint module — Autopylot-parity visuals.
+   Delete with static/airspace/ */
+
+/* Light basemap feel while Drone flight is on (Autopylot uses light streets).
+   Keeps existing OSM/topo tiles — only lifts the app dark filter. */
+#map.basemap-airspace-light .leaflet-tile-pane {
+  filter: brightness(1.08) contrast(0.95) saturate(0.75);
+}
 
 .airspace-slot {
   margin-top: 8px;
@@ -23,7 +30,7 @@
 }
 
 .airspace-slot-title i {
-  color: #e8b84a;
+  color: #fd9104;
   font-size: 0.75rem;
 }
 
@@ -38,7 +45,7 @@
 }
 
 .airspace-toggle input {
-  accent-color: #e8b84a;
+  accent-color: #fd9104;
   margin: 0;
 }
 
@@ -56,6 +63,11 @@
   color: var(--text-dim);
   line-height: 1.35;
   margin: 0 0 6px;
+}
+
+.airspace-blurb strong {
+  color: var(--text-muted);
+  font-weight: 600;
 }
 
 .airspace-class-toggles {
@@ -76,7 +88,7 @@
 }
 
 .airspace-class-toggle input {
-  accent-color: #e8b84a;
+  accent-color: #fd9104;
   margin: 0;
   flex-shrink: 0;
 }
@@ -94,19 +106,22 @@
   flex-shrink: 0;
 }
 
+/* Autopylot blocking red #F60726 */
 .airspace-swatch-nofly {
-  background: rgba(192, 57, 43, 0.65);
-  border-color: #e85d5d;
+  background: rgba(246, 7, 38, 0.55);
+  border-color: #f60726;
 }
 
+/* Autopylot other-blocking purple #7C1C8D */
 .airspace-swatch-park {
-  background: rgba(160, 64, 0, 0.65);
-  border-color: #d35400;
+  background: rgba(124, 28, 141, 0.55);
+  border-color: #7c1c8d;
 }
 
+/* Autopylot LAANC amber #FD9104 */
 .airspace-swatch-auth {
-  background: rgba(201, 148, 46, 0.5);
-  border-color: #e8b84a;
+  background: rgba(253, 145, 4, 0.55);
+  border-color: #fd9104;
 }
 
 .airspace-status {
@@ -144,22 +159,48 @@
   width: 22px !important;
   height: 22px !important;
   border-radius: 50%;
-  background: rgba(26, 30, 36, 0.88);
-  border: 1px solid #e85d5d;
-  color: #e85d5d;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #f60726;
+  color: #f60726;
   font-size: 10px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+/* Autopylot-style UASFM ceiling labels (center of cell) */
+.airspace-uasfm-label {
+  background: transparent !important;
+  border: none !important;
+}
+
+.airspace-uasfm-label span {
+  display: inline-block;
+  min-width: 1.4em;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #374151;
+  text-shadow:
+    0 0 2px #fff,
+    0 0 3px #fff,
+    1px 0 0 #fff,
+    -1px 0 0 #fff,
+    0 1px 0 #fff,
+    0 -1px 0 #fff;
+  line-height: 1.1;
+  pointer-events: none;
 }
 
 .airspace-popup {
   font-size: 0.75rem;
-  min-width: 160px;
+  min-width: 170px;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 .airspace-popup-title {
   font-weight: 600;
   margin-bottom: 4px;
-  color: #1a1e24;
+  color: #111827;
 }
 
 .airspace-badge {
@@ -168,21 +209,21 @@
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  padding: 1px 6px;
-  border-radius: 3px;
+  padding: 2px 7px;
+  border-radius: 4px;
   margin-bottom: 6px;
 }
 
 .airspace-badge-nofly {
-  background: rgba(192, 57, 43, 0.15);
-  color: #922b21;
-  border: 1px solid rgba(192, 57, 43, 0.45);
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #f60726;
 }
 
 .airspace-badge-auth {
-  background: rgba(201, 148, 46, 0.18);
-  color: #8a6a1a;
-  border: 1px solid rgba(201, 148, 46, 0.5);
+  background: #fff7ed;
+  color: #9a3412;
+  border: 1px solid #fd9104;
 }
 
 .airspace-popup-row {
@@ -194,10 +235,10 @@
 }
 
 .airspace-popup-row span {
-  color: #6a7384;
+  color: #6b7280;
 }
 
 /* Slightly wider layers panel when airspace slot is present */
 .layers-panel {
-  width: 270px;
+  width: 280px;
 }
