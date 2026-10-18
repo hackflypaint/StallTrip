@@ -164,6 +164,27 @@ class TestMobileShell(unittest.TestCase):
         self.assertIn("/mobile", body)
         self.assertIn("COST_PROFILE", body)
         self.assertIn("OSRM", body)
+        self.assertIn("ngrok", body)
+        self.assertIn("NGROK_AUTHTOKEN", body)
+
+    def test_mobile_ngrok_script_exists(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(root, "scripts", "mobile-ngrok.sh")
+        self.assertTrue(os.path.isfile(path))
+        self.assertTrue(os.access(path, os.X_OK), "mobile-ngrok.sh should be executable")
+        with open(path, encoding="utf-8") as fh:
+            body = fh.read()
+        self.assertIn("ngrok http", body)
+        self.assertIn("/mobile", body)
+        # No literal authtoken assignment baked into the script
+        for line in body.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            self.assertFalse(
+                stripped.startswith("NGROK_AUTHTOKEN=") and "add-authtoken" not in stripped,
+                f"unexpected token assignment: {stripped}",
+            )
 
     def test_phase4_verify_mobile_script_exists(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
