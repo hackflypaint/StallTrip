@@ -7,7 +7,7 @@
  * deviceScaleFactor 1.53, hasTouch true.
  *
  * Smoke: load → preset plan → drawer → box select → layers open.
- * Screenshots → store media/tesla-emulation/ when run.
+ * Screenshots → store media/tesla-emulation/car-shell/ (car shell UX).
  */
 const { chromium } = require("playwright");
 const fs = require("fs");
@@ -119,7 +119,6 @@ async function runProfile(browser, profile) {
   if (!/148/.test(chromiumCell || "")) {
     throw new Error(`expected Chromium major 148 from spoofed UA, got: ${chromiumCell}`);
   }
-  // Touch smoke on probe pad
   await page.locator("#touchPad").tap();
   await page.waitForFunction(
     () => {
@@ -132,45 +131,70 @@ async function runProfile(browser, profile) {
   console.log("  probe OK");
 
   // App smoke
-  console.log("1. Load planner...");
+  console.log("1. Load planner (expect car-shell)...");
   await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded", timeout: 20000 });
   await page.waitForSelector("#totalChargersBadge", { timeout: 15000 });
+  await page.waitForFunction(() => document.body.classList.contains("car-shell"), {
+    timeout: 5000,
+  });
+  await page.waitForFunction(() => document.body.getAttribute("data-sheet") === "plan", {
+    timeout: 5000,
+  });
   await page.waitForSelector("button.preset-tag", { timeout: 10000 });
+
+  const layersH = await page.locator("#btnToggleLayers").evaluate((el) => el.getBoundingClientRect().height);
+  console.log(`  car-shell active; layers btn height=${layersH}px`);
+  if (layersH < 44) {
+    throw new Error(`map control touch target too small: ${layersH}px (need ≥44)`);
+  }
+
   await shot("01_load");
 
   console.log("2. Preset plan SF → LA...");
   await page.selectOption("#maxStopsSelect", "6");
   await page.locator('button.preset-tag:has-text("SF → LA")').tap();
-  await page.waitForSelector("#routeResults", { state: "visible", timeout: 45000 });
+  // After plan, sheet peeks — results may be hidden; assert via appState
   await page.waitForFunction(
     () => {
-      const el = document.getElementById("statStops");
-      return el && parseInt(el.textContent || "0", 10) > 1;
+      const plan = window.appState && window.appState.activePlan;
+      return plan && plan.summary && plan.summary.supercharger_stops_count > 1;
     },
     { timeout: 45000 }
   );
-  const stops = parseInt(await page.locator("#statStops").textContent(), 10);
-  console.log(`  stops=${stops}`);
-  if (!(stops > 1)) {
-    throw new Error(`Visit Maximizer expected >1 stops, got ${stops}`);
-  }
-  await shot("02_plan");
+  await page.waitForFunction(() => document.body.getAttribute("data-sheet") === "peek", {
+    timeout: 8000,
+  });
+  const stops = await page.evaluate(
+    () => window.appState.activePlan.summary.supercharger_stops_count
+  );
+  console.log(`  stops=${stops}; sheet=peek`);
+  await shot("02_plan_peek");
 
-  console.log("3. Open charger drawer...");
+  console.log("3. Expand itinerary + open charger drawer...");
+  await page.locator("#btnCarSheetItinerary").tap();
+  await page.waitForFunction(() => document.body.getAttribute("data-sheet") === "itinerary", {
+    timeout: 5000,
+  });
+  await page.waitForSelector("#routeResults", { state: "visible", timeout: 8000 });
   await page.locator(".timeline-item.supercharger .timeline-content").first().tap();
   await page.waitForSelector("#chargerDrawer", { state: "visible", timeout: 8000 });
   const drawerTitle = (await page.locator("#drawerTitle").textContent()) || "";
   if (!drawerTitle.trim()) {
     throw new Error("drawer title empty");
   }
-  // Force-include control must be tappable (no hover-only)
   await page.locator("#btnAddStopToRoute").tap();
   await page.waitForFunction(() => window.appState && window.appState.forcedChargers.size >= 1, {
     timeout: 10000,
   });
   await shot("03_drawer");
   await page.locator("#btnCloseDrawer").tap();
-  await sleep(400);
+  await sleep(300);
+  // Collapse to peek so map dominates for draw / layers
+  await page.locator("#btnCarSheetHandle").tap();
+  await page.waitForFunction(() => document.body.getAttribute("data-sheet") === "peek", {
+    timeout: 5000,
+  });
+  await sleep(200);
 
   console.log("4. Box select from map toolbar...");
   const areaOnBar = await page.locator(".map-floating-bar #btnAreaModeBox").count();
@@ -183,23 +207,14 @@ async function runProfile(browser, profile) {
   if (!mapBox) {
     throw new Error("#map has no bounding box");
   }
-  // Prefer touchscreen drag when available
-  const start = { x: mapBox.x + mapBox.width * 0.4, y: mapBox.y + mapBox.height * 0.4 };
-  const end = { x: mapBox.x + mapBox.width * 0.7, y: mapBox.y + mapBox.height * 0.7 };
-  if (page.touchscreen && typeof page.touchscreen.tap === "function") {
-    await page.mouse.move(start.x, start.y);
-    await page.mouse.down();
-    await page.mouse.move(end.x, end.y, { steps: 8 });
-    await page.mouse.up();
-  } else {
-    await page.mouse.move(start.x, start.y);
-    await page.mouse.down();
-    await page.mouse.move(end.x, end.y, { steps: 8 });
-    await page.mouse.up();
-  }
+  const start = { x: mapBox.x + mapBox.width * 0.4, y: mapBox.y + mapBox.height * 0.35 };
+  const end = { x: mapBox.x + mapBox.width * 0.7, y: mapBox.y + mapBox.height * 0.65 };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 8 });
+  await page.mouse.up();
   await sleep(1500);
   await shot("04_box");
-  // Clear so layers interaction is clean
   const clearBtn = page.locator(".map-floating-bar #btnClearSelection");
   if (!(await clearBtn.isDisabled())) {
     await clearBtn.tap();
@@ -207,18 +222,8 @@ async function runProfile(browser, profile) {
   }
 
   console.log("5. Open layers panel...");
-  // At 773×601 the map legend can cover #btnToggleLayers (Phase 2 car-shell).
-  // Prefer a real tap; otherwise dispatch a DOM click (still exercises the handler).
-  const layersBtn = page.locator("#btnToggleLayers");
-  try {
-    await layersBtn.tap({ timeout: 4000 });
-  } catch (_) {
-    await page.evaluate(() => {
-      const btn = document.getElementById("btnToggleLayers");
-      if (!btn) throw new Error("btnToggleLayers missing");
-      btn.click();
-    });
-  }
+  // Legend is hidden in car-shell — layers control should be directly tappable
+  await page.locator("#btnToggleLayers").tap({ timeout: 8000 });
   await page.waitForFunction(
     () => {
       const panel = document.getElementById("layersPanel");
@@ -230,7 +235,6 @@ async function runProfile(browser, profile) {
   if (!layersVisible) {
     throw new Error("layers panel not visible after open");
   }
-  // Streets radio present — primary layer control without hover
   const streets = await page.locator('input[name="basemapRadio"][value="streets"]').count();
   if (streets < 1) {
     throw new Error("basemap streets control missing");
