@@ -1,5 +1,5 @@
 /**
- * Focused Playwright smoke for drone flight Layers overlay.
+ * Focused Playwright smoke for drone flight Layers overlay (Autopylot-parity).
  * Run (server on :8080): node tests/test_drone_airspace_ui.js
  */
 const { chromium } = require("playwright");
@@ -8,10 +8,13 @@ const path = require("path");
 
 const MEDIA_DIR =
   "/tmp/tesla-planner-media/drone-airspace";
+const PARITY_DIR =
+  "/tmp/tesla-planner-media/autopylot-parity";
 const ARTIFACTS = "/tmp/tesla-planner-artifacts";
 
 async function main() {
   fs.mkdirSync(MEDIA_DIR, { recursive: true });
+  fs.mkdirSync(PARITY_DIR, { recursive: true });
   fs.mkdirSync(ARTIFACTS, { recursive: true });
 
   const browser = await chromium.launch({
@@ -41,8 +44,8 @@ async function main() {
   }
 
   const toggles = await page.locator("#airspaceClassToggles").textContent();
-  if (!/No-fly/i.test(toggles || "") || !/Auth required/i.test(toggles || "")) {
-    throw new Error(`Class toggles missing labels: ${toggles}`);
+  if (!/Do Not Fly/i.test(toggles || "") || !/Fly with Approval/i.test(toggles || "")) {
+    throw new Error(`Class toggles missing Autopylot labels: ${toggles}`);
   }
   if (!/National park/i.test(toggles || "")) {
     throw new Error(`Class toggles missing park: ${toggles}`);
@@ -65,56 +68,70 @@ async function main() {
   });
 
   const status = await waitStatus(
-    (t) => /No-fly\s+\d+/.test(t) && /Parks\s+[1-9]\d*/.test(t),
+    (t) => /Do Not Fly\s+\d+/.test(t) && /Parks\s+[1-9]\d*/.test(t),
     30000
   );
   console.log("status:", status);
 
-  // Independent toggle: hide auth, keep no-fly + parks
+  const lightOn = await page.evaluate(() =>
+    document.getElementById("map")?.classList.contains("basemap-airspace-light")
+  );
+  if (!lightOn) throw new Error("Expected basemap-airspace-light while drone overlay on");
+
+  // Independent toggle: hide approval class
   await page.locator("#airspaceClassAuth").uncheck();
-  await waitStatus((t) => /Auth off/.test(t), 5000);
+  await waitStatus((t) => /Approval off/.test(t), 5000);
   console.log("after auth off:", await page.locator("#airspaceStatus").textContent());
 
-  const shotToggles = path.join(MEDIA_DIR, "drone_class_toggles_auth_off.png");
-  const shotTogglesA = path.join(ARTIFACTS, "drone_class_toggles_auth_off.png");
+  const shotToggles = path.join(PARITY_DIR, "parity_approval_off.png");
+  const shotTogglesA = path.join(ARTIFACTS, "parity_approval_off.png");
   await page.screenshot({ path: shotToggles, fullPage: false });
   fs.copyFileSync(shotToggles, shotTogglesA);
 
   await page.locator("#airspaceClassAuth").check();
-  await waitStatus((t) => !/Auth off/.test(t), 5000);
+  await waitStatus((t) => !/Approval off/.test(t), 5000);
 
-  // DC area — prohibited P-56, Class B/D, NPS units
+  // DC area — denser UASFM; then zoom for ceiling labels
   await page.evaluate(() => {
     window.appState.map.setView([38.89, -77.03], 11);
   });
   const statusDc = await waitStatus(
-    (t) => /No-fly\s+[1-9]\d*/.test(t) && /Auth\s+[1-9]\d*/.test(t),
+    (t) => /Do Not Fly\s+[1-9]\d*/.test(t) && /Approval\s+[1-9]\d*/.test(t),
     30000
   );
   console.log("status DC:", statusDc);
 
-  const FINAL =
-    "/tmp/tesla-planner-media/media/final-audit";
-  fs.mkdirSync(FINAL, { recursive: true });
+  await page.evaluate(() => {
+    window.appState.map.setView([38.851, -77.04], 13);
+  });
+  await waitStatus((t) => /UASFM\s+[1-9]\d*/.test(t), 30000);
+  // Allow labels to paint after debounced refresh
+  await page.waitForTimeout(2000);
+  const labelCount = await page.locator(".airspace-uasfm-label").count();
+  console.log("uasfm labels:", labelCount);
+  if (labelCount < 1) {
+    throw new Error("Expected UASFM ceiling labels at zoom ≥11");
+  }
 
-  const shot2 = path.join(MEDIA_DIR, "drone_constraints_dc_toggles.png");
-  const shot2a = path.join(ARTIFACTS, "drone_constraints_dc_toggles.png");
-  await page.screenshot({ path: shot2, fullPage: false });
-  fs.copyFileSync(shot2, shot2a);
-  fs.copyFileSync(shot2, path.join(FINAL, "drone_constraints_dc_toggles.png"));
-  fs.copyFileSync(shotToggles, path.join(FINAL, "drone_class_toggles_auth_off.png"));
+  const shotGrid = path.join(PARITY_DIR, "parity_dc_uasfm_grid.png");
+  const shotGridA = path.join(ARTIFACTS, "parity_dc_uasfm_grid.png");
+  await page.screenshot({ path: shotGrid, fullPage: false });
+  fs.copyFileSync(shotGrid, shotGridA);
 
-  // Layers panel close-up with class toggles
   const panel = page.locator("#layersPanel");
-  const shot3 = path.join(MEDIA_DIR, "drone_layers_panel_class_toggles.png");
-  const shot3a = path.join(ARTIFACTS, "drone_layers_panel_class_toggles.png");
-  await panel.screenshot({ path: shot3 });
-  fs.copyFileSync(shot3, shot3a);
-  fs.copyFileSync(shot3, path.join(FINAL, "drone_layers_panel_class_toggles.png"));
+  const shotPanel = path.join(PARITY_DIR, "parity_layers_panel.png");
+  const shotPanelA = path.join(ARTIFACTS, "parity_layers_panel.png");
+  await panel.screenshot({ path: shotPanel });
+  fs.copyFileSync(shotPanel, shotPanelA);
+
+  // Keep legacy drone-airspace paths updated for prior status docs
+  fs.copyFileSync(shotToggles, path.join(MEDIA_DIR, "drone_class_toggles_auth_off.png"));
+  fs.copyFileSync(shotGrid, path.join(MEDIA_DIR, "drone_constraints_dc_toggles.png"));
+  fs.copyFileSync(shotPanel, path.join(MEDIA_DIR, "drone_layers_panel_class_toggles.png"));
 
   await browser.close();
   console.log("test_drone_airspace_ui.js: OK");
-  console.log("media:", MEDIA_DIR);
+  console.log("parity media:", PARITY_DIR);
 }
 
 main().catch((err) => {
