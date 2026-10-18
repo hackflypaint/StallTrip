@@ -25,14 +25,13 @@ docker compose up -d --build
 
 Local Python (no Docker): `python3 server.py 8080` — **stdlib only**, no `pip install`.
 
-**Mobile (published):** map-first web shell at `/mobile` (`COST_PROFILE=lean`). **Public access now:** ngrok → `https://…/mobile` (see [mobile-deploy.md](./mobile-deploy.md)). Long-term host remains the HI container. Soft UA redirect stays **off**.
+**Mobile:** map-first web shell at **`/mobile`** (`COST_PROFILE=lean`) — separate from desktop `/` and Tesla car shell. Soft UA redirect stays **off**. Deploy notes: [mobile-deploy.md](./mobile-deploy.md). *(You may optionally tunnel with ngrok himself; agents do not run ngrok.)*
 
 ### Mobile verify
 ```bash
 python3 -m unittest tests.test_mobile tests.test_security -v
 COST_PROFILE=lean python3 server.py 8080
-./scripts/mobile-ngrok.sh          # on a machine with ngrok already configured
-# phones → https://<ngrok-host>/mobile
+# phones → http://localhost:8080/mobile
 ```
 
 ## What’s in the box
@@ -44,6 +43,12 @@ COST_PROFILE=lean python3 server.py 8080
 | `static/` | SPA (map, route, explore, foliage module) |
 | `data/superchargers.json` | ~11k stations (bundled) |
 | `Dockerfile` | Multi-stage **HI** Python 3.12 build |
+
+## Tesla in-car probe
+
+`GET /tesla-probe` — fingerprint page for car browser (viewport, DPR, touch, geolocation). The car cannot hit LAN/localhost; use a public HTTPS tunnel or deploy (Project store runbook `docs/https-car-access.md`).
+
+Tesla Playwright profiles: `node tests/verify_tesla_ui.js` (773×601 & 1254×784, DPR 1.53, touch).
 
 ## Docs
 

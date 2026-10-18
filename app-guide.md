@@ -178,9 +178,21 @@ node tests/verify_ui.js
 Phone viewport Playwright checks for map-first shell, Plan sheet, SF→LA plan, and default-off UA redirect:
 ```bash
 # requires Chrome + playwright (npm install --no-save playwright)
-MOBILE_MEDIA_DIR=/tmp/tesla-planner-media node tests/verify_mobile.js
+node tests/verify_mobile.js
 ```
-Soft UA redirect (`MOBILE_UA_REDIRECT`) remains **disabled** in Docker compose unless explicitly set.
+Soft UA redirect (`MOBILE_UA_REDIRECT`) remains **disabled** in Docker compose unless explicitly set. Phones use **`/mobile`** (separate from desktop and Tesla car shell).
+
+### Tesla landscape suite (in-car profiles)
+Chromium with `deviceScaleFactor: 1.53`, `hasTouch: true`, viewports **773×601** and **1254×784**. Smoke: probe page → preset plan → drawer → box select → layers. Screenshots go to the TESLA Project store `media/tesla-emulation/` when run:
+```bash
+# requires: npm install playwright && server on :8080 (or let the script start it)
+node tests/verify_tesla_ui.js
+```
+
+### Tesla browser probe
+In-car fingerprint page (UA, Chromium major, viewport/screen, DPR, touch, hover/pointer MQs, geolocation attempt):
+- `GET /tesla-probe` (also `/tesla-probe.html`)
+- Needs **public HTTPS** in the car — LAN/localhost are blocked (see Project store `docs/https-car-access.md`).
 
 ---
 

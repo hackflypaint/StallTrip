@@ -142,6 +142,11 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json_response({"error": "Endpoint not found"}, status=404)
             return
 
+        # Clean URL for in-car fingerprint page (must work over public HTTPS later)
+        if path in ("/tesla-probe", "/tesla-probe/"):
+            self.path = "/tesla-probe.html"
+            return super().do_GET()
+
         if self._maybe_mobile_ua_redirect(path):
             return
 
@@ -161,6 +166,10 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+
+        if path in ("/tesla-probe", "/tesla-probe/"):
+            self.path = "/tesla-probe.html"
+            return super().do_HEAD()
 
         if self._maybe_mobile_ua_redirect(path):
             return

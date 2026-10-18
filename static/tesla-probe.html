@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tesla browser probe — Supercharge Route</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #141e30;
+      --text: #e8eef8;
+      --muted: #93a4bc;
+      --accent: #e82127;
+      --ok: #3ecf8e;
+      --warn: #f0b429;
+      --bad: #ff6b6b;
+      --line: #243248;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #1a2740 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #2a1520 0%, transparent 50%),
+        var(--bg);
+      color: var(--text);
+      padding: 20px clamp(16px, 3vw, 32px) 40px;
+    }
+    header {
+      max-width: 920px;
+      margin: 0 auto 20px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(1.4rem, 3vw, 1.85rem);
+      letter-spacing: -0.02em;
+    }
+    .lede {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+      line-height: 1.45;
+      max-width: 62ch;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    button, a.btn {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      min-height: 48px;
+      min-width: 140px;
+      padding: 12px 18px;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+    }
+    button.primary {
+      background: var(--accent);
+      border-color: #ff4d52;
+    }
+    button:active, a.btn:active { transform: scale(0.98); }
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      display: grid;
+      gap: 12px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: minmax(140px, 220px) 1fr;
+      gap: 8px 16px;
+      padding: 14px 16px;
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    .label {
+      color: var(--muted);
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      align-self: start;
+      padding-top: 2px;
+    }
+    .value {
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.95rem;
+      word-break: break-word;
+      white-space: pre-wrap;
+      line-height: 1.4;
+    }
+    .value.ok { color: var(--ok); }
+    .value.warn { color: var(--warn); }
+    .value.bad { color: var(--bad); }
+    #copyStatus {
+      min-height: 1.2em;
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-top: 8px;
+    }
+    #touchPad {
+      margin-top: 8px;
+      border: 2px dashed var(--line);
+      border-radius: 12px;
+      min-height: 96px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.02);
+      user-select: none;
+      touch-action: manipulation;
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    #touchPad.hit {
+      border-color: var(--ok);
+      color: var(--ok);
+      background: rgba(62, 207, 142, 0.08);
+    }
+    footer {
+      max-width: 920px;
+      margin: 24px auto 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    @media (max-width: 640px) {
+      .row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Tesla browser probe</h1>
+    <p class="lede">
+      Capture fingerprint fields from this car session (UA, Chromium, viewport, DPR, touch, media queries, geolocation).
+      Screenshot or copy JSON before closing. Public HTTPS required — the car cannot reach LAN or localhost.
+    </p>
+    <div class="actions">
+      <button type="button" class="primary" id="btnRefresh">Refresh readings</button>
+      <button type="button" id="btnGeo">Retry geolocation</button>
+      <button type="button" id="btnCopy">Copy JSON</button>
+      <a class="btn" href="/">Open planner</a>
+    </div>
+    <p id="copyStatus" aria-live="polite"></p>
+  </header>
+
+  <main id="probeRows" aria-live="polite"></main>
+
+  <section style="max-width:920px;margin:16px auto 0;">
+    <div class="row" style="display:block;">
+      <div class="label">Touch smoke</div>
+      <div id="touchPad" role="button" tabindex="0">Tap here with a finger</div>
+    </div>
+  </section>
+
+  <footer>
+    Route: <code>/tesla-probe</code> · values update on load and Refresh · geolocation is best-effort (often denied off Tesla allowlists).
+  </footer>
+
+  <script src="/tesla-probe.js"></script>
+</body>
+</html>
