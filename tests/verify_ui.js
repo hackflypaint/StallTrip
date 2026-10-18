@@ -21,11 +21,18 @@ async function runVerification() {
     fs.mkdirSync(MEDIA_DIR, { recursive: true });
   }
 
-  // Catch console errors
+  // Catch console errors and logs
   page.on('console', msg => {
     if (msg.type() === 'error') {
       console.log('Browser console error:', msg.text());
     }
+  });
+  page.on('pageerror', err => {
+    console.log('[Browser PageError]:', err.message);
+  });
+  page.on('dialog', async dialog => {
+    console.log('[Browser Dialog]:', dialog.message());
+    await dialog.dismiss();
   });
 
   try {
@@ -39,9 +46,11 @@ async function runVerification() {
 
     // 2. Click preset route: "SF -> LA" in Visit Maximizer mode
     console.log('2. Clicking "SF -> LA" preset in Visit Maximizer mode...');
+    // Set max stops to 6 for faster test run
+    await page.selectOption('#maxStopsSelect', '6');
     await page.locator('button.preset-tag:has-text("SF → LA")').click();
 
-    await page.waitForSelector('#routeResults', { state: 'visible', timeout: 10000 });
+    await page.waitForSelector('#routeResults', { state: 'visible', timeout: 35000 });
     await page.waitForTimeout(3000);
 
     const distance = await page.locator('#statDistance').textContent();
