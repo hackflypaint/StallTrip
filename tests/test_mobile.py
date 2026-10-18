@@ -113,6 +113,17 @@ class TestMobileShell(unittest.TestCase):
         self.assertIn(b"function setMobileSheetOpen", body)
         self.assertIn(b"closeMobileSheet()", body)
 
+    def test_phase3_perf_helpers_in_app_js(self):
+        status, _, body = self._get("/app.js")
+        self.assertEqual(status, 200)
+        self.assertIn(b"function scheduleLoadMapBoundsChargers", body)
+        self.assertIn(b"function scheduleMapInvalidate", body)
+        self.assertIn(b"function mountOptionalOverlays", body)
+        self.assertIn(b"function exploreFetchLimitFor", body)
+        self.assertIn(b"function corridorMarkerCapFor", body)
+        self.assertIn(b"function subsampleMarkers", body)
+        self.assertIn(b"optionalOverlaysMounted", body)
+
     def test_phase2_mobile_css_touch_targets(self):
         status, _, body = self._get("/style.css")
         self.assertEqual(status, 200)

@@ -32,6 +32,12 @@ const state = {
   layersPanelOpen: false,
   /** Monotonic token so overlapping planRoute calls discard stale responses. */
   planRouteSeq: 0,
+  /** Foliage/airspace mounted (lazy on mobile until Layers opens). */
+  optionalOverlaysMounted: false,
+  /** Explore bounds fetch sequencing / debounce. */
+  exploreFetchSeq: 0,
+  exploreDebounceTimer: null,
+  invalidateSizeTimer: null,
 };
 
 // Expose for Playwright / debugging (cloud verification)
@@ -59,21 +65,35 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+/** Coalesce Leaflet invalidateSize — sheet toggles can fire back-to-back. */
+function scheduleMapInvalidate(delayMs) {
+  if (!state.map) return;
+  const delay = delayMs == null ? 80 : delayMs;
+  if (state.invalidateSizeTimer) clearTimeout(state.invalidateSizeTimer);
+  state.invalidateSizeTimer = setTimeout(() => {
+    state.invalidateSizeTimer = null;
+    if (state.map) state.map.invalidateSize();
+  }, delay);
+}
+
+window.scheduleMapInvalidate = scheduleMapInvalidate;
+
 function setMobileSheetOpen(open) {
   if (!document.body.classList.contains("ui-mobile")) return;
-  document.body.classList.toggle("sheet-open", !!open);
+  const wasOpen = document.body.classList.contains("sheet-open");
+  const next = !!open;
+  if (wasOpen === next) return;
+  document.body.classList.toggle("sheet-open", next);
   const toggle = document.getElementById("btnMobileSheet");
   if (toggle) {
-    toggle.setAttribute("aria-expanded", open ? "true" : "false");
-    const label = open ? "Hide planner" : "Show planner";
+    toggle.setAttribute("aria-expanded", next ? "true" : "false");
+    const label = next ? "Hide planner" : "Show planner";
     toggle.setAttribute("aria-label", label);
     toggle.title = label;
     const text = toggle.querySelector("span");
-    if (text) text.textContent = open ? "Map" : "Plan";
+    if (text) text.textContent = next ? "Map" : "Plan";
   }
-  if (state.map) {
-    setTimeout(() => state.map.invalidateSize(), 50);
-  }
+  scheduleMapInvalidate(80);
 }
 
 function openMobileSheet() {
@@ -112,12 +132,57 @@ function resolveGeolocationPlace(position, error) {
 
 window.resolveGeolocationPlace = resolveGeolocationPlace;
 
-/** Explore fetch limit — tighter on mobile shell to keep markers light. */
+/**
+ * Explore API limit — desktop fixed; mobile drops further when zoomed out.
+ * Pure zoom/mobile inputs kept testable via exploreFetchLimitFor(zoom, mobile).
+ */
+function exploreFetchLimitFor(zoom, mobileShell) {
+  if (!mobileShell) return 120;
+  const z = Number.isFinite(zoom) ? zoom : 6;
+  if (z < 7) return 25;
+  if (z < 9) return 40;
+  return 60;
+}
+
 function exploreFetchLimit() {
-  return isMobileShell() ? 60 : 120;
+  const zoom = state.map ? state.map.getZoom() : 6;
+  return exploreFetchLimitFor(zoom, isMobileShell());
 }
 
 window.exploreFetchLimit = exploreFetchLimit;
+window.exploreFetchLimitFor = exploreFetchLimitFor;
+
+/** Cap corridor yellow dots on mobile so plan renders stay light at low zoom. */
+function corridorMarkerCapFor(zoom, mobileShell) {
+  if (!mobileShell) return 500;
+  const z = Number.isFinite(zoom) ? zoom : 6;
+  if (z < 7) return 40;
+  if (z < 9) return 80;
+  return 120;
+}
+
+function corridorMarkerCap() {
+  const zoom = state.map ? state.map.getZoom() : 6;
+  return corridorMarkerCapFor(zoom, isMobileShell());
+}
+
+window.corridorMarkerCapFor = corridorMarkerCapFor;
+
+/** Evenly subsample a list down to `cap` (keeps first/last when possible). */
+function subsampleMarkers(items, cap) {
+  if (!Array.isArray(items) || items.length <= cap) return items || [];
+  if (cap <= 0) return [];
+  if (cap === 1) return [items[0]];
+  const out = [];
+  const last = items.length - 1;
+  for (let i = 0; i < cap; i++) {
+    const idx = Math.round((i * last) / (cap - 1));
+    out.push(items[idx]);
+  }
+  return out;
+}
+
+window.subsampleMarkers = subsampleMarkers;
 
 function initMobileShell() {
   if (!isMobileShell()) return;
@@ -141,7 +206,7 @@ function initMobileShell() {
   }
 
   if (state.map) {
-    setTimeout(() => state.map.invalidateSize(), 100);
+    scheduleMapInvalidate(100);
   }
 }
 
@@ -151,7 +216,10 @@ document.addEventListener("DOMContentLoaded", () => {
   initMobileShell();
   setupEventListeners();
   loadStats();
-  loadNearbyChargers();
+  // Mobile: skip eager nearby list until Explore is opened (saves a boot fetch)
+  if (!isMobileShell()) {
+    loadNearbyChargers();
+  }
 });
 
 function initMap() {
@@ -189,16 +257,9 @@ function initMap() {
   state.forcedMarkersLayer = L.featureGroup().addTo(state.map);
   state.markersLayer = L.featureGroup().addTo(state.map);
 
-  // Optional removable foliage module (static/foliage/)
-  const foliageSlot = document.getElementById("foliageSlot");
-  if (window.FoliageModule && foliageSlot) {
-    window.FoliageModule.mount({ map: state.map, slotEl: foliageSlot });
-  }
-
-  // Optional removable airspace / UAS module (static/airspace/)
-  const airspaceSlot = document.getElementById("airspaceSlot");
-  if (window.AirspaceModule && airspaceSlot) {
-    window.AirspaceModule.mount({ map: state.map, slotEl: airspaceSlot });
+  // Desktop: mount optional overlays eagerly. Mobile: wait until Layers opens.
+  if (!isMobileShell()) {
+    mountOptionalOverlays();
   }
 
   // Map click handler for origin/destination when not in area selection mode
@@ -220,17 +281,36 @@ function initMap() {
     }
   });
 
-  // Re-query chargers when map moves in explore mode
+  // Re-query chargers when map moves in explore mode (debounced)
   state.map.on("moveend", () => {
     const exploreTab = document.getElementById("explore-tab");
-    if (exploreTab.style.display !== "none") {
-      loadMapBoundsChargers();
+    if (exploreTab && exploreTab.style.display !== "none") {
+      scheduleLoadMapBoundsChargers();
     }
   });
 
   // Setup Map Area Selection Drawing Handlers
   setupMapAreaSelection();
 }
+
+/** Mount foliage + airspace once (lazy on mobile). */
+function mountOptionalOverlays() {
+  if (state.optionalOverlaysMounted) return;
+
+  const foliageSlot = document.getElementById("foliageSlot");
+  if (window.FoliageModule && foliageSlot) {
+    window.FoliageModule.mount({ map: state.map, slotEl: foliageSlot });
+  }
+
+  const airspaceSlot = document.getElementById("airspaceSlot");
+  if (window.AirspaceModule && airspaceSlot) {
+    window.AirspaceModule.mount({ map: state.map, slotEl: airspaceSlot });
+  }
+
+  state.optionalOverlaysMounted = true;
+}
+
+window.mountOptionalOverlays = mountOptionalOverlays;
 
 function setBasemap(name) {
   if (!state.baseLayers || !state.map) return;
@@ -263,6 +343,8 @@ function toggleLayersPanel(force) {
     btn.classList.toggle("is-active", open);
     btn.setAttribute("aria-expanded", open ? "true" : "false");
   }
+  // Mobile: first open of Layers mounts heavy optional overlays
+  if (open) mountOptionalOverlays();
 }
 
 function setupEventListeners() {
@@ -270,7 +352,7 @@ function setupEventListeners() {
   document.getElementById("tabRoute").addEventListener("click", () => switchTab("route-tab"));
   document.getElementById("tabExplore").addEventListener("click", () => {
     switchTab("explore-tab");
-    loadMapBoundsChargers();
+    scheduleLoadMapBoundsChargers(0);
   });
 
   // Autocomplete for Origin
@@ -443,20 +525,16 @@ function setupEventListeners() {
     maybeReplan();
   });
 
-  // Explore search & filters
+  // Explore search & filters (shared debounced loader)
   const chargerSearchInput = document.getElementById("chargerSearchInput");
-  let debounceTimeout = null;
   chargerSearchInput.addEventListener("input", () => {
-    clearTimeout(debounceTimeout);
-    debounceTimeout = setTimeout(() => {
-      loadMapBoundsChargers();
-    }, 350);
+    scheduleLoadMapBoundsChargers(isMobileShell() ? 350 : 280);
   });
 
-  document.getElementById("filterStatus").addEventListener("change", loadMapBoundsChargers);
-  document.getElementById("filterMinPower").addEventListener("change", loadMapBoundsChargers);
-  document.getElementById("filterMinStalls").addEventListener("change", loadMapBoundsChargers);
-  document.getElementById("btnFilterMapArea").addEventListener("click", loadMapBoundsChargers);
+  document.getElementById("filterStatus").addEventListener("change", () => scheduleLoadMapBoundsChargers(0));
+  document.getElementById("filterMinPower").addEventListener("change", () => scheduleLoadMapBoundsChargers(0));
+  document.getElementById("filterMinStalls").addEventListener("change", () => scheduleLoadMapBoundsChargers(0));
+  document.getElementById("btnFilterMapArea").addEventListener("click", () => scheduleLoadMapBoundsChargers(0));
 
   // Global ESC: abort in-progress draw (same as banner Cancel); use Clear selection to drop finished area
   document.addEventListener("keydown", (e) => {
@@ -1155,9 +1233,10 @@ function renderRoutePlan(plan) {
     state.map.fitBounds(geojsonLayer.getBounds(), { padding: [50, 50] });
   }
 
-  // 3. Render Corridor Chargers (Yellow dots)
+  // 3. Render Corridor Chargers (Yellow dots) — capped/subsampled on mobile
   if (plan.all_corridor_chargers) {
-    plan.all_corridor_chargers.forEach((c) => {
+    const capped = subsampleMarkers(plan.all_corridor_chargers, corridorMarkerCap());
+    capped.forEach((c) => {
       const circle = L.circleMarker([c.lat, c.lng], {
         radius: 5,
         fillColor: "#ffaa00",
@@ -1368,8 +1447,26 @@ async function loadNearbyChargers() {
   }
 }
 
+/** Debounce explore bounds fetches (pan/zoom spam). delayMs=0 runs ASAP. */
+function scheduleLoadMapBoundsChargers(delayMs) {
+  const delay =
+    delayMs != null
+      ? delayMs
+      : isMobileShell()
+        ? 280
+        : 150;
+  if (state.exploreDebounceTimer) clearTimeout(state.exploreDebounceTimer);
+  state.exploreDebounceTimer = setTimeout(() => {
+    state.exploreDebounceTimer = null;
+    loadMapBoundsChargers();
+  }, delay);
+}
+
+window.scheduleLoadMapBoundsChargers = scheduleLoadMapBoundsChargers;
+
 async function loadMapBoundsChargers() {
   if (!state.map) return;
+  const seq = ++state.exploreFetchSeq;
   const bounds = state.map.getBounds();
   const status = document.getElementById("filterStatus").value;
   const minPower = document.getElementById("filterMinPower").value;
@@ -1387,8 +1484,11 @@ async function loadMapBoundsChargers() {
   try {
     const res = await fetch(url);
     const data = await res.json();
+    // Drop stale responses from overlapping pans
+    if (seq !== state.exploreFetchSeq) return;
     renderExploreList(data.superchargers || []);
   } catch (e) {
+    if (seq !== state.exploreFetchSeq) return;
     console.error("Failed to query map chargers", e);
   }
 }
