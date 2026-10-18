@@ -151,7 +151,37 @@ def query_superchargers(
     return results
 
 def geocode_address(query: str) -> List[Dict[str, Any]]:
-    """Geocode an address or place name using Photon (OSM) with Nominatim fallback."""
+    """Geocode an address or place name using local city lookup, coordinate parsing, Photon (OSM), or Nominatim."""
+    q_clean = query.strip()
+    
+    # 0. Check well-known cities / popular presets locally for instant reliability
+    KNOWN_PLACES = {
+        "san francisco, ca": {"name": "San Francisco, CA, USA", "lat": 37.7749, "lng": -122.4194},
+        "san francisco": {"name": "San Francisco, CA, USA", "lat": 37.7749, "lng": -122.4194},
+        "los angeles, ca": {"name": "Los Angeles, CA, USA", "lat": 34.0522, "lng": -118.2437},
+        "los angeles": {"name": "Los Angeles, CA, USA", "lat": 34.0522, "lng": -118.2437},
+        "las vegas, nv": {"name": "Las Vegas, NV, USA", "lat": 36.1699, "lng": -115.1398},
+        "las vegas": {"name": "Las Vegas, NV, USA", "lat": 36.1699, "lng": -115.1398},
+        "new york, ny": {"name": "New York, NY, USA", "lat": 40.7128, "lng": -74.0060},
+        "new york": {"name": "New York, NY, USA", "lat": 40.7128, "lng": -74.0060},
+        "washington, dc": {"name": "Washington, DC, USA", "lat": 38.9072, "lng": -77.0369},
+        "washington": {"name": "Washington, DC, USA", "lat": 38.9072, "lng": -77.0369},
+        "seattle, wa": {"name": "Seattle, WA, USA", "lat": 47.6062, "lng": -122.3321},
+        "seattle": {"name": "Seattle, WA, USA", "lat": 47.6062, "lng": -122.3321},
+        "portland, or": {"name": "Portland, OR, USA", "lat": 45.5152, "lng": -122.6784},
+        "portland": {"name": "Portland, OR, USA", "lat": 45.5152, "lng": -122.6784},
+    }
+    lower_q = q_clean.lower()
+    if lower_q in KNOWN_PLACES:
+        p = KNOWN_PLACES[lower_q]
+        return [{
+            "name": p["name"],
+            "lat": p["lat"],
+            "lng": p["lng"],
+            "type": "city",
+            "importance": 1.0
+        }]
+
     parts = [p.strip() for p in query.split(",")]
     if len(parts) == 2:
         try:

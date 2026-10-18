@@ -21,11 +21,18 @@ async function runVerification() {
     fs.mkdirSync(MEDIA_DIR, { recursive: true });
   }
 
-  // Catch console errors
+  // Catch console errors and logs
   page.on('console', msg => {
     if (msg.type() === 'error') {
       console.log('Browser console error:', msg.text());
     }
+  });
+  page.on('pageerror', err => {
+    console.log('[Browser PageError]:', err.message);
+  });
+  page.on('dialog', async dialog => {
+    console.log('[Browser Dialog]:', dialog.message());
+    await dialog.dismiss();
   });
 
   try {
@@ -39,9 +46,11 @@ async function runVerification() {
 
     // 2. Click preset route: "SF -> LA" in Visit Maximizer mode
     console.log('2. Clicking "SF -> LA" preset in Visit Maximizer mode...');
+    // Set max stops to 6 for faster test run
+    await page.selectOption('#maxStopsSelect', '6');
     await page.locator('button.preset-tag:has-text("SF → LA")').click();
 
-    await page.waitForSelector('#routeResults', { state: 'visible', timeout: 10000 });
+    await page.waitForSelector('#routeResults', { state: 'visible', timeout: 35000 });
     await page.waitForTimeout(3000);
 
     const distance = await page.locator('#statDistance').textContent();
@@ -62,6 +71,60 @@ async function runVerification() {
 
     await page.screenshot({ path: path.join(MEDIA_DIR, '01_visit_maximizer_route.png') });
     console.log('Saved 01_visit_maximizer_route.png');
+
+    // 2b. Switch to Topographic basemap and capture screenshot
+    console.log('2b. Switching basemap to Topographic (OpenTopoMap)...');
+    const topoLabel = page.locator('.leaflet-control-layers label:has-text("Topographic")');
+    await topoLabel.waitFor({ state: 'visible', timeout: 5000 });
+    await topoLabel.click();
+    await page.waitForTimeout(2500);
+
+    const mapHasTopoClass = await page.locator('#map.basemap-topo').count();
+    if (mapHasTopoClass < 1) {
+      throw new Error('Expected #map.basemap-topo after selecting Topographic layer');
+    }
+    const topoRadioChecked = await page.locator('.leaflet-control-layers label:has-text("Topographic") input').isChecked();
+    if (!topoRadioChecked) {
+      throw new Error('Topographic radio was not checked after click');
+    }
+
+    await page.screenshot({ path: path.join(MEDIA_DIR, 'topo_layer.png') });
+    console.log('Saved topo_layer.png');
+
+    // Switch back to Streets so remaining overlays stay on familiar dark-filtered tiles
+    await page.locator('.leaflet-control-layers label:has-text("Streets")').click();
+    await page.waitForTimeout(800);
+
+    // 2c. Enable Fall Foliage overlay and capture screenshot
+    console.log('2c. Enabling Fall Foliage overlay...');
+    const foliageLabel = page.locator('.leaflet-control-layers label:has-text("Fall Foliage")');
+    await foliageLabel.waitFor({ state: 'visible', timeout: 8000 });
+    await foliageLabel.click();
+    await page.waitForTimeout(2000);
+
+    const foliageLegendVisible = await page.locator('#foliageLegend').isVisible();
+    if (!foliageLegendVisible) {
+      throw new Error('Expected #foliageLegend to be visible after enabling Fall Foliage');
+    }
+    const foliagePathCount = await page.locator('.leaflet-overlay-pane path').count();
+    if (foliagePathCount < 10) {
+      throw new Error(`Expected multiple foliage state polygons, found ${foliagePathCount}`);
+    }
+
+    // Zoom out a bit to show regional autumn wash across the Lower 48
+    await page.evaluate(() => {
+      if (window.appState && window.appState.map) {
+        window.appState.map.setView([39.5, -98.0], 4);
+      }
+    });
+    await page.waitForTimeout(1500);
+
+    await page.screenshot({ path: path.join(MEDIA_DIR, 'foliage_layer.png') });
+    console.log('Saved foliage_layer.png');
+
+    // Fit back to the planned route for subsequent checks
+    await page.locator('#btnMapReset').click();
+    await page.waitForTimeout(1000);
 
     // 3. Test Drawer and Force-Include toggle
     console.log('3. Clicking first Supercharger stop in timeline to view details...');

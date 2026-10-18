@@ -1,0 +1,11 @@
+services:
+  supercharger-planner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tesla-supercharger-planner
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+    restart: unless-stopped

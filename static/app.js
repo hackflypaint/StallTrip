@@ -1,7 +1,8 @@
 /**
  * Tesla Supercharger Route Planner - Client Application
  * Includes Visit Maximizer routing, map area drag-selection for force-included chargers,
- * and intelligent multi-stop itinerary generation.
+ * Streets / Topographic (OpenTopoMap) basemap switching, Fall Foliage overlay,
+ * and multi-stop itinerary generation.
  */
 
 // Application State
@@ -21,7 +22,14 @@ const state = {
   areaSelectMode: false,
   dragStartLatLng: null,
   selectionRect: null,
+  baseLayers: null,
+  activeBasemap: "streets",
+  foliageLayer: null,
+  layerControl: null,
 };
+
+// Expose for Playwright / debugging (cloud verification)
+window.appState = state;
 
 // Initialize Application
 document.addEventListener("DOMContentLoaded", () => {
@@ -41,11 +49,57 @@ function initMap() {
 
   L.control.zoom({ position: "topright" }).addTo(state.map);
 
-  // High quality OpenStreetMap tiles
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  // Base layers: Streets (OSM) and Topographic (OpenTopoMap)
+  const streetsLayer = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     maxZoom: 19,
-  }).addTo(state.map);
+  });
+
+  const topoLayer = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
+    attribution:
+      'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, ' +
+      '<a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; ' +
+      '<a href="https://opentopomap.org">OpenTopoMap</a> ' +
+      '(<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)',
+    maxZoom: 17,
+    subdomains: ["a", "b", "c"],
+  });
+
+  streetsLayer.addTo(state.map);
+  state.baseLayers = { streets: streetsLayer, topo: topoLayer };
+  state.activeBasemap = "streets";
+
+  state.layerControl = L.control
+    .layers(
+      {
+        Streets: streetsLayer,
+        Topographic: topoLayer,
+      },
+      {},
+      { position: "bottomleft", collapsed: false }
+    )
+    .addTo(state.map);
+
+  state.map.on("baselayerchange", (e) => {
+    const mapEl = document.getElementById("map");
+    if (e.name === "Topographic") {
+      state.activeBasemap = "topo";
+      mapEl.classList.add("basemap-topo");
+    } else {
+      state.activeBasemap = "streets";
+      mapEl.classList.remove("basemap-topo");
+    }
+  });
+
+  state.map.on("overlayadd", (e) => {
+    if (e.name === "Fall Foliage") showFoliageLegend(true);
+  });
+  state.map.on("overlayremove", (e) => {
+    if (e.name === "Fall Foliage") showFoliageLegend(false);
+  });
+
+  // Async: Explore Fall–inspired seasonal choropleth overlay
+  initFoliageOverlay();
 
   state.routeLayer = L.featureGroup().addTo(state.map);
   state.corridorLayer = L.featureGroup().addTo(state.map);
@@ -81,6 +135,28 @@ function initMap() {
 
   // Setup Map Area Selection Drawing Handlers
   setupMapAreaSelection();
+}
+
+async function initFoliageOverlay() {
+  try {
+    if (!window.FoliageOverlay) return;
+    const foliageLayer = await window.FoliageOverlay.createFoliageOverlay(new Date());
+    state.foliageLayer = foliageLayer;
+    state.layerControl.addOverlay(foliageLayer, "Fall Foliage");
+
+    const legendEl = document.getElementById("foliageLegend");
+    if (legendEl) {
+      legendEl.innerHTML = window.FoliageOverlay.buildFoliageLegendHtml(new Date());
+    }
+  } catch (err) {
+    console.warn("Fall Foliage overlay unavailable:", err);
+  }
+}
+
+function showFoliageLegend(visible) {
+  const legendEl = document.getElementById("foliageLegend");
+  if (!legendEl) return;
+  legendEl.style.display = visible ? "block" : "none";
 }
 
 function setupEventListeners() {
