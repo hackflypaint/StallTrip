@@ -25,15 +25,14 @@ docker compose up -d --build
 
 Local Python (no Docker): `python3 server.py 8080` — **stdlib only**, no `pip install`.
 
-**Mobile (published):** `http://localhost:8080/mobile` — map-first web shell in the **same HI container**. Compose defaults to `COST_PROFILE=lean`. Soft UA redirect stays **off**. Full HI + cost notes: [mobile-deploy.md](./mobile-deploy.md).
+**Mobile (published):** map-first web shell at `/mobile` (`COST_PROFILE=lean`). **Public access now:** ngrok → `https://…/mobile` (see [mobile-deploy.md](./mobile-deploy.md)). Long-term host remains the HI container. Soft UA redirect stays **off**.
 
 ### Mobile verify
 ```bash
 python3 -m unittest tests.test_mobile tests.test_security -v
-node tests/test_mobile_touch.js && node tests/test_mobile_perf.js
-docker compose up -d --build
-curl -fsS http://localhost:8080/api/health   # mobile_shell + cost_profile
-# optional Playwright: npm install --no-save playwright && node tests/verify_mobile.js
+COST_PROFILE=lean python3 server.py 8080
+./scripts/mobile-ngrok.sh          # on a machine with ngrok already configured
+# phones → https://<ngrok-host>/mobile
 ```
 
 ## What’s in the box
