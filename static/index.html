@@ -61,7 +61,9 @@
             <button type="button" class="preset-tag" data-orig="Seattle, WA" data-dest="Portland, OR">SEA→PDX</button>
           </div>
           <div class="car-peek-actions">
-            <button type="button" class="car-peek-btn car-peek-locate" id="btnCarSheetLocate" title="Find my location" aria-label="Find my location">
+            <button type="button" class="car-peek-btn car-peek-locate" id="btnCarSheetLocate"
+              title="Follow my location while driving" aria-label="Follow my location while driving"
+              aria-pressed="false">
               <i class="fa-solid fa-crosshairs" aria-hidden="true"></i>
             </button>
             <button type="button" class="car-peek-btn" id="btnCarSheetPlan">Edit</button>
@@ -364,8 +366,11 @@
         <button class="map-btn" id="btnMapReset" title="Reset View">
           <i class="fa-solid fa-expand"></i>
         </button>
-        <button class="map-btn" id="btnLocateMe" title="Find My Location">
-          <i class="fa-solid fa-crosshairs"></i>
+        <button type="button" class="map-btn" id="btnLocateMe"
+          title="Follow my location while driving"
+          aria-label="Follow my location while driving"
+          aria-pressed="false">
+          <i class="fa-solid fa-crosshairs" aria-hidden="true"></i>
         </button>
         <button class="map-btn" id="btnToggleLayers" title="Map Layers" aria-expanded="false" aria-controls="layersPanel">
           <i class="fa-solid fa-layer-group"></i>

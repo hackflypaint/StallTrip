@@ -213,25 +213,36 @@ async function runProfile(browser, profile) {
   await page.locator("#btnCarSheetHandle").click({ force: true });
   await page.waitForSelector('body[data-sheet="peek"]', { timeout: 5000 });
 
-  console.log("1c. Locate control (fail-soft if geo denied)...");
+  console.log("1c. Live follow locate (mock GPS → follow → stop)...");
+  // Client-side only: Playwright grants geo; SPA uses watchPosition (no server proxy).
+  const ctx = page.context();
+  await ctx.grantPermissions(["geolocation"]).catch(() => null);
+  await ctx.setGeolocation({ latitude: 37.7749, longitude: -122.4194, accuracy: 25 });
   await page.locator("#btnLocateMe").tap();
-  // Either toast (denied/unavailable) or locating class / origin set
   await Promise.race([
+    page.waitForSelector("#btnLocateMe.is-live-follow", { timeout: 12000 }),
     page.waitForSelector("#appToast:not([hidden])", { timeout: 12000 }),
-    page.waitForSelector("#btnLocateMe.is-locating", { timeout: 3000 }).then(() =>
-      page.waitForSelector("#btnLocateMe:not(.is-locating)", { timeout: 12000 })
-    ),
   ]).catch(() => null);
-  const toastOrIdle = await page.evaluate(() => {
+  const liveState = await page.evaluate(() => {
     const t = document.getElementById("appToast");
     const b = document.getElementById("btnLocateMe");
+    const live = window.appState && window.appState.liveLocation;
     return {
       toast: t && !t.hidden ? t.textContent : "",
-      locating: !!(b && b.classList.contains("is-locating")),
+      follow: !!(b && b.classList.contains("is-live-follow")),
+      watching: !!(live && live.watching),
+      hasDot: !!(document.querySelector(".user-location-dot")),
     };
   });
-  console.log(`  locate feedback: toast="${toastOrIdle.toast}" locating=${toastOrIdle.locating}`);
+  console.log(
+    `  live: toast="${liveState.toast}" follow=${liveState.follow} watching=${liveState.watching} dot=${liveState.hasDot}`
+  );
   await shot("01d_locate");
+  // Stop watch so later steps are not fighting panTo
+  if (liveState.watching || liveState.follow) {
+    await page.locator("#btnLocateMe").tap();
+    await sleep(200);
+  }
 
   console.log("2. Preset SF → LA...");
   await page.locator('#carPresetRow .preset-tag:has-text("SF→LA")').tap();
