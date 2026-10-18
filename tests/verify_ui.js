@@ -487,6 +487,7 @@ async function runVerification() {
   } finally {
     await browser.close();
   }
+  process.exit(0);
 }
 
 runVerification();
