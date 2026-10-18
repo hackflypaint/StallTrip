@@ -325,9 +325,7 @@ function setupEventListeners() {
     if (!state.selectedCharger) return;
     toggleForcedCharger(state.selectedCharger);
     updateDrawerButton(state.selectedCharger);
-    if (state.origin && state.destination) {
-      planRoute();
-    }
+    maybeReplan();
   });
 
   // Explore search & filters
