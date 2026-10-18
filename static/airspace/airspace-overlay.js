@@ -1,25 +1,25 @@
 /**
- * Removable Airspace / UAS overlay — FAA ArcGIS FeatureServer GeoJSON.
+ * Removable drone flight-constraint overlay — FAA + NPS public FeatureServers.
  *
- * Sources (FAA AIS / UDDS, org ssFJjBXIUyZDrSYZ):
- *   Class_Airspace, Special_Use_Airspace, FAA_UAS_FacilityMap_Data,
- *   Stadiums, US_Airport
- * Viewport-bounded queries only; see README.md for URLs + removal.
+ * Answers (informationally): no-fly / authorization required / unconstrained.
+ * Sources: FAA AIS/UDDS ArcGIS + official NPS Land Resources boundaries.
+ * Never Autopylot private APIs. Not a LAANC / authorization product.
  *
- * Visual language loosely evokes Autopylot-style UAS maps (rings + SUA
- * fills + UASFM ceiling cells) without calling Autopylot APIs.
+ * See README.md for URLs, legality mapping, and removal steps.
  */
 (function (global) {
   "use strict";
 
   const FAA_ORG =
     "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services";
+  /** Official NPS Land Resources Division boundaries (public FeatureServer). */
+  const NPS_ORG = "https://services1.arcgis.com/fBc8EJBxQRMcHlei/arcgis/rest/services";
 
-  /** Min map zoom before any FAA fetch (avoid loading half of CONUS). */
+  /** Min map zoom before any fetch (avoid loading half of CONUS). */
   const MIN_ZOOM = 7;
   /** UAS Facility Map cells are dense — only at closer zooms. */
   const MIN_ZOOM_UASFM = 9;
-  /** Airport / stadium markers. */
+  /** Stadium / NSFR point markers. */
   const MIN_ZOOM_POINTS = 8;
 
   const DEBOUNCE_MS = 350;
@@ -27,22 +27,96 @@
   const MAX_CLASS = 800;
   const MAX_SUA = 500;
   const MAX_UASFM = 1500;
+  const MAX_NPS = 400;
+  const MAX_TFR = 200;
   const MAX_POINTS = 200;
 
+  /** Constraint classes shown to the pilot. */
+  const CONSTRAINT = {
+    noFly: "no-fly",
+    auth: "auth",
+  };
+
+  const STYLES = {
+    noFly: {
+      color: "#e85d5d",
+      weight: 1.6,
+      opacity: 0.95,
+      fillColor: "#c0392b",
+      fillOpacity: 0.32,
+    },
+    /** NPS parks — same legality class, distinct hue so parks read clearly. */
+    park: {
+      color: "#d35400",
+      weight: 1.5,
+      opacity: 0.9,
+      fillColor: "#a04000",
+      fillOpacity: 0.3,
+    },
+    auth: {
+      color: "#e8b84a",
+      weight: 1.4,
+      opacity: 0.85,
+      fillColor: "#c9942e",
+      fillOpacity: 0.18,
+      dashArray: "4 3",
+    },
+    /** UASFM cells with a published ceiling > 0 ft — still auth-required. */
+    uasfmAuth: {
+      color: "#d4a84b",
+      weight: 0.35,
+      opacity: 0.55,
+      fillColor: "#c9942e",
+      fillOpacity: 0.22,
+    },
+    /** UASFM ceiling 0 — no LAANC grid authorization; treat as no-fly. */
+    uasfmZero: {
+      color: "#c0392b",
+      weight: 0.4,
+      opacity: 0.65,
+      fillColor: "#922b21",
+      fillOpacity: 0.4,
+    },
+  };
+
+  /**
+   * Layer defs. `base` overrides FAA_ORG for NPS.
+   * `constraint` is the pilot-facing class used in legend / status.
+   */
   const LAYERS = {
-    classAirspace: {
+    npsParks: {
+      base: NPS_ORG,
+      path: "NPS_Land_Resources_Division_Boundary_and_Tract_Data_Service/FeatureServer/2",
+      where: "1=1",
+      outFields: "UNIT_NAME,UNIT_CODE,UNIT_TYPE,STATE,PARKNAME,Status",
+      max: MAX_NPS,
+      minZoom: MIN_ZOOM,
+      constraint: CONSTRAINT.noFly,
+    },
+    /** Prohibited + Restricted SUA only — drop MOA/Warning chrome. */
+    suaNoFly: {
+      path: "Special_Use_Airspace/FeatureServer/0",
+      where: "TYPE_CODE IN ('P','R')",
+      outFields: "NAME,TYPE_CODE,LOWER_VAL,UPPER_VAL,LOWER_DESC,UPPER_DESC,STATE",
+      max: MAX_SUA,
+      minZoom: MIN_ZOOM,
+      constraint: CONSTRAINT.noFly,
+    },
+    defenseTfr: {
+      path: "National_Defense_Airspace_TFR_Areas/FeatureServer/0",
+      where: "1=1",
+      outFields: "NAME,TYPE_CODE,LOCAL_TYPE,CITY,STATE",
+      max: MAX_TFR,
+      minZoom: MIN_ZOOM,
+      constraint: CONSTRAINT.noFly,
+    },
+    classAuth: {
       path: "Class_Airspace/FeatureServer/0",
       where: "CLASS IN ('B','C','D')",
       outFields: "NAME,CLASS,TYPE_CODE,LOWER_VAL,UPPER_VAL,LOWER_DESC,UPPER_DESC",
       max: MAX_CLASS,
       minZoom: MIN_ZOOM,
-    },
-    sua: {
-      path: "Special_Use_Airspace/FeatureServer/0",
-      where: "1=1",
-      outFields: "NAME,TYPE_CODE,CLASS,LOWER_VAL,UPPER_VAL,LOWER_DESC,UPPER_DESC,STATE",
-      max: MAX_SUA,
-      minZoom: MIN_ZOOM,
+      constraint: CONSTRAINT.auth,
     },
     uasfm: {
       path: "FAA_UAS_FacilityMap_Data/FeatureServer/0",
@@ -50,6 +124,7 @@
       outFields: "CEILING,UNIT,APT1_FAAID,APT1_NAME,APT1_ICAO",
       max: MAX_UASFM,
       minZoom: MIN_ZOOM_UASFM,
+      constraint: CONSTRAINT.auth,
     },
     stadiums: {
       path: "Stadiums/FeatureServer/0",
@@ -57,148 +132,30 @@
       outFields: "NAME,CITY,STATE",
       max: MAX_POINTS,
       minZoom: MIN_ZOOM_POINTS,
-    },
-    airports: {
-      path: "US_Airport/FeatureServer/0",
-      where: "PRIVATEUSE=0 AND OPERSTATUS='OPERATIONAL'",
-      outFields: "IDENT,NAME,ICAO_ID,TYPE_CODE,STATE",
-      max: MAX_POINTS,
-      minZoom: MIN_ZOOM_POINTS,
+      constraint: CONSTRAINT.noFly,
     },
   };
 
-  function classStyle(klass) {
-    const k = String(klass || "").toUpperCase();
-    if (k === "B") {
-      return {
-        color: "#9b6bff",
-        weight: 2,
-        opacity: 0.85,
-        fillColor: "#7a4fd6",
-        fillOpacity: 0.12,
-        dashArray: null,
-      };
-    }
-    if (k === "C") {
-      return {
-        color: "#c4a8ff",
-        weight: 1.75,
-        opacity: 0.8,
-        fillColor: "#8f7ab8",
-        fillOpacity: 0.1,
-        dashArray: "4 3",
-      };
-    }
-    // D (and fallback)
-    return {
-      color: "#a8b0c0",
-      weight: 1.5,
-      opacity: 0.75,
-      fillColor: "#6e7585",
-      fillOpacity: 0.08,
-      dashArray: "3 4",
-    };
+  function constraintLabel(kind) {
+    if (kind === CONSTRAINT.noFly) return "No-fly";
+    if (kind === CONSTRAINT.auth) return "Auth required";
+    return "Constraint";
   }
 
-  function suaStyle(typeCode) {
-    const t = String(typeCode || "").toUpperCase();
-    if (t === "P") {
-      return {
-        color: "#e85d5d",
-        weight: 1.5,
-        opacity: 0.9,
-        fillColor: "#c0392b",
-        fillOpacity: 0.28,
-      };
-    }
-    if (t === "R") {
-      return {
-        color: "#3d8bfd",
-        weight: 1.25,
-        opacity: 0.85,
-        fillColor: "#2a6fd6",
-        fillOpacity: 0.22,
-      };
-    }
-    if (t === "W") {
-      return {
-        color: "#5dade2",
-        weight: 1.25,
-        opacity: 0.85,
-        fillColor: "#3498db",
-        fillOpacity: 0.2,
-      };
-    }
-    if (t === "MOA") {
-      return {
-        color: "#c9a227",
-        weight: 1,
-        opacity: 0.7,
-        fillColor: "#b8860b",
-        fillOpacity: 0.12,
-        dashArray: "5 4",
-      };
-    }
-    // A, AA, alert, etc.
-    return {
-      color: "#7f8c9a",
-      weight: 1,
-      opacity: 0.65,
-      fillColor: "#5d6d7e",
-      fillOpacity: 0.1,
-    };
-  }
-
-  /** UAS Facility Map ceiling → Autopylot-like purple/grey wash. */
-  function uasfmStyle(ceiling) {
+  function uasfmConstraint(ceiling) {
     const c = Number(ceiling);
-    if (!Number.isFinite(c) || c <= 0) {
-      return {
-        color: "#5a2d7a",
-        weight: 0.4,
-        opacity: 0.55,
-        fillColor: "#4a1f66",
-        fillOpacity: 0.45,
-      };
-    }
-    if (c <= 100) {
-      return {
-        color: "#6b3d8f",
-        weight: 0.35,
-        opacity: 0.5,
-        fillColor: "#6b3d8f",
-        fillOpacity: 0.38,
-      };
-    }
-    if (c <= 200) {
-      return {
-        color: "#7d5a9e",
-        weight: 0.3,
-        opacity: 0.45,
-        fillColor: "#8060a0",
-        fillOpacity: 0.28,
-      };
-    }
-    if (c <= 300) {
-      return {
-        color: "#8a8fa3",
-        weight: 0.25,
-        opacity: 0.4,
-        fillColor: "#9aa0b0",
-        fillOpacity: 0.18,
-      };
-    }
-    // 350–400 ft — light tint
-    return {
-      color: "#a8b0c0",
-      weight: 0.2,
-      opacity: 0.3,
-      fillColor: "#c5cad6",
-      fillOpacity: 0.08,
-    };
+    if (!Number.isFinite(c) || c <= 0) return CONSTRAINT.noFly;
+    return CONSTRAINT.auth;
+  }
+
+  function uasfmStyle(ceiling) {
+    return uasfmConstraint(ceiling) === CONSTRAINT.noFly
+      ? Object.assign({}, STYLES.uasfmZero)
+      : Object.assign({}, STYLES.uasfmAuth);
   }
 
   function buildQueryUrl(layerDef, bboxStr) {
+    const base = layerDef.base || FAA_ORG;
     const params = new URLSearchParams({
       where: layerDef.where,
       geometry: bboxStr,
@@ -211,7 +168,7 @@
       f: "geojson",
       resultRecordCount: String(layerDef.max),
     });
-    return `${FAA_ORG}/${layerDef.path}/query?${params.toString()}`;
+    return `${base}/${layerDef.path}/query?${params.toString()}`;
   }
 
   function paddedBbox(bounds) {
@@ -222,19 +179,31 @@
     const south = Math.max(-90, sw.lat - pad);
     const east = Math.min(180, ne.lng + pad);
     const north = Math.min(90, ne.lat + pad);
-    // ArcGIS envelope: xmin,ymin,xmax,ymax
     return `${west},${south},${east},${north}`;
   }
 
-  function popupHtml(title, rows) {
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function popupHtml(title, constraintKind, rows) {
+    const badge = constraintLabel(constraintKind);
+    const badgeClass =
+      constraintKind === CONSTRAINT.noFly
+        ? "airspace-badge-nofly"
+        : "airspace-badge-auth";
     const body = rows
       .filter(([, v]) => v != null && v !== "")
       .map(
         ([k, v]) =>
-          `<div class="airspace-popup-row"><span>${k}</span><strong>${v}</strong></div>`
+          `<div class="airspace-popup-row"><span>${escapeHtml(k)}</span><strong>${escapeHtml(v)}</strong></div>`
       )
       .join("");
-    return `<div class="airspace-popup"><div class="airspace-popup-title">${title}</div>${body}</div>`;
+    return `<div class="airspace-popup"><div class="airspace-popup-title">${escapeHtml(title)}</div><div class="airspace-badge ${badgeClass}">${escapeHtml(badge)}</div>${body}</div>`;
   }
 
   const api = {
@@ -243,8 +212,9 @@
     _enabled: false,
     _group: null,
     _layers: {
-      class: null,
-      sua: null,
+      parks: null,
+      noFlyPoly: null,
+      authPoly: null,
       uasfm: null,
       points: null,
     },
@@ -256,14 +226,18 @@
 
     // Exported for unit tests
     _test: {
-      classStyle,
-      suaStyle,
+      STYLES,
+      CONSTRAINT,
+      constraintLabel,
+      uasfmConstraint,
       uasfmStyle,
       buildQueryUrl,
       LAYERS,
       FAA_ORG,
+      NPS_ORG,
       MIN_ZOOM,
       MIN_ZOOM_UASFM,
+      MIN_ZOOM_POINTS,
     },
 
     /**
@@ -284,7 +258,13 @@
       this._slotEl = null;
       this._statusEl = null;
       this._group = null;
-      this._layers = { class: null, sua: null, uasfm: null, points: null };
+      this._layers = {
+        parks: null,
+        noFlyPoly: null,
+        authPoly: null,
+        uasfm: null,
+        points: null,
+      };
     },
 
     isEnabled() {
@@ -295,28 +275,26 @@
       this._slotEl.innerHTML = `
         <div class="airspace-slot">
           <div class="airspace-slot-header">
-            <div class="airspace-slot-title"><i class="fa-solid fa-plane"></i> Airspace / UAS</div>
+            <div class="airspace-slot-title"><i class="fa-solid fa-drone"></i> Drone flight</div>
             <label class="airspace-toggle">
               <input type="checkbox" id="airspaceToggle" />
               Show
             </label>
           </div>
           <div class="airspace-detail-block" id="airspaceDetailBlock">
+            <p class="airspace-blurb">Constraints for whether recreational / Part&nbsp;107 flight is typically blocked, needs airspace authorization, or unconstrained. Not a LAANC approval tool.</p>
             <div class="airspace-legend-mini">
-              <span><i class="airspace-swatch airspace-swatch-b"></i>Class B</span>
-              <span><i class="airspace-swatch airspace-swatch-c"></i>Class C</span>
-              <span><i class="airspace-swatch airspace-swatch-d"></i>Class D</span>
-              <span><i class="airspace-swatch airspace-swatch-r"></i>Restricted / Warning</span>
-              <span><i class="airspace-swatch airspace-swatch-p"></i>Prohibited</span>
-              <span><i class="airspace-swatch airspace-swatch-uas"></i>UASFM ceilings</span>
+              <span><i class="airspace-swatch airspace-swatch-nofly"></i>No-fly</span>
+              <span><i class="airspace-swatch airspace-swatch-park"></i>National park (no-fly)</span>
+              <span><i class="airspace-swatch airspace-swatch-auth"></i>Auth required</span>
             </div>
-            <div class="airspace-status" id="airspaceStatus">Zoom in (≥${MIN_ZOOM}) for FAA overlays</div>
+            <div class="airspace-status" id="airspaceStatus">Zoom in (≥${MIN_ZOOM}) for constraints</div>
             <div class="airspace-credit">
-              Airspace data
-              <a href="https://adds-faa.opendata.arcgis.com/" target="_blank" rel="noopener">FAA AIS / ADDS</a>
-              ·
+              FAA AIS / ADDS ·
               <a href="https://udds-faa.opendata.arcgis.com/" target="_blank" rel="noopener">UDDS</a>
-              · UAS Facility Maps informational only (not authorization).
+              ·
+              <a href="https://www.nps.gov/articles/uncrewed-aircraft-in-the-national-parks.htm" target="_blank" rel="noopener">NPS UAS policy</a>
+              · blank areas ≠ legal clearance.
             </div>
           </div>
         </div>
@@ -343,56 +321,114 @@
 
       if (this._enabled) {
         if (!this._group) {
-          this._layers.class = L.geoJSON(null, {
-            style: (feat) => classStyle(feat.properties && feat.properties.CLASS),
+          this._layers.authPoly = L.geoJSON(null, {
+            style: () => Object.assign({}, STYLES.auth),
             onEachFeature: (feat, layer) => {
               const p = feat.properties || {};
               layer.bindPopup(
-                popupHtml(p.NAME || "Class airspace", [
+                popupHtml(p.NAME || "Controlled airspace", CONSTRAINT.auth, [
                   ["Class", p.CLASS],
                   ["Floor", p.LOWER_DESC || p.LOWER_VAL],
                   ["Ceiling", p.UPPER_DESC || p.UPPER_VAL],
+                  ["Note", "Class B/C/D — airspace authorization typically required"],
                 ])
               );
             },
-            className: "airspace-class-layer",
-          });
-          this._layers.sua = L.geoJSON(null, {
-            style: (feat) => suaStyle(feat.properties && feat.properties.TYPE_CODE),
-            onEachFeature: (feat, layer) => {
-              const p = feat.properties || {};
-              layer.bindPopup(
-                popupHtml(p.NAME || "Special use", [
-                  ["Type", p.TYPE_CODE],
-                  ["Floor", p.LOWER_DESC || p.LOWER_VAL],
-                  ["Ceiling", p.UPPER_DESC || p.UPPER_VAL],
-                  ["State", p.STATE],
-                ])
-              );
-            },
-            className: "airspace-sua-layer",
+            className: "airspace-auth-layer",
           });
           this._layers.uasfm = L.geoJSON(null, {
             style: (feat) =>
               uasfmStyle(feat.properties && feat.properties.CEILING),
             onEachFeature: (feat, layer) => {
               const p = feat.properties || {};
+              const kind = uasfmConstraint(p.CEILING);
               const apt = p.APT1_NAME || p.APT1_FAAID || "";
               layer.bindPopup(
-                popupHtml("UAS Facility Map cell", [
+                popupHtml("UAS Facility Map cell", kind, [
                   ["Ceiling", `${p.CEILING != null ? p.CEILING : "—"} ${p.UNIT || "ft"}`],
                   ["Airport", apt],
+                  [
+                    "Note",
+                    kind === CONSTRAINT.noFly
+                      ? "0 ft UASFM cell — no LAANC grid; treat as no-fly"
+                      : "UASFM ceiling — authorization typically required below/near airport",
+                  ],
                 ])
               );
             },
             interactive: true,
             className: "airspace-uasfm-layer",
           });
+          this._layers.noFlyPoly = L.geoJSON(null, {
+            style: (feat) => {
+              const p = feat.properties || {};
+              if (p._airspaceSource === "defenseTfr") {
+                return Object.assign({}, STYLES.noFly);
+              }
+              // Prohibited vs Restricted share no-fly class
+              return Object.assign({}, STYLES.noFly);
+            },
+            onEachFeature: (feat, layer) => {
+              const p = feat.properties || {};
+              const src = p._airspaceSource;
+              if (src === "defenseTfr") {
+                layer.bindPopup(
+                  popupHtml(p.NAME || "National defense TFR", CONSTRAINT.noFly, [
+                    ["Type", p.TYPE_CODE || p.LOCAL_TYPE],
+                    ["City", p.CITY],
+                    ["State", p.STATE],
+                    ["Note", "National defense UAS TFR — no-fly"],
+                  ])
+                );
+                return;
+              }
+              const typeLabel =
+                String(p.TYPE_CODE || "").toUpperCase() === "P"
+                  ? "Prohibited"
+                  : String(p.TYPE_CODE || "").toUpperCase() === "R"
+                    ? "Restricted"
+                    : p.TYPE_CODE;
+              layer.bindPopup(
+                popupHtml(p.NAME || "Special use", CONSTRAINT.noFly, [
+                  ["Type", typeLabel],
+                  ["Floor", p.LOWER_DESC || p.LOWER_VAL],
+                  ["Ceiling", p.UPPER_DESC || p.UPPER_VAL],
+                  ["State", p.STATE],
+                  ["Note", "Special-use airspace — treat as no-fly for UAS"],
+                ])
+              );
+            },
+            className: "airspace-nofly-layer",
+          });
+          this._layers.parks = L.geoJSON(null, {
+            style: () => Object.assign({}, STYLES.park),
+            onEachFeature: (feat, layer) => {
+              const p = feat.properties || {};
+              layer.bindPopup(
+                popupHtml(
+                  p.UNIT_NAME || p.PARKNAME || "National Park Service unit",
+                  CONSTRAINT.noFly,
+                  [
+                    ["Unit", p.UNIT_CODE],
+                    ["Type", p.UNIT_TYPE],
+                    ["State", p.STATE],
+                    [
+                      "Note",
+                      "NPS lands — launch/land/operate UAS generally prohibited (park policy)",
+                    ],
+                  ]
+                )
+              );
+            },
+            className: "airspace-park-layer",
+          });
           this._layers.points = L.layerGroup();
+          // Draw order: auth under no-fly under parks (parks most salient)
           this._group = L.layerGroup([
             this._layers.uasfm,
-            this._layers.sua,
-            this._layers.class,
+            this._layers.authPoly,
+            this._layers.noFlyPoly,
+            this._layers.parks,
             this._layers.points,
           ]);
         }
@@ -420,8 +456,9 @@
     },
 
     _clearLayerData() {
-      if (this._layers.class) this._layers.class.clearLayers();
-      if (this._layers.sua) this._layers.sua.clearLayers();
+      if (this._layers.parks) this._layers.parks.clearLayers();
+      if (this._layers.noFlyPoly) this._layers.noFlyPoly.clearLayers();
+      if (this._layers.authPoly) this._layers.authPoly.clearLayers();
       if (this._layers.uasfm) this._layers.uasfm.clearLayers();
       if (this._layers.points) this._layers.points.clearLayers();
     },
@@ -439,6 +476,15 @@
       }, DEBOUNCE_MS);
     },
 
+    _tagFeatures(gj, source) {
+      if (!gj || !gj.features) return gj;
+      for (const f of gj.features) {
+        if (!f.properties) f.properties = {};
+        f.properties._airspaceSource = source;
+      }
+      return gj;
+    },
+
     async _refresh() {
       if (!this._enabled || !this._map) return;
       const zoom = this._map.getZoom();
@@ -454,18 +500,26 @@
       this._abort = new AbortController();
       const signal = this._abort.signal;
 
-      this._setStatus("Loading FAA airspace…");
+      this._setStatus("Loading drone constraints…");
 
-      const jobs = [];
-      jobs.push(
-        this._fetchLayer("classAirspace", bbox, signal).then((gj) => ({
+      const jobs = [
+        this._fetchLayer("npsParks", bbox, signal).then((gj) => ({
+          key: "parks",
+          gj,
+        })),
+        this._fetchLayer("suaNoFly", bbox, signal).then((gj) => ({
+          key: "sua",
+          gj: this._tagFeatures(gj, "sua"),
+        })),
+        this._fetchLayer("defenseTfr", bbox, signal).then((gj) => ({
+          key: "defenseTfr",
+          gj: this._tagFeatures(gj, "defenseTfr"),
+        })),
+        this._fetchLayer("classAuth", bbox, signal).then((gj) => ({
           key: "class",
           gj,
-        }))
-      );
-      jobs.push(
-        this._fetchLayer("sua", bbox, signal).then((gj) => ({ key: "sua", gj }))
-      );
+        })),
+      ];
       if (zoom >= MIN_ZOOM_UASFM) {
         jobs.push(
           this._fetchLayer("uasfm", bbox, signal).then((gj) => ({
@@ -483,61 +537,73 @@
             gj,
           }))
         );
-        jobs.push(
-          this._fetchLayer("airports", bbox, signal).then((gj) => ({
-            key: "airports",
-            gj,
-          }))
-        );
       }
 
       try {
         const results = await Promise.all(jobs);
         if (seq !== this._fetchSeq || !this._enabled) return;
 
-        let classN = 0;
-        let suaN = 0;
+        let parkN = 0;
+        let noFlyN = 0;
+        let authN = 0;
         let uasN = 0;
-        let pointN = 0;
-        const stadiumFc = { type: "FeatureCollection", features: [] };
-        const airportFc = { type: "FeatureCollection", features: [] };
+        let uasZeroN = 0;
+        let stadiumN = 0;
+        const suaFc = { type: "FeatureCollection", features: [] };
+        const tfrFc = { type: "FeatureCollection", features: [] };
 
         for (const r of results) {
           if (!r.gj) continue;
-          if (r.key === "class") {
-            this._layers.class.clearLayers();
-            this._layers.class.addData(r.gj);
-            classN = (r.gj.features || []).length;
+          if (r.key === "parks") {
+            this._layers.parks.clearLayers();
+            this._layers.parks.addData(r.gj);
+            parkN = (r.gj.features || []).length;
           } else if (r.key === "sua") {
-            this._layers.sua.clearLayers();
-            this._layers.sua.addData(r.gj);
-            suaN = (r.gj.features || []).length;
+            suaFc.features = r.gj.features || [];
+          } else if (r.key === "defenseTfr") {
+            tfrFc.features = r.gj.features || [];
+          } else if (r.key === "class") {
+            this._layers.authPoly.clearLayers();
+            this._layers.authPoly.addData(r.gj);
+            authN = (r.gj.features || []).length;
           } else if (r.key === "uasfm") {
             this._layers.uasfm.clearLayers();
             this._layers.uasfm.addData(r.gj);
             uasN = (r.gj.features || []).length;
+            uasZeroN = (r.gj.features || []).filter(
+              (f) => uasfmConstraint((f.properties || {}).CEILING) === CONSTRAINT.noFly
+            ).length;
           } else if (r.key === "stadiums") {
-            stadiumFc.features = r.gj.features || [];
-          } else if (r.key === "airports") {
-            airportFc.features = r.gj.features || [];
+            stadiumN = this._renderStadiums(r.gj);
           }
         }
 
-        if (zoom >= MIN_ZOOM_POINTS) {
-          pointN = this._renderPoints(stadiumFc, airportFc);
-        } else if (this._layers.points) {
+        this._layers.noFlyPoly.clearLayers();
+        this._layers.noFlyPoly.addData({
+          type: "FeatureCollection",
+          features: [...suaFc.features, ...tfrFc.features],
+        });
+        noFlyN = suaFc.features.length + tfrFc.features.length + parkN + stadiumN;
+
+        if (zoom < MIN_ZOOM_POINTS && this._layers.points) {
           this._layers.points.clearLayers();
         }
 
-        const parts = [`Class ${classN}`, `SUA ${suaN}`];
-        if (zoom >= MIN_ZOOM_UASFM) parts.push(`UASFM ${uasN}`);
-        else parts.push(`UASFM @z≥${MIN_ZOOM_UASFM}`);
-        if (zoom >= MIN_ZOOM_POINTS) parts.push(`pts ${pointN}`);
+        const parts = [
+          `No-fly ${noFlyN}`,
+          `Parks ${parkN}`,
+          `Auth ${authN}`,
+        ];
+        if (zoom >= MIN_ZOOM_UASFM) {
+          parts.push(`UASFM ${uasN}${uasZeroN ? ` (${uasZeroN} @0ft)` : ""}`);
+        } else {
+          parts.push(`UASFM @z≥${MIN_ZOOM_UASFM}`);
+        }
         this._setStatus(parts.join(" · "));
       } catch (err) {
         if (err && err.name === "AbortError") return;
         console.warn("[AirspaceModule] refresh failed", err);
-        this._setStatus("FAA fetch failed — retry by panning");
+        this._setStatus("Constraint fetch failed — retry by panning");
       }
     },
 
@@ -552,17 +618,15 @@
       if (!res.ok) throw new Error(`${key} HTTP ${res.status}`);
       const gj = await res.json();
       if (!gj || gj.type !== "FeatureCollection") {
-        // ArcGIS error payload
         if (gj && gj.error) throw new Error(`${key}: ${gj.error.message || "error"}`);
         return { type: "FeatureCollection", features: [] };
       }
       return gj;
     },
 
-    _renderPoints(stadiumFc, airportFc) {
+    _renderStadiums(stadiumFc) {
       this._layers.points.clearLayers();
       let n = 0;
-
       for (const f of stadiumFc.features || []) {
         const g = f.geometry;
         if (!g || g.type !== "Point" || !g.coordinates) continue;
@@ -570,41 +634,16 @@
         const p = f.properties || {};
         const icon = L.divIcon({
           className: "airspace-marker airspace-marker-stadium",
-          html: '<i class="fa-solid fa-flag"></i>',
+          html: '<i class="fa-solid fa-ban"></i>',
           iconSize: [22, 22],
           iconAnchor: [11, 11],
         });
-        L.marker([lat, lng], { icon, title: p.NAME || "Stadium" })
+        L.marker([lat, lng], { icon, title: p.NAME || "Stadium NSFR" })
           .bindPopup(
-            popupHtml(p.NAME || "Stadium TFR area", [
+            popupHtml(p.NAME || "Stadium NSFR", CONSTRAINT.noFly, [
               ["City", p.CITY],
               ["State", p.STATE],
-              ["Note", "Stadium NSFRs — check FAA NOTAMs"],
-            ])
-          )
-          .addTo(this._layers.points);
-        n += 1;
-      }
-
-      for (const f of airportFc.features || []) {
-        const g = f.geometry;
-        if (!g || g.type !== "Point" || !g.coordinates) continue;
-        const [lng, lat] = g.coordinates;
-        const p = f.properties || {};
-        const label = p.IDENT || p.ICAO_ID || "APT";
-        const icon = L.divIcon({
-          className: "airspace-marker airspace-marker-airport",
-          html: `<span class="airspace-apt-code">${label}</span>`,
-          iconSize: [28, 16],
-          iconAnchor: [14, 8],
-        });
-        L.marker([lat, lng], { icon, title: p.NAME || label })
-          .bindPopup(
-            popupHtml(p.NAME || label, [
-              ["Ident", p.IDENT],
-              ["ICAO", p.ICAO_ID],
-              ["Type", p.TYPE_CODE],
-              ["State", p.STATE],
+              ["Note", "Stadium NSFR — no-fly during covered events; check NOTAMs"],
             ])
           )
           .addTo(this._layers.points);

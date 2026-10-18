@@ -1,5 +1,5 @@
 /**
- * Cloud unit tests for Airspace / UAS style + query helpers.
+ * Cloud unit tests for drone flight-constraint helpers.
  * Run: node tests/test_airspace.js
  *
  * Loads static/airspace/airspace-overlay.js in a minimal VM sandbox
@@ -36,33 +36,50 @@ function run() {
   const t = loadModule();
 
   assert(t.FAA_ORG.includes("ssFJjBXIUyZDrSYZ"), "FAA org id");
+  assert(t.NPS_ORG.includes("fBc8EJBxQRMcHlei"), "NPS org id");
   assert(t.MIN_ZOOM === 7, "MIN_ZOOM");
   assert(t.MIN_ZOOM_UASFM === 9, "MIN_ZOOM_UASFM");
-  assert(t.LAYERS.classAirspace.path.includes("Class_Airspace"), "class path");
-  assert(t.LAYERS.sua.path.includes("Special_Use_Airspace"), "sua path");
+
+  assert(t.LAYERS.npsParks.path.includes("NPS_Land_Resources"), "NPS parks path");
+  assert(t.LAYERS.npsParks.constraint === t.CONSTRAINT.noFly, "parks are no-fly");
+  assert(t.LAYERS.suaNoFly.where.includes("'P'"), "SUA prohibited filter");
+  assert(t.LAYERS.suaNoFly.where.includes("'R'"), "SUA restricted filter");
+  assert(!t.LAYERS.suaNoFly.where.includes("MOA"), "MOA not in SUA filter");
+  assert(t.LAYERS.defenseTfr.path.includes("National_Defense"), "defense TFR");
+  assert(t.LAYERS.classAuth.where.includes("CLASS"), "class auth where");
+  assert(t.LAYERS.classAuth.constraint === t.CONSTRAINT.auth, "class is auth");
   assert(t.LAYERS.uasfm.path.includes("FAA_UAS_FacilityMap_Data"), "uasfm path");
+  assert(t.LAYERS.stadiums.constraint === t.CONSTRAINT.noFly, "stadiums no-fly");
+  assert(!t.LAYERS.airports, "airport markers removed");
 
-  const b = t.classStyle("B");
-  assert(b.fillColor && b.color, "class B style");
-  const d = t.classStyle("D");
-  assert(d.dashArray, "class D dashed");
+  assert(t.constraintLabel(t.CONSTRAINT.noFly) === "No-fly", "no-fly label");
+  assert(t.constraintLabel(t.CONSTRAINT.auth) === "Auth required", "auth label");
 
-  const r = t.suaStyle("R");
-  assert(r.fillColor.includes("2a6fd6") || r.color.includes("3d8bfd"), "restricted blue");
-  const p = t.suaStyle("P");
-  assert(p.fillOpacity >= 0.2, "prohibited fill");
+  assert(t.uasfmConstraint(0) === t.CONSTRAINT.noFly, "0ft UASFM = no-fly");
+  assert(t.uasfmConstraint(200) === t.CONSTRAINT.auth, "200ft UASFM = auth");
+  const zeroStyle = t.uasfmStyle(0);
+  const hiStyle = t.uasfmStyle(400);
+  assert(zeroStyle.fillOpacity > hiStyle.fillOpacity, "0ft darker than auth cell");
 
-  const zero = t.uasfmStyle(0);
-  const hi = t.uasfmStyle(400);
-  assert(zero.fillOpacity > hi.fillOpacity, "lower ceiling darker than 400ft");
+  assert(t.STYLES.noFly.fillColor, "no-fly style");
+  assert(t.STYLES.park.fillColor, "park style");
+  assert(t.STYLES.auth.fillColor, "auth style");
 
-  const url = t.buildQueryUrl(t.LAYERS.classAirspace, "-77.5,38.0,-75.5,39.5");
-  assert(url.startsWith(t.FAA_ORG), "query base");
-  assert(url.includes("f=geojson"), "geojson");
-  assert(url.includes("geometryType=esriGeometryEnvelope"), "envelope");
-  assert(url.includes("outSR=4326"), "outSR");
-  assert(url.includes("CLASS"), "class where clause encoded");
-  assert(!url.toLowerCase().includes("autopylot"), "must not call Autopylot");
+  const npsUrl = t.buildQueryUrl(t.LAYERS.npsParks, "-77.5,38.0,-75.5,39.5");
+  assert(npsUrl.startsWith(t.NPS_ORG), "NPS query base");
+  assert(npsUrl.includes("f=geojson"), "geojson");
+  assert(npsUrl.includes("geometryType=esriGeometryEnvelope"), "envelope");
+
+  const classUrl = t.buildQueryUrl(t.LAYERS.classAuth, "-77.5,38.0,-75.5,39.5");
+  assert(classUrl.startsWith(t.FAA_ORG), "FAA query base");
+  assert(classUrl.includes("outSR=4326"), "outSR");
+  assert(classUrl.includes("CLASS"), "class where clause encoded");
+  assert(!classUrl.toLowerCase().includes("autopylot"), "must not call Autopylot");
+  assert(!npsUrl.toLowerCase().includes("autopylot"), "NPS must not call Autopylot");
+
+  const suaUrl = t.buildQueryUrl(t.LAYERS.suaNoFly, "-77.5,38.0,-75.5,39.5");
+  assert(suaUrl.includes("TYPE_CODE"), "SUA type filter encoded");
+  assert(!decodeURIComponent(suaUrl).includes("MOA"), "MOA not requested");
 
   console.log("test_airspace.js: OK");
 }

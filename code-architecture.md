@@ -35,7 +35,7 @@ Approximate sizes from the packaged app tree (~5k LOC excluding `data/` and foli
 | `app.js` | ~1242 | UI state, Leaflet map, plan/explore, area select, geocode UX |
 | `style.css` | ~1287 | Dark theme, sidebar, map controls, timeline, drawer |
 | `foliage/` | modular | Removable Explore Fall overlay (`foliage-overlay.js`, CSS, mid-Oct PNG cache) |
-| `airspace/` | modular | Removable FAA Class/SUA/UASFM overlay (`airspace-overlay.js`, CSS) |
+| `airspace/` | modular | Removable drone no-fly / auth overlay (FAA + NPS; `airspace-overlay.js`, CSS) |
 
 ### Tests
 
@@ -173,10 +173,10 @@ Fetches `https://supercharge.info/service/supercharge/allSites`, normalizes GPS/
 - Mid-October dates cached under `foliage/cache/` for offline demos.  
 - Credit UI required. Removable: delete folder + slot/hooks (see foliage README).
 
-### 4.4 Airspace / UAS module (`static/airspace/`)
+### 4.4 Drone flight module (`static/airspace/`)
 
-- Viewport-bounded GeoJSON from FAA ArcGIS FeatureServers (`Class_Airspace`, `Special_Use_Airspace`, `FAA_UAS_FacilityMap_Data`, `Stadiums`, `US_Airport`).  
-- Debounced fetch on map move; zoom gates; no Autopylot private APIs.  
+- Viewport-bounded GeoJSON: FAA Class B/C/D + P/R SUA + defense TFRs + UASFM + stadiums, plus NPS Land Resources boundaries (park no-fly).  
+- Maps to pilot-facing **no-fly** / **auth required**; debounced fetch; zoom gates; no Autopylot private APIs.  
 - Removable: delete folder + slot/hooks (see airspace README).
 
 ---

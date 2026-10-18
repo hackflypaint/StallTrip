@@ -1,45 +1,56 @@
-# Airspace / UAS Module (removable)
+# Drone flight constraints (removable)
 
-Isolated FAA airspace + UAS Facility Map overlay for the Layers panel.
+Isolated map overlay that answers, for a viewport: **no-fly**, **authorization required**, or **unconstrained** (no tint).
 
-Evokes Autopylot-style UAS planning maps (controlled-airspace rings, special-use
-polygons, UASFM ceiling cells, airport/stadium markers) using **official FAA
-ArcGIS FeatureServers only** — never Autopylot private APIs.
+Uses **official public FeatureServers only** (FAA AIS/UDDS + NPS Land Resources). Never Autopylot private APIs. Not a LAANC / flight-authorization product.
+
+## Legality mapping
+
+| Visual class | Meaning (informational) | Data |
+| --- | --- | --- |
+| **No-fly** | Launch/operate generally blocked | NPS unit boundaries; FAA Prohibited + Restricted SUA; National Defense UAS TFRs; stadium NSFRs; UASFM cells with **0 ft** ceiling |
+| **Auth required** | Controlled airspace / UASFM — typically needs airspace authorization (e.g. LAANC or FAA approval) | FAA Class B/C/D; UASFM cells with ceiling &gt; 0 |
+| **Unconstrained** | No overlay in view | Absence of the above — **not** legal clearance (remote ID, NOTAMs, local rules still apply) |
+
+**Auth** here means “airspace authorization is typically required,” not “this app issued LAANC.” Always verify with FAA / park rules before flying.
 
 ## Data sources & attribution
 
-FAA Aeronautical Information Services (AIS) / ADDS & UAS Data Delivery System (UDDS).
-
-| Layer | ArcGIS FeatureServer query (GeoJSON) |
+| Layer | Source |
 | --- | --- |
-| Class B/C/D | `https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/FeatureServer/0/query` |
-| Special Use (R/W/P/MOA…) | `…/Special_Use_Airspace/FeatureServer/0/query` |
-| UAS Facility Maps | `…/FAA_UAS_FacilityMap_Data/FeatureServer/0/query` |
-| Stadiums | `…/Stadiums/FeatureServer/0/query` |
-| Airports | `…/US_Airport/FeatureServer/0/query` |
+| National Park Service units | `https://services1.arcgis.com/fBc8EJBxQRMcHlei/arcgis/rest/services/NPS_Land_Resources_Division_Boundary_and_Tract_Data_Service/FeatureServer/2` |
+| Prohibited / Restricted SUA | FAA `Special_Use_Airspace` (`TYPE_CODE IN ('P','R')`) |
+| National defense UAS TFRs | FAA `National_Defense_Airspace_TFR_Areas` |
+| Class B/C/D | FAA `Class_Airspace` |
+| UAS Facility Maps | FAA `FAA_UAS_FacilityMap_Data` |
+| Stadium NSFRs | FAA `Stadiums` |
 
-Org catalog: [FAA ArcGIS services](https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services)  
-Open data hubs: [ADDS](https://adds-faa.opendata.arcgis.com/) · [UDDS](https://udds-faa.opendata.arcgis.com/)  
-UAS Facility Maps explainer: [faa.gov UAS Facility Maps](https://www.faa.gov/uas/commercial_operators/uas_facility_maps)
-
-**Attribution (shown in UI):** FAA AIS / ADDS · UDDS. UASFM cells are informational only and do **not** authorize flight.
+FAA org catalog: [services6…/ssFJjBXIUyZDrSYZ](https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services)  
+Hubs: [ADDS](https://adds-faa.opendata.arcgis.com/) · [UDDS](https://udds-faa.opendata.arcgis.com/)  
+NPS UAS policy: [nps.gov — Uncrewed Aircraft in the National Parks](https://www.nps.gov/articles/uncrewed-aircraft-in-the-national-parks.htm)
 
 Queries use `geometry` + `esriGeometryEnvelope` + `f=geojson` + `outSR=4326`, CORS `*`.
 
+## Removed / de-emphasized (vs prior Airspace / UAS chrome)
+
+- Airport point markers (ident chrome) — removed
+- Class B / C / D as separate colored rings — unified as **Auth required**
+- MOA / Warning / other SUA types — not fetched
+- Autopylot-style purple UASFM ceiling gradient — simplified to auth / 0-ft no-fly
+
 ## Behavior / performance
 
-- Toggle **Airspace / UAS** in the Layers panel.
+- Toggle **Drone flight** in the Layers panel.
 - Fetches only when enabled; debounced on `moveend` / `zoomend`.
-- Min zoom **7** for Class + SUA; **9** for dense UASFM cells; **8** for airport/stadium points.
-- Viewport-bounded with a small bbox pad; `resultRecordCount` caps per layer.
-- In-flight requests aborted on pan/zoom.
+- Min zoom **7** for parks / SUA / Class / defense TFRs; **9** for UASFM; **8** for stadium points.
+- Viewport-bounded with bbox pad; `resultRecordCount` caps; in-flight requests aborted on pan/zoom.
 
 ## Files
 
 | Path | Role |
 | --- | --- |
 | `airspace-overlay.js` | Module API: mount/unmount, fetch, Leaflet GeoJSON |
-| `airspace.css` | Panel + marker styles |
+| `airspace.css` | Panel + marker + popup badge styles |
 | `README.md` | This file |
 
 ## How to remove later
@@ -57,8 +68,8 @@ No routing, charger, foliage, or Docker logic depends on this module.
 
 ## Limitations
 
-- Not a LAANC / flight-authorization tool.
-- No Autopylot weather / radar / live TFRs beyond what these static FAA layers include (`National_Defense_Airspace_TFR_Areas` etc. not wired yet).
-- Park / noise-sensitive area tints (if shown on Autopylot) are out of scope here.
+- Not a LAANC / flight-authorization tool; “Auth required” ≠ approval granted.
+- NPS polygons are legislated unit boundaries (policy no-fly for launch/land/operate on NPS lands) — not a substitute for park-specific exceptions.
+- Part-time national security UAS restrictions and other dynamic NOTAMs are not fully covered.
 - At low zoom, overlays are suppressed so CONUS is not loaded naively.
-- UASFM max ~1500 cells per viewport; dense metro areas may truncate until zoomed closer.
+- UASFM max ~1500 cells per viewport; dense metros may truncate until zoomed closer.
