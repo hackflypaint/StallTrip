@@ -8,7 +8,7 @@ Phone entry is the **web shell** at `/mobile` (same stdlib / HI container as des
 | --- | --- | --- |
 | Desktop planner | `/` | Default SPA |
 | **Phone mobile shell** | **`/mobile`** | Map-first; `body.ui-mobile` |
-| Tesla car shell | `/` + landscape heuristics / `?car=1` | `body.car-shell` — not `/mobile` |
+| Tesla car shell | **`/tesla`** (preferred) or `/` + heuristics / `?car=1` | `body.car-shell` — not `/mobile` |
 | Tesla probe | `/tesla-probe` | Fingerprint page |
 
 Agents **do not** start ngrok. You may optionally use `./scripts/mobile-ngrok.sh` himself for a public URL.

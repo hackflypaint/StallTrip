@@ -312,18 +312,78 @@ function setupCarShell() {
   const handle = document.getElementById("btnCarSheetHandle");
   const planBtn = document.getElementById("btnCarSheetPlan");
   const itinBtn = document.getElementById("btnCarSheetItinerary");
+  const locateBtn = document.getElementById("btnCarSheetLocate");
   if (handle) {
-    handle.addEventListener("click", () => cycleCarSheet());
+    handle.addEventListener("click", (e) => {
+      // Ignore click that ends a drag gesture
+      if (handle.dataset.dragged === "1") {
+        handle.dataset.dragged = "0";
+        e.preventDefault();
+        return;
+      }
+      cycleCarSheet();
+    });
+    setupCarSheetDrag(handle);
   }
   if (planBtn) {
     planBtn.addEventListener("click", () => setCarSheet("plan"));
   }
   if (itinBtn) {
     itinBtn.addEventListener("click", () => {
-      if (state.activePlan) setCarSheet("itinerary");
-      else setCarSheet("plan");
+      setCarSheet("itinerary");
     });
   }
+  if (locateBtn) {
+    locateBtn.addEventListener("click", () => detectCurrentLocation());
+  }
+}
+
+/**
+ * Drag the sheet handle: swipe up expands (peek→half→full), down collapses.
+ * Intentional limit: max ~88vh so a map strip + Tesla browser chrome stay visible.
+ */
+function setupCarSheetDrag(handle) {
+  let startY = 0;
+  let tracking = false;
+  const THRESH = 36;
+
+  const onDown = (e) => {
+    if (!state.carShell) return;
+    tracking = true;
+    handle.dataset.dragged = "0";
+    startY = e.clientY;
+    try {
+      handle.setPointerCapture(e.pointerId);
+    } catch (_) {
+      /* ignore */
+    }
+  };
+  const onMove = (e) => {
+    if (!tracking) return;
+    const dy = e.clientY - startY;
+    if (Math.abs(dy) > 10) handle.dataset.dragged = "1";
+  };
+  const onUp = (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const dy = e.clientY - startY;
+    if (dy < -THRESH) {
+      // swipe up → expand
+      if (state.sheetMode === "peek") setCarSheet("plan");
+      else if (state.sheetMode === "plan") setCarSheet("itinerary");
+    } else if (dy > THRESH) {
+      // swipe down → collapse
+      if (state.sheetMode === "itinerary") setCarSheet("plan");
+      else if (state.sheetMode === "plan") setCarSheet("peek");
+    }
+  };
+
+  handle.addEventListener("pointerdown", onDown);
+  handle.addEventListener("pointermove", onMove);
+  handle.addEventListener("pointerup", onUp);
+  handle.addEventListener("pointercancel", () => {
+    tracking = false;
+  });
 }
 
 function applyCarShell() {
@@ -377,7 +437,7 @@ function setCarSheet(mode) {
   if (next === "plan" || next === "itinerary") {
     switchTab("route-tab");
   }
-  if (next === "itinerary") {
+  if (next === "itinerary" && state.activePlan) {
     const results = document.getElementById("routeResults");
     if (results && results.style.display !== "none") {
       setTimeout(() => {
@@ -392,31 +452,46 @@ function setCarSheet(mode) {
   });
 }
 
+/** Always peek → half(plan) → nearly-full(itinerary) → peek. */
 function cycleCarSheet() {
   if (!state.carShell) return;
-  if (state.sheetMode === "peek") {
-    setCarSheet(state.activePlan ? "itinerary" : "plan");
-  } else if (state.sheetMode === "plan") {
-    setCarSheet(state.activePlan ? "itinerary" : "peek");
-  } else {
-    setCarSheet("peek");
-  }
+  if (state.sheetMode === "peek") setCarSheet("plan");
+  else if (state.sheetMode === "plan") setCarSheet("itinerary");
+  else setCarSheet("peek");
 }
 
 function updateCarPeek() {
   const summary = document.getElementById("carPeekSummary");
   const itinBtn = document.getElementById("btnCarSheetItinerary");
-  if (!summary) return;
-  if (state.activePlan && state.activePlan.summary) {
-    const s = state.activePlan.summary;
-    summary.textContent = `${s.supercharger_stops_count} stops · ${s.distance_miles} mi · ${s.total_trip_duration_formatted}`;
-    if (itinBtn) itinBtn.hidden = false;
-  } else if (state.origin && state.destination) {
-    summary.textContent = "Ready — tap Plan Tesla Route";
-    if (itinBtn) itinBtn.hidden = true;
-  } else {
-    summary.textContent = "Tap a preset or enter places";
-    if (itinBtn) itinBtn.hidden = true;
+  const hint = document.getElementById("carSheetHint");
+  const handle = document.getElementById("btnCarSheetHandle");
+  if (summary) {
+    if (state.activePlan && state.activePlan.summary) {
+      const s = state.activePlan.summary;
+      summary.textContent = `${s.supercharger_stops_count} stops · ${s.distance_miles} mi`;
+    } else if (state.origin && state.destination) {
+      summary.textContent = "Ready to plan";
+    } else if (state.origin) {
+      summary.textContent = "Set destination";
+    } else {
+      summary.textContent = "Tap a preset";
+    }
+  }
+  if (itinBtn) itinBtn.hidden = !(state.activePlan && state.activePlan.summary);
+  if (hint) {
+    if (state.sheetMode === "peek") hint.textContent = "Expand";
+    else if (state.sheetMode === "plan") hint.textContent = "Full";
+    else hint.textContent = "Collapse";
+  }
+  if (handle) {
+    handle.setAttribute("aria-expanded", state.sheetMode === "peek" ? "false" : "true");
+    const label =
+      state.sheetMode === "peek"
+        ? "Expand plan sheet"
+        : state.sheetMode === "plan"
+          ? "Expand sheet to full"
+          : "Collapse plan sheet";
+    handle.setAttribute("aria-label", label);
   }
 }
 
@@ -1202,30 +1277,46 @@ function applyOriginFromGeolocation(place) {
 
 window.applyOriginFromGeolocation = applyOriginFromGeolocation;
 
-function detectCurrentLocation() {
-  const resetLocateBtns = () => {
-    const label = '<i class="fa-solid fa-location-crosshairs"></i> Use Current Location';
-    const btn = document.getElementById("btnUseCurrentLocation");
-    if (btn) btn.innerHTML = label;
-  };
+function setLocateBusy(busy) {
+  const mapBtn = document.getElementById("btnLocateMe");
+  const carBtn = document.getElementById("btnCarSheetLocate");
+  const formBtn = document.getElementById("btnUseCurrentLocation");
+  [mapBtn, carBtn].forEach((el) => {
+    if (!el) return;
+    el.classList.toggle("is-locating", !!busy);
+    el.setAttribute("aria-busy", busy ? "true" : "false");
+    if (busy) {
+      el.dataset.prevHtml = el.innerHTML;
+      el.innerHTML = '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>';
+    } else if (el.dataset.prevHtml) {
+      el.innerHTML = el.dataset.prevHtml;
+      delete el.dataset.prevHtml;
+    }
+  });
+  if (formBtn) {
+    formBtn.innerHTML = busy
+      ? '<i class="fa-solid fa-spinner fa-spin"></i> Locating...'
+      : '<i class="fa-solid fa-location-crosshairs"></i> Use Current Location';
+  }
+}
 
+function detectCurrentLocation() {
   if (!navigator.geolocation) {
     if (isMobileShell()) {
       // Phone shell: keep demo fallback so trip UX stays testable without GPS
       applyOriginFromGeolocation(resolveGeolocationPlace(null, { code: 0, message: "unsupported" }));
     } else {
-      showToast("Location unavailable in this browser. Use a preset or type an address.");
-      if (state.carShell) setCarSheet("plan");
+      showToast("Location unavailable. Use a preset or Edit to type an address.");
+      // Stay on current sheet — presets remain reachable in peek
     }
     return;
   }
 
-  const btn = document.getElementById("btnUseCurrentLocation");
-  if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Locating...';
+  setLocateBusy(true);
 
   navigator.geolocation.getCurrentPosition(
     (pos) => {
-      resetLocateBtns();
+      setLocateBusy(false);
       if (isMobileShell()) {
         applyOriginFromGeolocation(resolveGeolocationPlace(pos, null));
         return;
@@ -1236,22 +1327,26 @@ function detectCurrentLocation() {
         lng: pos.coords.longitude,
       };
       setOrigin(coords);
-      state.map.setView([coords.lat, coords.lng], 12);
+      if (state.map) state.map.setView([coords.lat, coords.lng], 12);
       showToast("Location set — pick a destination or preset.", 2800);
       if (typeof updateCarPeek === "function") updateCarPeek();
     },
     (err) => {
-      resetLocateBtns();
+      setLocateBusy(false);
       console.warn("Geolocation denied or error:", err);
       if (isMobileShell()) {
         applyOriginFromGeolocation(resolveGeolocationPlace(null, err));
         return;
       }
-      // Desktop / car: fail soft — do NOT silently overwrite origin with a demo city.
-      showToast("Location unavailable in this browser. Use a preset or type an address.");
-      if (state.carShell) setCarSheet("plan");
+      // Desktop / car: fail soft — do NOT overwrite origin; presets/manual still work.
+      const denied = err && (err.code === 1 || /denied/i.test(String(err.message || "")));
+      showToast(
+        denied
+          ? "Location denied — use a preset or Edit to type start/end."
+          : "Location unavailable — use a preset or Edit to type start/end."
+      );
     },
-    { enableHighAccuracy: false, timeout: 8000, maximumAge: isMobileShell() ? 60_000 : 0 }
+    { enableHighAccuracy: false, timeout: 10000, maximumAge: isMobileShell() ? 60_000 : 0 }
   );
 }
 

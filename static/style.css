@@ -1341,18 +1341,19 @@ body, html {
 }
 
 body.car-shell {
-  /* Default = peek height; map must dominate (incar photo ground truth) */
-  --car-sheet-h: 120px;
-  --car-touch: 56px;
-  --car-touch-lg: 64px;
+  /* peek → half(plan) → nearly-full(itinerary); map dominates in peek */
+  --car-sheet-h: 88px;
+  /* Hit area ≥44px; visual size stays near desktop 38px icons */
+  --car-touch: 44px;
+  --car-icon-font: 0.95rem;
 }
 
 body.car-shell .car-sheet-chrome {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  gap: 6px;
-  padding: 0 10px 8px;
+  gap: 2px;
+  padding: 0 8px 6px;
   border-bottom: 1px solid var(--border-color);
   background: var(--bg-secondary);
 }
@@ -1396,17 +1397,18 @@ body.car-shell[data-sheet="itinerary"] .sidebar {
 }
 
 body.car-shell[data-sheet="peek"] {
-  /* Fit handle + peek row + preset chips without clipping */
-  --car-sheet-h: 148px;
+  /* One dense row: handle + brand/presets/actions — map ~85% at 601px */
+  --car-sheet-h: 88px;
 }
 
 body.car-shell[data-sheet="plan"] {
-  /* Keep form short — never 50% again (Note: top way too big) */
-  --car-sheet-h: min(200px, 34vh);
+  /* Half sheet — origin/dest/Plan must be usable (was ~200px; felt stuck) */
+  --car-sheet-h: min(320px, 52vh);
 }
 
 body.car-shell[data-sheet="itinerary"] {
-  --car-sheet-h: min(420px, 72vh);
+  /* Nearly full under browser chrome; leave a map strip */
+  --car-sheet-h: min(540px, 88vh);
 }
 
 /* Brand header always gone in car mode — peek chip is enough */
@@ -1419,7 +1421,6 @@ body.car-shell .route-form > .quick-presets {
   display: none !important;
 }
 
-body.car-shell[data-sheet="peek"] .tabs,
 body.car-shell[data-sheet="peek"] .tab-content {
   display: none !important;
 }
@@ -1428,18 +1429,28 @@ body.car-shell[data-sheet="plan"] .route-results {
   display: none !important;
 }
 
-body.car-shell[data-sheet="plan"] .car-preset-row {
-  display: none; /* presets already used to get here; reclaim height for fields */
+/* Full sheet: keep form + results stacked and scrollable */
+body.car-shell[data-sheet="itinerary"] .route-results {
+  display: block;
+}
+
+/* Presets stay in peek; hide in half/full to reclaim space for form/timeline */
+body.car-shell[data-sheet="plan"] .car-preset-row,
+body.car-shell[data-sheet="itinerary"] .car-preset-row {
+  display: none;
 }
 
 body.car-shell .car-preset-row {
   display: flex;
   flex-wrap: nowrap;
-  gap: 8px;
+  gap: 6px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 0 2px 2px;
+  padding: 0;
   scrollbar-width: none;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
 }
 
 body.car-shell .car-preset-row::-webkit-scrollbar {
@@ -1448,34 +1459,45 @@ body.car-shell .car-preset-row::-webkit-scrollbar {
 
 body.car-shell .car-preset-row .preset-tag {
   flex: 0 0 auto;
-  min-height: 44px;
-  padding: 8px 12px;
-  font-size: 0.82rem;
+  min-height: 40px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
   font-weight: 600;
-  border-radius: 12px;
+  border-radius: 10px;
 }
 
 body.car-shell .car-sheet-handle {
   align-self: center;
   width: 100%;
-  max-width: 120px;
-  min-height: 28px;
-  margin: 4px 0 2px;
-  padding: 8px;
+  max-width: 160px;
+  min-height: 22px;
+  margin: 2px 0 0;
+  padding: 4px 8px 2px;
   border: none;
   background: transparent;
   cursor: pointer;
-  touch-action: manipulation;
+  touch-action: none; /* pointer drag expand/collapse */
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 2px;
 }
 
 body.car-shell .car-sheet-grip {
-  width: 44px;
-  height: 5px;
+  width: 40px;
+  height: 4px;
   border-radius: 999px;
   background: var(--text-dim);
+}
+
+body.car-shell .car-sheet-hint {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  line-height: 1;
 }
 
 body.car-shell .car-sheet-handle:active .car-sheet-grip {
@@ -1485,25 +1507,26 @@ body.car-shell .car-sheet-handle:active .car-sheet-grip {
 body.car-shell .car-peek-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
-  min-height: 40px;
+  min-height: 44px;
 }
 
 body.car-shell .car-peek-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
+  max-width: 42%;
 }
 
 body.car-shell .car-peek-logo {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
-  font-size: 0.85rem;
-  border-radius: 8px;
+  font-size: 0.75rem;
+  border-radius: 7px;
 }
 
 body.car-shell .car-peek-text {
@@ -1514,12 +1537,13 @@ body.car-shell .car-peek-text {
 }
 
 body.car-shell .car-peek-text strong {
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   color: #fff;
-  line-height: 1.15;
+  line-height: 1.1;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  white-space: nowrap;
 }
 
 body.car-shell .car-mode-chip {
@@ -1559,33 +1583,46 @@ body.car-shell .car-mode-badge {
 }
 
 body.car-shell .car-peek-summary {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 48vw;
-  line-height: 1.2;
+  max-width: 28vw;
+  line-height: 1.15;
 }
 
 body.car-shell .car-peek-actions {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 body.car-shell .car-peek-btn {
-  min-height: 44px;
-  min-width: 56px;
-  padding: 8px 12px;
+  min-height: 40px;
+  min-width: 44px;
+  padding: 6px 10px;
   border-radius: 10px;
   border: 1px solid var(--border-color);
   background: var(--bg-tertiary);
   color: var(--text-main);
   font-weight: 700;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   cursor: pointer;
   touch-action: manipulation;
+}
+
+body.car-shell .car-peek-btn.car-peek-locate {
+  min-width: 40px;
+  padding: 6px 8px;
+  font-size: 0.95rem;
+}
+
+body.car-shell .car-peek-btn.car-peek-locate.is-locating,
+body.car-shell #btnLocateMe.is-locating {
+  color: #7dd3fc;
+  border-color: rgba(0, 180, 216, 0.55);
 }
 
 body.car-shell .car-peek-btn:active {
@@ -1607,6 +1644,11 @@ body.car-shell .subtitle {
   display: none;
 }
 
+/* Tabs ate peek/plan height ( photo) — car shell is route-only */
+body.car-shell .tabs {
+  display: none !important;
+}
+
 body.car-shell .tab-btn {
   min-height: 40px;
   font-size: 0.78rem;
@@ -1615,8 +1657,14 @@ body.car-shell .tab-btn {
 }
 
 body.car-shell .tab-content {
-  padding: 8px 12px 12px;
-  gap: 8px;
+  padding: 6px 10px 10px;
+  gap: 6px;
+}
+
+/* Ensure route form stays visible when expanded (tabs hidden) */
+body.car-shell[data-sheet="plan"] #route-tab,
+body.car-shell[data-sheet="itinerary"] #route-tab {
+  display: flex !important;
 }
 
 /* Compact compose: placeholders only — labels ate the map in the photo */
@@ -1715,28 +1763,31 @@ body.car-shell .swap-btn {
 }
 
 body.car-shell .map-floating-bar {
-  top: 12px;
-  right: 12px;
-  gap: 10px;
-  /* Do not max-height + flex-shrink the tools — that crushed 56px targets to ~20px */
+  top: 10px;
+  right: 10px;
+  gap: 8px;
+  /* Above sheet stacking context so locate/tools stay tappable */
+  z-index: 1300;
   overflow: visible;
   flex-shrink: 0;
 }
 
 body.car-shell .map-area-tools {
-  gap: 8px;
-  padding: 6px;
+  gap: 6px;
+  padding: 4px;
   flex-shrink: 0;
 }
 
 body.car-shell .map-btn {
+  /* Visual ≈ desktop 38px; hit box 44px via padding box */
   width: var(--car-touch);
   height: var(--car-touch);
   min-width: var(--car-touch);
   min-height: var(--car-touch);
   flex-shrink: 0;
-  font-size: 1.15rem;
-  border-radius: 14px;
+  font-size: var(--car-icon-font);
+  border-radius: var(--radius-md);
+  box-sizing: border-box;
 }
 
 body.car-shell .map-btn:hover {
@@ -1760,10 +1811,13 @@ body.car-shell .leaflet-top.leaflet-right {
 }
 
 body.car-shell .leaflet-control-zoom a {
-  width: 44px !important;
-  height: 44px !important;
-  line-height: 44px !important;
-  font-size: 18px !important;
+  /* Match familiar Leaflet visual size; pad hit via control spacing */
+  width: 34px !important;
+  height: 34px !important;
+  line-height: 34px !important;
+  font-size: 16px !important;
+  padding: 5px !important; /* grows touchable area toward 44px */
+  box-sizing: content-box !important;
 }
 
 /* Legend competed with tools at 773×601 — hide in car mode */
@@ -1849,16 +1903,16 @@ body.car-shell .suggestion-item:active {
   background: var(--bg-tertiary);
 }
 
-/* Taller car canvas (e.g. 1254×784): slightly roomier, still map-first */
+/* Taller car canvas (e.g. 1254×784): same expand ratios, slightly roomier peek */
 @media (min-height: 720px) {
   body.car-shell[data-sheet="peek"] {
-    --car-sheet-h: 152px;
+    --car-sheet-h: 92px;
   }
   body.car-shell[data-sheet="plan"] {
-    --car-sheet-h: min(220px, 30vh);
+    --car-sheet-h: min(360px, 50vh);
   }
   body.car-shell[data-sheet="itinerary"] {
-    --car-sheet-h: min(480px, 68vh);
+    --car-sheet-h: min(620px, 86vh);
   }
 }
 
