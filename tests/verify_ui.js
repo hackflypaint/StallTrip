@@ -396,6 +396,88 @@ async function runVerification() {
     await page.screenshot({ path: path.join(MEDIA_DIR, '05_mobile_responsive.png') });
     console.log('Saved 05_mobile_responsive.png');
 
+    // 7. Test Client-Side Live Driving / Follow-Me Mode (mock watchPosition + Wake Lock + HUD + Re-center)
+    console.log('7. Testing Client-Side Live Driving / Follow-Me Mode (watchPosition + HUD + Re-center)...');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.evaluate(() => {
+      window.__mockWatchCallbacks = {};
+      window.__wakeLockRequested = 0;
+      const mockWakeLock = {
+        request: async (type) => {
+          window.__wakeLockRequested++;
+          return {
+            type,
+            addEventListener: () => {},
+            release: async () => {},
+          };
+        },
+      };
+      try {
+        Object.defineProperty(navigator, 'wakeLock', {
+          value: mockWakeLock,
+          configurable: true,
+        });
+      } catch (_) {
+        navigator.wakeLock = mockWakeLock;
+      }
+      navigator.geolocation.watchPosition = (success, error, opts) => {
+        window.__mockWatchCallbacks = { success, error, opts };
+        setTimeout(() => {
+          success({
+            coords: {
+              latitude: 37.65,
+              longitude: -122.38,
+              accuracy: 18,
+              heading: 135,
+              speed: 29.0576, // 65 mph
+            },
+          });
+        }, 30);
+        return 42;
+      };
+      navigator.geolocation.clearWatch = () => {
+        window.__mockWatchCleared = true;
+      };
+    });
+
+    await page.locator('#btnLocateMe').click();
+    await page.waitForSelector('#liveDriveHud:not([hidden])', { timeout: 5000 });
+    await page.waitForSelector('.user-location-dot', { timeout: 5000 });
+    const hudCheck = await page.evaluate(() => ({
+      speedText: document.getElementById('liveHudSpeed')?.textContent || '',
+      nextText: document.getElementById('liveHudNextStop')?.textContent || '',
+      wakeLocks: window.__wakeLockRequested,
+      following: window.appState.liveLocation.follow,
+    }));
+    console.log(`  Live HUD: speed="${hudCheck.speedText}" next="${hudCheck.nextText}" wakeLocks=${hudCheck.wakeLocks}`);
+    if (!/65 mph/i.test(hudCheck.speedText) || !/SE 135/i.test(hudCheck.speedText)) {
+      throw new Error(`Expected speed/heading in HUD, got: ${hudCheck.speedText}`);
+    }
+    if (!/mi/i.test(hudCheck.nextText)) {
+      throw new Error(`Expected distance to next planned stop in HUD, got: ${hudCheck.nextText}`);
+    }
+    if (hudCheck.wakeLocks < 1) {
+      throw new Error('Expected navigator.wakeLock.request("screen") to be called');
+    }
+
+    // Simulate manual map drag -> pauses follow and reveals Re-center pill
+    await page.evaluate(() => {
+      window.appState.map.fire('dragstart');
+    });
+    await page.waitForSelector('#btnLiveRecenter:not([hidden])', { timeout: 3000 });
+    await page.locator('#btnLiveRecenter').click();
+    const resumed = await page.evaluate(() => window.appState.liveLocation.follow);
+    if (!resumed) {
+      throw new Error('Expected Re-center pill to resume live follow');
+    }
+    // Stop live follow
+    await page.locator('#btnLocateMe').click();
+    const stopped = await page.evaluate(() => !window.appState.liveLocation.watching);
+    if (!stopped) {
+      throw new Error('Expected second tap while following to stop live watch');
+    }
+    console.log('  Live Drive mode + HUD + Wake Lock + Re-center verified!');
+
     console.log('\n=============================================');
     console.log('ALL PLAYWRIGHT VERIFICATION CHECKS PASSED!');
     console.log('=============================================\n');
@@ -405,6 +487,7 @@ async function runVerification() {
   } finally {
     await browser.close();
   }
+  process.exit(0);
 }
 
 runVerification();

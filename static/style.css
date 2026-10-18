@@ -1121,6 +1121,135 @@ body, html {
   }
 }
 
+/* Client-Side Live Driving HUD (speed/heading, next Supercharger distance, Re-center pill) */
+.live-drive-hud {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 1090;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: calc(100% - 88px);
+  pointer-events: none;
+}
+
+.live-drive-hud[hidden] {
+  display: none !important;
+}
+
+.live-hud-pill {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(20, 24, 30, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  box-shadow: var(--shadow-md);
+  color: var(--text-main);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.live-hud-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 8px #38bdf8;
+  flex-shrink: 0;
+}
+
+.live-hud-speed {
+  color: #e0f2fe;
+  white-space: nowrap;
+}
+
+.live-hud-sep {
+  color: var(--text-dim);
+}
+
+.live-hud-next {
+  color: #7dd3fc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+.live-recenter-btn,
+.live-replan-btn {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(56, 189, 248, 0.8);
+  background: rgba(14, 165, 233, 0.28);
+  backdrop-filter: blur(8px);
+  color: #f0f9ff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.live-replan-btn {
+  border-color: rgba(245, 158, 11, 0.85);
+  background: rgba(245, 158, 11, 0.25);
+  color: #fef3c7;
+}
+
+.live-recenter-btn:hover,
+.live-recenter-btn:active {
+  background: #0284c7;
+  color: #fff;
+}
+
+.live-replan-btn:hover,
+.live-replan-btn:active {
+  background: #d97706;
+  color: #fff;
+}
+
+body.car-shell .live-drive-hud {
+  top: 36px;
+  left: 8px;
+  gap: 6px;
+  max-width: calc(100% - 70px);
+}
+
+body.car-shell .live-recenter-btn,
+body.car-shell .live-replan-btn {
+  min-height: 40px;
+  padding: 6px 12px;
+  font-size: 0.74rem;
+}
+
+body.ui-mobile .live-drive-hud {
+  top: calc(10px + var(--safe-top));
+  left: calc(10px + var(--safe-left));
+  max-width: calc(100% - 62px);
+  gap: 5px;
+}
+
+body.ui-mobile.sheet-open .live-drive-hud {
+  top: calc(64px + var(--safe-top));
+}
+
+body.ui-mobile .live-hud-next {
+  max-width: 155px;
+}
+
 @media (max-width: 720px) {
   .layers-panel {
     top: 12px;
