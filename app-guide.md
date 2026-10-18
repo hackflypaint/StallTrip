@@ -174,6 +174,14 @@ Runs end-to-end automated UI checks including Visit Maximizer calculation, drawe
 node tests/verify_ui.js
 ```
 
+### Mobile shell smoke (`/mobile`)
+Phone viewport Playwright checks for map-first shell, Plan sheet, SF→LA plan, and default-off UA redirect:
+```bash
+# requires Chrome + playwright (npm install --no-save playwright)
+node tests/verify_mobile.js
+```
+Soft UA redirect (`MOBILE_UA_REDIRECT`) remains **disabled** in Docker compose unless explicitly set. Phones use **`/mobile`** (separate from desktop and Tesla car shell).
+
 ### Tesla landscape suite (in-car profiles)
 Chromium with `deviceScaleFactor: 1.53`, `hasTouch: true`, viewports **773×601** and **1254×784**. Smoke: probe page → preset plan → drawer → box select → layers. Screenshots go to the TESLA Project store `media/tesla-emulation/` when run:
 ```bash
