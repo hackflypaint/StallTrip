@@ -95,6 +95,37 @@ async function runVerification() {
     await page.locator('.leaflet-control-layers label:has-text("Streets")').click();
     await page.waitForTimeout(800);
 
+    // 2c. Enable Fall Foliage overlay and capture screenshot
+    console.log('2c. Enabling Fall Foliage overlay...');
+    const foliageLabel = page.locator('.leaflet-control-layers label:has-text("Fall Foliage")');
+    await foliageLabel.waitFor({ state: 'visible', timeout: 8000 });
+    await foliageLabel.click();
+    await page.waitForTimeout(2000);
+
+    const foliageLegendVisible = await page.locator('#foliageLegend').isVisible();
+    if (!foliageLegendVisible) {
+      throw new Error('Expected #foliageLegend to be visible after enabling Fall Foliage');
+    }
+    const foliagePathCount = await page.locator('.leaflet-overlay-pane path').count();
+    if (foliagePathCount < 10) {
+      throw new Error(`Expected multiple foliage state polygons, found ${foliagePathCount}`);
+    }
+
+    // Zoom out a bit to show regional autumn wash across the Lower 48
+    await page.evaluate(() => {
+      if (window.appState && window.appState.map) {
+        window.appState.map.setView([39.5, -98.0], 4);
+      }
+    });
+    await page.waitForTimeout(1500);
+
+    await page.screenshot({ path: path.join(MEDIA_DIR, 'foliage_layer.png') });
+    console.log('Saved foliage_layer.png');
+
+    // Fit back to the planned route for subsequent checks
+    await page.locator('#btnMapReset').click();
+    await page.waitForTimeout(1000);
+
     // 3. Test Drawer and Force-Include toggle
     console.log('3. Clicking first Supercharger stop in timeline to view details...');
     const firstStop = page.locator('.timeline-item.supercharger .timeline-content').first();

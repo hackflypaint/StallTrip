@@ -1,7 +1,8 @@
 /**
  * Tesla Supercharger Route Planner - Client Application
  * Includes Visit Maximizer routing, map area drag-selection for force-included chargers,
- * Streets / Topographic (OpenTopoMap) basemap switching, and multi-stop itinerary generation.
+ * Streets / Topographic (OpenTopoMap) basemap switching, Fall Foliage overlay,
+ * and multi-stop itinerary generation.
  */
 
 // Application State
@@ -23,7 +24,12 @@ const state = {
   selectionRect: null,
   baseLayers: null,
   activeBasemap: "streets",
+  foliageLayer: null,
+  layerControl: null,
 };
+
+// Expose for Playwright / debugging (cloud verification)
+window.appState = state;
 
 // Initialize Application
 document.addEventListener("DOMContentLoaded", () => {
@@ -63,13 +69,13 @@ function initMap() {
   state.baseLayers = { streets: streetsLayer, topo: topoLayer };
   state.activeBasemap = "streets";
 
-  L.control
+  state.layerControl = L.control
     .layers(
       {
         Streets: streetsLayer,
         Topographic: topoLayer,
       },
-      null,
+      {},
       { position: "bottomleft", collapsed: false }
     )
     .addTo(state.map);
@@ -84,6 +90,16 @@ function initMap() {
       mapEl.classList.remove("basemap-topo");
     }
   });
+
+  state.map.on("overlayadd", (e) => {
+    if (e.name === "Fall Foliage") showFoliageLegend(true);
+  });
+  state.map.on("overlayremove", (e) => {
+    if (e.name === "Fall Foliage") showFoliageLegend(false);
+  });
+
+  // Async: Explore Fall–inspired seasonal choropleth overlay
+  initFoliageOverlay();
 
   state.routeLayer = L.featureGroup().addTo(state.map);
   state.corridorLayer = L.featureGroup().addTo(state.map);
@@ -119,6 +135,28 @@ function initMap() {
 
   // Setup Map Area Selection Drawing Handlers
   setupMapAreaSelection();
+}
+
+async function initFoliageOverlay() {
+  try {
+    if (!window.FoliageOverlay) return;
+    const foliageLayer = await window.FoliageOverlay.createFoliageOverlay(new Date());
+    state.foliageLayer = foliageLayer;
+    state.layerControl.addOverlay(foliageLayer, "Fall Foliage");
+
+    const legendEl = document.getElementById("foliageLegend");
+    if (legendEl) {
+      legendEl.innerHTML = window.FoliageOverlay.buildFoliageLegendHtml(new Date());
+    }
+  } catch (err) {
+    console.warn("Fall Foliage overlay unavailable:", err);
+  }
+}
+
+function showFoliageLegend(visible) {
+  const legendEl = document.getElementById("foliageLegend");
+  if (!legendEl) return;
+  legendEl.style.display = visible ? "block" : "none";
 }
 
 function setupEventListeners() {

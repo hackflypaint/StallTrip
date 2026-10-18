@@ -1096,6 +1096,90 @@ body, html {
   color: var(--text-muted);
 }
 
+/* Fall Foliage overlay legend (Explore Fall–style stages) */
+.foliage-legend {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 1000;
+  min-width: 168px;
+  max-width: 220px;
+  padding: 12px 14px;
+  background: rgba(26, 30, 36, 0.94);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.foliage-legend-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 2px;
+}
+
+.foliage-legend-title i {
+  color: #e8913a;
+}
+
+.foliage-legend-sub {
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.foliage-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 0;
+}
+
+.foliage-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+
+.foliage-legend-note {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+  font-size: 0.62rem;
+  color: var(--text-dim);
+}
+
+.foliage-tooltip {
+  background: rgba(26, 30, 36, 0.95) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-main) !important;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  font-size: 0.75rem;
+}
+
+.foliage-tooltip::before {
+  border-top-color: rgba(26, 30, 36, 0.95) !important;
+}
+
+@media (max-width: 720px) {
+  .foliage-legend {
+    top: 12px;
+    left: 10px;
+    max-width: 150px;
+    padding: 10px 12px;
+  }
+}
+
 /* Map Floating Tools */
 .map-floating-bar {
   position: absolute;
