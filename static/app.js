@@ -1028,9 +1028,9 @@ function renderRoutePlan(plan) {
       marker.bindPopup(`
         <div style="min-width:180px;">
           <h4 style="margin:0 0 4px 0; color:${markerColor};">${isForced ? '⭐ [FORCED] ' : ''}Stop #${escapeHtml(stop.stop_index)}: ${escapeHtml(stop.name)}</h4>
-          <p style="margin:2px 0; font-size:12px;"><b>Power:</b> ${stop.power} kW (${stop.stalls} stalls)</p>
-          <p style="margin:2px 0; font-size:12px;"><b>Arrive:</b> ${stop.arrival_battery_pct}% &rarr; <b>Leave:</b> ${stop.departure_battery_pct}%</p>
-          <p style="margin:2px 0; font-size:12px; color:#10b981;"><b>Charge time:</b> ${stop.charge_duration_min} min</p>
+          <p style="margin:2px 0; font-size:12px;"><b>Power:</b> ${escapeHtml(stop.power)} kW (${escapeHtml(stop.stalls)} stalls)</p>
+          <p style="margin:2px 0; font-size:12px;"><b>Arrive:</b> ${escapeHtml(stop.arrival_battery_pct)}% &rarr; <b>Leave:</b> ${escapeHtml(stop.departure_battery_pct)}%</p>
+          <p style="margin:2px 0; font-size:12px; color:#10b981;"><b>Charge time:</b> ${escapeHtml(stop.charge_duration_min)} min</p>
         </div>
       `);
       marker.on("click", () => showChargerDrawer(stop));

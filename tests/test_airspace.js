@@ -93,6 +93,15 @@ function run() {
   assert(suaUrl.includes("TYPE_CODE"), "SUA type filter encoded");
   assert(!decodeURIComponent(suaUrl).includes("MOA"), "MOA not requested");
 
+  const xss = t.popupHtml('<img src=x onerror=alert(1)>', [
+    ["Class", "<script>alert(1)</script>"],
+  ]);
+  assert(!xss.includes("<script>"), "popup escapes script tags");
+  assert(!xss.includes("<img"), "popup escapes img tags");
+  assert(xss.includes("&lt;script&gt;"), "popup encodes angle brackets");
+  assert(xss.includes("&lt;img"), "popup encodes img opener");
+  assert(t.escapeHtml('"') === "&quot;", "escapeHtml quotes");
+
   console.log("test_airspace.js: OK");
 }
 

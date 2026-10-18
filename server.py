@@ -9,6 +9,7 @@ import json
 import os
 import socketserver
 import sys
+import threading
 import time
 import traceback
 import urllib.parse
@@ -29,9 +30,11 @@ MAX_GEOCODE_QUERY_LEN = 200
 GEOCODE_RATE_LIMIT = 30  # requests
 GEOCODE_RATE_WINDOW_SEC = 60.0
 MAX_CORRIDOR_BUFFER_KM = 100.0
+MAX_GEOCODE_TRACKED_IPS = 10_000
 
 # Simple in-memory geocode rate limiter: ip -> (window_start, count)
 _geocode_hits: Dict[str, Tuple[float, int]] = {}
+_geocode_lock = threading.Lock()
 
 
 def _clamp_int(value: Any, default: int, lo: int, hi: int) -> int:
@@ -151,14 +154,27 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
     def _geocode_allowed(self) -> bool:
         now = time.monotonic()
         ip = self._client_ip()
-        start, count = _geocode_hits.get(ip, (now, 0))
-        if now - start >= GEOCODE_RATE_WINDOW_SEC:
-            _geocode_hits[ip] = (now, 1)
+        with _geocode_lock:
+            # Drop stale windows so the map cannot grow without bound
+            if len(_geocode_hits) > MAX_GEOCODE_TRACKED_IPS:
+                stale = [
+                    key
+                    for key, (start, _) in _geocode_hits.items()
+                    if now - start >= GEOCODE_RATE_WINDOW_SEC
+                ]
+                for key in stale:
+                    del _geocode_hits[key]
+                if len(_geocode_hits) > MAX_GEOCODE_TRACKED_IPS:
+                    _geocode_hits.clear()
+
+            start, count = _geocode_hits.get(ip, (now, 0))
+            if now - start >= GEOCODE_RATE_WINDOW_SEC:
+                _geocode_hits[ip] = (now, 1)
+                return True
+            if count >= GEOCODE_RATE_LIMIT:
+                return False
+            _geocode_hits[ip] = (start, count + 1)
             return True
-        if count >= GEOCODE_RATE_LIMIT:
-            return False
-        _geocode_hits[ip] = (start, count + 1)
-        return True
 
     def handle_get_superchargers(self, query: Dict[str, list]):
         """Filter superchargers by bounds, search text, or radius."""
@@ -178,18 +194,39 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
 
             bounds = None
             if "min_lat" in query and "max_lat" in query and "min_lng" in query and "max_lng" in query:
+                min_lat = float(query["min_lat"][0])
+                max_lat = float(query["max_lat"][0])
+                min_lng = float(query["min_lng"][0])
+                max_lng = float(query["max_lng"][0])
+                if not (
+                    -90 <= min_lat <= 90
+                    and -90 <= max_lat <= 90
+                    and -180 <= min_lng <= 180
+                    and -180 <= max_lng <= 180
+                    and min_lat <= max_lat
+                ):
+                    self.send_json_response({"error": "Invalid bounds"}, status=400)
+                    return
                 bounds = {
-                    "min_lat": float(query["min_lat"][0]),
-                    "max_lat": float(query["max_lat"][0]),
-                    "min_lng": float(query["min_lng"][0]),
-                    "max_lng": float(query["max_lng"][0]),
+                    "min_lat": min_lat,
+                    "max_lat": max_lat,
+                    "min_lng": min_lng,
+                    "max_lng": max_lng,
                 }
 
             center_lat = float(query["lat"][0]) if "lat" in query else None
             center_lng = float(query["lng"][0]) if "lng" in query else None
+            if center_lat is not None and not -90 <= center_lat <= 90:
+                self.send_json_response({"error": "Invalid lat"}, status=400)
+                return
+            if center_lng is not None and not -180 <= center_lng <= 180:
+                self.send_json_response({"error": "Invalid lng"}, status=400)
+                return
             radius_km = float(query["radius_km"][0]) if "radius_km" in query else None
             if radius_km is not None:
                 radius_km = max(0.1, min(500.0, radius_km))
+
+            status = str(status)[:32]
 
             results = routing.query_superchargers(
                 bounds=bounds,
@@ -274,6 +311,29 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                 )
                 return
 
+            try:
+                origin_lat = float(origin[0])
+                origin_lng = float(origin[1])
+                dest_lat = float(destination[0])
+                dest_lng = float(destination[1])
+            except (TypeError, ValueError):
+                self.send_json_response(
+                    {"error": "Invalid origin or destination coordinates"},
+                    status=400,
+                )
+                return
+            if not (
+                -90 <= origin_lat <= 90
+                and -180 <= origin_lng <= 180
+                and -90 <= dest_lat <= 90
+                and -180 <= dest_lng <= 180
+            ):
+                self.send_json_response(
+                    {"error": "Origin or destination out of range"},
+                    status=400,
+                )
+                return
+
             initial_battery = _clamp_float(data.get("initial_battery", 90.0), 90.0, 0.0, 100.0)
             target_arrival = _clamp_float(data.get("target_arrival", 15.0), 15.0, 0.0, 100.0)
             max_range = _clamp_float(data.get("max_range_km", 450.0), 450.0, 50.0, 1000.0)
@@ -305,8 +365,8 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                 return
 
             plan = routing.plan_trip(
-                origin=(float(origin[0]), float(origin[1])),
-                destination=(float(destination[0]), float(destination[1])),
+                origin=(origin_lat, origin_lng),
+                destination=(dest_lat, dest_lng),
                 routing_mode=routing_mode,
                 forced_chargers=forced_chargers,
                 forced_charger_ids=forced_charger_ids,
@@ -350,8 +410,23 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                 )
                 return
 
+            cleaned: List[Any] = []
+            for pair in coords:
+                if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+                    continue
+                try:
+                    lng = float(pair[0])
+                    lat = float(pair[1])
+                except (TypeError, ValueError):
+                    continue
+                if -180 <= lng <= 180 and -90 <= lat <= 90:
+                    cleaned.append((lng, lat))
+            if not cleaned:
+                self.send_json_response({"error": "No valid coordinates provided"}, status=400)
+                return
+
             chargers = routing.find_superchargers_along_route(
-                coords, corridor_buffer_km=buffer_km, status_filter=status
+                cleaned, corridor_buffer_km=buffer_km, status_filter=status
             )
             # Cap response size
             if len(chargers) > MAX_SUPERCHARGER_LIMIT:
@@ -372,6 +447,8 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        # Allow removable modules: foliage (Explore Fall tiles) + airspace (FAA ArcGIS).
+        # Keep connect-src narrow — only same-origin APIs + FAA FeatureServers.
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; "
@@ -379,8 +456,8 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             "style-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
             "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:; "
             "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.tile.opentopomap.org "
-            "https://www.explorefall.com; "
-            "connect-src 'self'; "
+            "https://unpkg.com https://www.explorefall.com; "
+            "connect-src 'self' https://services6.arcgis.com; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
             "form-action 'self'",
