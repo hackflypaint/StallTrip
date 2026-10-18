@@ -6,17 +6,49 @@ Zero extra third-party dependencies: Built with Python's high performance standa
 
 import http.server
 import json
-import mimetypes
 import os
 import socketserver
 import sys
+import time
+import traceback
 import urllib.parse
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Tuple
 
 import routing
 
 PORT = int(os.environ.get("PORT", 8080))
-STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+STATIC_DIR = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"))
+
+# Request / response hardening limits
+MAX_BODY_BYTES = 256 * 1024  # 256 KiB
+MAX_SUPERCHARGER_LIMIT = 500
+DEFAULT_SUPERCHARGER_LIMIT = 250
+MAX_FORCED_CHARGERS = 100
+MAX_ROUTE_COORDINATES = 2000
+MAX_GEOCODE_QUERY_LEN = 200
+GEOCODE_RATE_LIMIT = 30  # requests
+GEOCODE_RATE_WINDOW_SEC = 60.0
+MAX_CORRIDOR_BUFFER_KM = 100.0
+
+# Simple in-memory geocode rate limiter: ip -> (window_start, count)
+_geocode_hits: Dict[str, Tuple[float, int]] = {}
+
+
+def _clamp_int(value: Any, default: int, lo: int, hi: int) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = default
+    return max(lo, min(hi, n))
+
+
+def _clamp_float(value: Any, default: float, lo: float, hi: float) -> float:
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        n = default
+    return max(lo, min(hi, n))
+
 
 class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
     """Handles static files and REST API endpoints for Tesla Supercharger planning."""
@@ -24,27 +56,38 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=STATIC_DIR, **kwargs)
 
+    def do_OPTIONS(self):
+        """CORS preflight for JSON POST APIs."""
+        self.send_response(204)
+        self._send_cors_headers()
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Max-Age", "600")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
 
-        # API Endpoints
         if path == "/api/superchargers":
             self.handle_get_superchargers(query)
             return
-        elif path == "/api/geocode":
+        if path == "/api/geocode":
             self.handle_geocode(query)
             return
-        elif path == "/api/stats":
+        if path == "/api/stats":
             self.handle_stats()
             return
-        elif path == "/api/health":
+        if path == "/api/health":
             self.send_json_response({"status": "healthy", "service": "Tesla Supercharger Route Planner"})
             return
+        if path.startswith("/api/"):
+            self.send_json_response({"error": "Endpoint not found"}, status=404)
+            return
 
-        # Default fallback to index.html for single page app root
-        if path == "/" or not os.path.exists(os.path.join(STATIC_DIR, path.lstrip("/"))):
+        # SPA fallback only for non-API GETs; path existence checked under STATIC_DIR only
+        if path == "/" or not self._static_file_exists(path):
             self.path = "/index.html"
 
         return super().do_GET()
@@ -56,20 +99,82 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/plan-route":
             self.handle_plan_route()
             return
-        elif path == "/api/find-along-route":
+        if path == "/api/find-along-route":
             self.handle_find_along_route()
             return
 
-        self.send_error(404, "Endpoint not found")
+        self.send_json_response({"error": "Endpoint not found"}, status=404)
+
+    def _static_file_exists(self, url_path: str) -> bool:
+        """True if url_path resolves to a real file under STATIC_DIR (no traversal)."""
+        rel = urllib.parse.unquote(url_path.lstrip("/"))
+        if not rel or ".." in rel.split("/"):
+            return False
+        candidate = os.path.realpath(os.path.join(STATIC_DIR, rel))
+        if candidate != STATIC_DIR and not candidate.startswith(STATIC_DIR + os.sep):
+            return False
+        return os.path.isfile(candidate)
+
+    def _read_json_body(self) -> Optional[Dict[str, Any]]:
+        """Read POST body with a hard size cap. Returns None and sends error on failure."""
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            self.send_json_response({"error": "Invalid Content-Length"}, status=400)
+            return None
+        if content_length < 0:
+            self.send_json_response({"error": "Invalid Content-Length"}, status=400)
+            return None
+        if content_length > MAX_BODY_BYTES:
+            self.send_json_response(
+                {"error": f"Request body too large (max {MAX_BODY_BYTES} bytes)"},
+                status=413,
+            )
+            return None
+        raw = self.rfile.read(content_length)
+        if not raw:
+            self.send_json_response({"error": "Empty request body"}, status=400)
+            return None
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self.send_json_response({"error": "Invalid JSON body"}, status=400)
+            return None
+        if not isinstance(data, dict):
+            self.send_json_response({"error": "JSON body must be an object"}, status=400)
+            return None
+        return data
+
+    def _client_ip(self) -> str:
+        return self.client_address[0] if self.client_address else "unknown"
+
+    def _geocode_allowed(self) -> bool:
+        now = time.monotonic()
+        ip = self._client_ip()
+        start, count = _geocode_hits.get(ip, (now, 0))
+        if now - start >= GEOCODE_RATE_WINDOW_SEC:
+            _geocode_hits[ip] = (now, 1)
+            return True
+        if count >= GEOCODE_RATE_LIMIT:
+            return False
+        _geocode_hits[ip] = (start, count + 1)
+        return True
 
     def handle_get_superchargers(self, query: Dict[str, list]):
         """Filter superchargers by bounds, search text, or radius."""
         try:
             status = query.get("status", ["OPEN"])[0]
-            limit = int(query.get("limit", [250])[0])
-            min_power = int(query.get("min_power", [0])[0]) if "min_power" in query else None
-            min_stalls = int(query.get("min_stalls", [0])[0]) if "min_stalls" in query else None
+            limit = _clamp_int(
+                query.get("limit", [DEFAULT_SUPERCHARGER_LIMIT])[0],
+                DEFAULT_SUPERCHARGER_LIMIT,
+                1,
+                MAX_SUPERCHARGER_LIMIT,
+            )
+            min_power = _clamp_int(query["min_power"][0], 0, 0, 1000) if "min_power" in query else None
+            min_stalls = _clamp_int(query["min_stalls"][0], 0, 0, 200) if "min_stalls" in query else None
             query_text = query.get("q", [None])[0]
+            if isinstance(query_text, str) and len(query_text) > MAX_GEOCODE_QUERY_LEN:
+                query_text = query_text[:MAX_GEOCODE_QUERY_LEN]
 
             bounds = None
             if "min_lat" in query and "max_lat" in query and "min_lng" in query and "max_lng" in query:
@@ -77,12 +182,14 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "min_lat": float(query["min_lat"][0]),
                     "max_lat": float(query["max_lat"][0]),
                     "min_lng": float(query["min_lng"][0]),
-                    "max_lng": float(query["max_lng"][0])
+                    "max_lng": float(query["max_lng"][0]),
                 }
 
             center_lat = float(query["lat"][0]) if "lat" in query else None
             center_lng = float(query["lng"][0]) if "lng" in query else None
             radius_km = float(query["radius_km"][0]) if "radius_km" in query else None
+            if radius_km is not None:
+                radius_km = max(0.1, min(500.0, radius_km))
 
             results = routing.query_superchargers(
                 bounds=bounds,
@@ -93,28 +200,43 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                 status_filter=status,
                 min_power=min_power,
                 min_stalls=min_stalls,
-                limit=limit
+                limit=limit,
             )
 
             self.send_json_response({
                 "count": len(results),
-                "superchargers": results
+                "superchargers": results,
             })
-        except Exception as e:
-            self.send_json_response({"error": str(e)}, status=400)
+        except Exception:
+            traceback.print_exc()
+            self.send_json_response({"error": "Invalid query parameters"}, status=400)
 
     def handle_geocode(self, query: Dict[str, list]):
         """Geocode query string to GPS coordinates."""
+        if not self._geocode_allowed():
+            self.send_json_response(
+                {"error": "Geocode rate limit exceeded", "results": []},
+                status=429,
+            )
+            return
+
         q = query.get("q", [""])[0].strip()
         if not q:
             self.send_json_response({"results": []})
+            return
+        if len(q) > MAX_GEOCODE_QUERY_LEN:
+            self.send_json_response(
+                {"error": "Query too long", "results": []},
+                status=400,
+            )
             return
 
         try:
             results = routing.geocode_address(q)
             self.send_json_response({"results": results})
-        except Exception as e:
-            self.send_json_response({"error": f"Geocoding failed: {e}", "results": []}, status=500)
+        except Exception:
+            traceback.print_exc()
+            self.send_json_response({"error": "Geocoding failed", "results": []}, status=500)
 
     def handle_stats(self):
         """Return dataset statistics."""
@@ -123,37 +245,64 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         powers = [c.get("power", 0) for c in chargers if c.get("power")]
         max_power = max(powers) if powers else 0
         countries = len(set(c.get("country") for c in chargers if c.get("country")))
-        
+
         self.send_json_response({
             "total_superchargers": len(chargers),
             "open_superchargers": open_count,
             "max_power_kw": max_power,
-            "countries_covered": countries
+            "countries_covered": countries,
         })
 
     def handle_plan_route(self):
         """Calculate optimal route and charging stops."""
-        try:
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length).decode("utf-8")
-            data = json.loads(body)
+        data = self._read_json_body()
+        if data is None:
+            return
 
-            origin = data.get("origin")          # [lat, lng]
-            destination = data.get("destination") # [lat, lng]
-            if not origin or not destination:
-                self.send_json_response({"error": "Missing origin or destination coordinates"}, status=400)
+        try:
+            origin = data.get("origin")
+            destination = data.get("destination")
+            if (
+                not isinstance(origin, (list, tuple))
+                or not isinstance(destination, (list, tuple))
+                or len(origin) < 2
+                or len(destination) < 2
+            ):
+                self.send_json_response(
+                    {"error": "Missing origin or destination coordinates"},
+                    status=400,
+                )
                 return
 
-            initial_battery = float(data.get("initial_battery", 90.0))
-            target_arrival = float(data.get("target_arrival", 15.0))
-            max_range = float(data.get("max_range_km", 450.0))
-            corridor_buffer = float(data.get("corridor_buffer_km", 30.0))
-            min_power = int(data.get("min_power", 0))
-            routing_mode = str(data.get("routing_mode", "MAXIMIZE"))
-            # Ceiling matches UI max corridor stops (Rally / Safari)
-            max_stops = max(1, min(50, int(data.get("max_stops", 20))))
+            initial_battery = _clamp_float(data.get("initial_battery", 90.0), 90.0, 0.0, 100.0)
+            target_arrival = _clamp_float(data.get("target_arrival", 15.0), 15.0, 0.0, 100.0)
+            max_range = _clamp_float(data.get("max_range_km", 450.0), 450.0, 50.0, 1000.0)
+            corridor_buffer = _clamp_float(
+                data.get("corridor_buffer_km", 30.0), 30.0, 1.0, MAX_CORRIDOR_BUFFER_KM
+            )
+            min_power = _clamp_int(data.get("min_power", 0), 0, 0, 1000)
+            routing_mode = str(data.get("routing_mode", "MAXIMIZE"))[:32]
+            max_stops = _clamp_int(data.get("max_stops", 20), 20, 1, 50)
+
             forced_chargers = data.get("forced_chargers", [])
+            if not isinstance(forced_chargers, list):
+                forced_chargers = []
+            if len(forced_chargers) > MAX_FORCED_CHARGERS:
+                self.send_json_response(
+                    {"error": f"Too many forced_chargers (max {MAX_FORCED_CHARGERS})"},
+                    status=400,
+                )
+                return
+
             forced_charger_ids = data.get("forced_charger_ids", [])
+            if not isinstance(forced_charger_ids, list):
+                forced_charger_ids = []
+            if len(forced_charger_ids) > MAX_FORCED_CHARGERS:
+                self.send_json_response(
+                    {"error": f"Too many forced_charger_ids (max {MAX_FORCED_CHARGERS})"},
+                    status=400,
+                )
+                return
 
             plan = routing.plan_trip(
                 origin=(float(origin[0]), float(origin[1])),
@@ -166,69 +315,114 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                 target_arrival_pct=target_arrival,
                 max_range_km=max_range,
                 corridor_buffer_km=corridor_buffer,
-                min_power=min_power
+                min_power=min_power,
             )
 
             self.send_json_response(plan)
-        except Exception as e:
-            import traceback
+        except ValueError as e:
+            # Domain validation (e.g. no route) — safe short message
+            msg = str(e)
+            if len(msg) > 200:
+                msg = "Unable to plan route"
+            self.send_json_response({"error": msg}, status=400)
+        except Exception:
             traceback.print_exc()
-            self.send_json_response({"error": str(e)}, status=500)
+            self.send_json_response({"error": "Route planning failed"}, status=500)
 
     def handle_find_along_route(self):
         """Find chargers along provided GeoJSON or coordinate list."""
+        data = self._read_json_body()
+        if data is None:
+            return
+
         try:
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length).decode("utf-8")
-            data = json.loads(body)
+            coords = data.get("coordinates")
+            buffer_km = _clamp_float(data.get("buffer_km", 25.0), 25.0, 1.0, MAX_CORRIDOR_BUFFER_KM)
+            status = str(data.get("status", "OPEN"))[:32]
 
-            coords = data.get("coordinates") # List of [lng, lat]
-            buffer_km = float(data.get("buffer_km", 25.0))
-            status = data.get("status", "OPEN")
-
-            if not coords:
+            if not isinstance(coords, list) or not coords:
                 self.send_json_response({"error": "No coordinates provided"}, status=400)
                 return
+            if len(coords) > MAX_ROUTE_COORDINATES:
+                self.send_json_response(
+                    {"error": f"Too many coordinates (max {MAX_ROUTE_COORDINATES})"},
+                    status=400,
+                )
+                return
 
-            chargers = routing.find_superchargers_along_route(coords, corridor_buffer_km=buffer_km, status_filter=status)
+            chargers = routing.find_superchargers_along_route(
+                coords, corridor_buffer_km=buffer_km, status_filter=status
+            )
+            # Cap response size
+            if len(chargers) > MAX_SUPERCHARGER_LIMIT:
+                chargers = chargers[:MAX_SUPERCHARGER_LIMIT]
             self.send_json_response({
                 "count": len(chargers),
-                "superchargers": chargers
+                "superchargers": chargers,
             })
-        except Exception as e:
-            self.send_json_response({"error": str(e)}, status=500)
+        except Exception:
+            traceback.print_exc()
+            self.send_json_response({"error": "Corridor search failed"}, status=500)
+
+    def _send_cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def _send_security_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "script-src 'self' https://unpkg.com; "
+            "style-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
+            "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:; "
+            "img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.tile.opentopomap.org "
+            "https://www.explorefall.com; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'",
+        )
+        self.send_header(
+            "Permissions-Policy",
+            "geolocation=(self), camera=(), microphone=(), payment=()",
+        )
 
     def send_json_response(self, data: Any, status: int = 200):
         body = json.dumps(data).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self._send_cors_headers()
         self.end_headers()
         self.wfile.write(body)
 
     def end_headers(self):
-        # Disable cache for rapid dev
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self._send_security_headers()
         super().end_headers()
+
 
 def run_server(port: int = PORT):
     # Pre-load dataset
     routing.load_superchargers()
-    
-    class ReusableTCPServer(socketserver.TCPServer):
-        allow_reuse_address = True
 
-    with ReusableTCPServer(("", port), SuperchargerRequestHandler) as httpd:
-        print(f"============================================================")
+    class ThreadedReusableServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
+    with ThreadedReusableServer(("", port), SuperchargerRequestHandler) as httpd:
+        print("============================================================")
         print(f"  Tesla Supercharger Route Planner running on port {port}")
         print(f"  Open http://localhost:{port} in your browser")
-        print(f"============================================================")
+        print("============================================================")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
             print("\nShutting down server.")
+
 
 if __name__ == "__main__":
     port_arg = int(sys.argv[1]) if len(sys.argv) > 1 else PORT

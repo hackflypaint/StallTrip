@@ -37,6 +37,17 @@ const state = {
 // Expose for Playwright / debugging (cloud verification)
 window.appState = state;
 
+
+/** Escape text for safe interpolation into HTML / Leaflet popups. */
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // Initialize Application
 document.addEventListener("DOMContentLoaded", () => {
   initMap();
@@ -687,7 +698,7 @@ function updateForcedChargersUI() {
       opacity: 1.0,
       fillOpacity: 0.9,
     });
-    forcedMarker.bindTooltip(`⭐ <b>FORCE-INCLUDED:</b> ${c.name}<br>${c.power || 250} kW • ${c.stalls || 8} stalls`, {
+    forcedMarker.bindTooltip(`⭐ <b>FORCE-INCLUDED:</b> ${escapeHtml(c.name)}<br>${escapeHtml(c.power || 250)} kW • ${escapeHtml(c.stalls || 8)} stalls`, {
       direction: "top",
       offset: [0, -8],
     });
@@ -801,7 +812,7 @@ function setupAutocomplete(inputId, suggestionsId, onSelect) {
           data.results.forEach((item) => {
             const el = document.createElement("div");
             el.className = "suggestion-item";
-            el.innerHTML = `<i class="fa-solid fa-location-dot"></i><span>${item.name}</span>`;
+            el.innerHTML = `<i class="fa-solid fa-location-dot"></i><span>${escapeHtml(item.name)}</span>`;
             el.addEventListener("click", () => {
               input.value = item.name;
               list.style.display = "none";
@@ -851,7 +862,7 @@ function updateMapMarkers() {
       iconAnchor: [14, 14],
     });
     const marker = L.marker([state.origin.lat, state.origin.lng], { icon: origIcon })
-      .bindPopup(`<b>Starting Location</b><br>${state.origin.name}`);
+      .bindPopup(`<b>Starting Location</b><br>${escapeHtml(state.origin.name)}`);
     state.markersLayer.addLayer(marker);
   }
 
@@ -863,7 +874,7 @@ function updateMapMarkers() {
       iconAnchor: [14, 14],
     });
     const marker = L.marker([state.destination.lat, state.destination.lng], { icon: destIcon })
-      .bindPopup(`<b>Destination</b><br>${state.destination.name}`);
+      .bindPopup(`<b>Destination</b><br>${escapeHtml(state.destination.name)}`);
     state.markersLayer.addLayer(marker);
   }
 
@@ -985,7 +996,7 @@ function renderRoutePlan(plan) {
         fillOpacity: 0.8,
       });
 
-      circle.bindTooltip(`<b>${c.name}</b><br>${c.power} kW • ${c.stalls} stalls<br>Detour: ${c.detour_miles} mi`, {
+      circle.bindTooltip(`<b>${escapeHtml(c.name)}</b><br>${escapeHtml(c.power)} kW • ${escapeHtml(c.stalls)} stalls<br>Detour: ${escapeHtml(c.detour_miles)} mi`, {
         direction: "top",
         offset: [0, -5],
       });
@@ -1016,7 +1027,7 @@ function renderRoutePlan(plan) {
       const marker = L.marker([stop.lat, stop.lng], { icon: stopIcon, zIndexOffset: isForced ? 600 : 500 });
       marker.bindPopup(`
         <div style="min-width:180px;">
-          <h4 style="margin:0 0 4px 0; color:${markerColor};">${isForced ? '⭐ [FORCED] ' : ''}Stop #${stop.stop_index}: ${stop.name}</h4>
+          <h4 style="margin:0 0 4px 0; color:${markerColor};">${isForced ? '⭐ [FORCED] ' : ''}Stop #${escapeHtml(stop.stop_index)}: ${escapeHtml(stop.name)}</h4>
           <p style="margin:2px 0; font-size:12px;"><b>Power:</b> ${stop.power} kW (${stop.stalls} stalls)</p>
           <p style="margin:2px 0; font-size:12px;"><b>Arrive:</b> ${stop.arrival_battery_pct}% &rarr; <b>Leave:</b> ${stop.departure_battery_pct}%</p>
           <p style="margin:2px 0; font-size:12px; color:#10b981;"><b>Charge time:</b> ${stop.charge_duration_min} min</p>
@@ -1044,7 +1055,7 @@ function renderTimeline(stops) {
         <div class="timeline-marker"><i class="fa-solid fa-play"></i></div>
         <div class="timeline-content">
           <div class="item-top">
-            <span class="item-name">${state.origin.name}</span>
+            <span class="item-name">${escapeHtml(state.origin.name)}</span>
             <span class="item-badge" style="background:rgba(16,185,129,0.15); color:var(--accent-green);"><i class="fa-solid fa-battery-full"></i> ${s.battery_pct}%</span>
           </div>
           <div class="item-details">
@@ -1061,7 +1072,7 @@ function renderTimeline(stops) {
         <div class="timeline-marker"><i class="fa-solid fa-flag-checkered"></i></div>
         <div class="timeline-content">
           <div class="item-top">
-            <span class="item-name">${state.destination.name}</span>
+            <span class="item-name">${escapeHtml(state.destination.name)}</span>
             <span class="item-badge" style="background:rgba(232,33,39,0.15); color:var(--tesla-red);"><i class="fa-solid fa-battery-half"></i> ~${s.battery_pct}%</span>
           </div>
           <div class="item-details">
@@ -1079,7 +1090,7 @@ function renderTimeline(stops) {
         <div class="timeline-marker">${isForced ? '<i class="fa-solid fa-star"></i>' : s.stop_index}</div>
         <div class="timeline-content">
           <div class="item-top">
-            <span class="item-name">${s.name}</span>
+            <span class="item-name">${escapeHtml(s.name)}</span>
             <span class="item-badge ${isForced ? 'badge-forced' : 'badge-charge'}">
               ${isForced ? '⭐ FORCED STOP' : `<i class="fa-solid fa-bolt"></i> +${s.charge_duration_min} min`}
             </span>
@@ -1130,7 +1141,7 @@ function showChargerDrawer(c) {
   const amenitiesContainer = document.getElementById("drawerAmenities");
   amenitiesContainer.innerHTML = "";
   if (c.facility) {
-    amenitiesContainer.innerHTML += `<span class="chip"><i class="fa-solid fa-store"></i> ${c.facility}</span>`;
+    amenitiesContainer.innerHTML += `<span class="chip"><i class="fa-solid fa-store"></i> ${escapeHtml(c.facility)}</span>`;
   }
   if (c.solar) {
     amenitiesContainer.innerHTML += `<span class="chip green"><i class="fa-solid fa-solar-panel"></i> Solar Canopy</span>`;
@@ -1224,11 +1235,11 @@ function renderExploreList(chargers) {
     card.className = "charger-list-item";
     card.innerHTML = `
       <div class="charger-list-title">
-        <span>${isForced ? '⭐ ' : ''}${c.name}</span>
-        <span class="chip ${c.status === 'OPEN' ? 'green' : 'red'}">${c.status}</span>
+        <span>${isForced ? '⭐ ' : ''}${escapeHtml(c.name)}</span>
+        <span class="chip ${c.status === 'OPEN' ? 'green' : 'red'}">${escapeHtml(c.status)}</span>
       </div>
       <div class="charger-list-sub">
-        ${[c.street, c.city, c.state].filter(Boolean).join(", ")}
+        ${escapeHtml([c.street, c.city, c.state].filter(Boolean).join(", "))}
       </div>
       <div class="charger-list-tags">
         <span class="chip red"><i class="fa-solid fa-bolt"></i> ${c.power || 150} kW</span>

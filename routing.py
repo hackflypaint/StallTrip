@@ -684,17 +684,50 @@ def plan_trip(
     # Clamp corridor stop budget to the same ceiling as the UI (1–50)
     max_stops = max(1, min(50, int(max_stops)))
 
-    # 1. Resolve forced chargers from IDs or objects
+    # 1. Resolve forced chargers from IDs or objects (cap + coerce ID types)
+    MAX_FORCED = 100
     resolved_forced: List[Dict[str, Any]] = []
+    seen_forced_ids: Set[Any] = set()
+
     if forced_chargers:
-        for fc in forced_chargers:
-            if isinstance(fc, dict) and "lat" in fc and "lng" in fc:
-                resolved_forced.append(fc)
+        for fc in forced_chargers[:MAX_FORCED]:
+            if not isinstance(fc, dict) or "lat" not in fc or "lng" not in fc:
+                continue
+            try:
+                lat = float(fc["lat"])
+                lng = float(fc["lng"])
+            except (TypeError, ValueError):
+                continue
+            if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                continue
+            entry = dict(fc)
+            entry["lat"] = lat
+            entry["lng"] = lng
+            fid = entry.get("id")
+            if fid is not None:
+                try:
+                    fid = int(fid)
+                    entry["id"] = fid
+                except (TypeError, ValueError):
+                    fid = None
+            if fid is not None:
+                if fid in seen_forced_ids:
+                    continue
+                seen_forced_ids.add(fid)
+            resolved_forced.append(entry)
 
     if forced_charger_ids:
-        for cid in forced_charger_ids:
-            if cid in SUPERCHARGERS_BY_ID and SUPERCHARGERS_BY_ID[cid] not in resolved_forced:
-                resolved_forced.append(SUPERCHARGERS_BY_ID[cid])
+        for raw_cid in forced_charger_ids[:MAX_FORCED]:
+            try:
+                cid = int(raw_cid)
+            except (TypeError, ValueError):
+                continue
+            if cid in seen_forced_ids:
+                continue
+            charger = SUPERCHARGERS_BY_ID.get(cid)
+            if charger:
+                seen_forced_ids.add(cid)
+                resolved_forced.append(charger)
 
     # 2. Baseline direct route
     initial_route_res = get_osrm_route([(orig_lng, orig_lat), (dest_lng, dest_lat)], overview="full")
@@ -839,7 +872,8 @@ def plan_trip(
         },
         "geometry": active_route["geometry"],
         "stops": stops_summary,
-        "all_corridor_chargers": corridor_chargers
+        # Cap corridor payload to limit JSON / map marker DoS
+        "all_corridor_chargers": corridor_chargers[:500],
     }
 
 def format_duration(seconds: float) -> str:
