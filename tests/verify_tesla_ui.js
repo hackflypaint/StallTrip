@@ -118,7 +118,13 @@ async function runProfile(browser, profile) {
   await page.waitForSelector("body.car-shell", { timeout: 8000 });
   await page.waitForSelector('body[data-sheet="peek"]', { timeout: 5000 });
   await page.waitForSelector("#carModeBadge", { state: "visible", timeout: 5000 });
-  await page.waitForSelector("#carPresetRow .preset-tag", { timeout: 5000 });
+  // Peek bar has Route | Explore tabs (not suggested-route chips)
+  await page.waitForSelector("#carPeekTabs #btnCarTabRoute", { state: "visible", timeout: 5000 });
+  await page.waitForSelector("#carPeekTabs #btnCarTabExplore", { state: "visible", timeout: 5000 });
+  const hasPresetChips = await page.locator("#carPresetRow").count();
+  if (hasPresetChips > 0) {
+    throw new Error("carPresetRow must be removed from peek — tabs replace chips");
+  }
 
   const onTeslaPath = await page.evaluate(() => {
     try {
@@ -176,22 +182,21 @@ async function runProfile(browser, profile) {
   if (headerVisible) {
     throw new Error("sidebar-header still visible in car peek — not compressed");
   }
-  const tabsVisible = await page.locator(".tabs").isVisible().catch(() => false);
-  if (tabsVisible) {
-    throw new Error("tabs still visible in car peek — should be route-only");
+  // Sidebar .tabs hidden — peek bar owns Route | Explore
+  const sidebarTabsVisible = await page.locator(".sidebar > .tabs").isVisible().catch(() => false);
+  if (sidebarTabsVisible) {
+    throw new Error("sidebar .tabs should be hidden — peek tabs own that space");
   }
 
-  await shot("01_load_peek");
+  await shot("01_load_peek_tabs");
 
-  console.log("1b. Expand sheet peek → half → full...");
+  console.log("1b. Expand via peek Route tab → half → full...");
   const peekH = sheetH;
-  await page.locator("#btnCarSheetHandle").click({ force: true });
+  await page.locator("#btnCarTabRoute").click({ force: true });
   await page.waitForSelector('body[data-sheet="plan"]', { timeout: 5000 });
-  // Tabs (not brand) own the top of the expanded sheet
-  await page.waitForSelector(".tabs", { state: "visible", timeout: 5000 });
+  await page.waitForSelector("#originInput", { state: "visible", timeout: 5000 });
   const brandGone = !(await page.locator(".sidebar-header").isVisible().catch(() => false));
   if (!brandGone) throw new Error("sidebar-header must stay hidden when sheet expands");
-  await page.waitForSelector("#originInput", { state: "visible", timeout: 5000 });
   // Poll height (CSP blocks waitForFunction predicates)
   let halfH = peekH;
   for (let i = 0; i < 20; i++) {
@@ -217,6 +222,21 @@ async function runProfile(browser, profile) {
   await shot("01c_full_sheet");
   await page.locator("#btnCarSheetHandle").click({ force: true });
   await page.waitForSelector('body[data-sheet="peek"]', { timeout: 5000 });
+
+  console.log("1b2. Map tap dismisses chrome; Plan FAB restores...");
+  await page.locator("#map").click({ position: { x: 120, y: 120 } });
+  await page.waitForSelector("body.car-chrome-hidden", { timeout: 5000 });
+  await page.waitForSelector("#btnCarShowSheet:not([hidden])", { timeout: 5000 });
+  const sheetHidden = await page.locator("#sidebar").evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return r.height < 2 || getComputedStyle(el).display === "none";
+  });
+  if (!sheetHidden) throw new Error("sidebar still visible after map-tap dismiss");
+  await shot("01e_map_dismissed");
+  await page.locator("#btnCarShowSheet").click({ force: true });
+  await page.waitForSelector("body.car-shell:not(.car-chrome-hidden)", { timeout: 5000 });
+  await page.waitForSelector('body[data-sheet="peek"]', { timeout: 5000 });
+  await page.waitForSelector("#carPeekTabs", { state: "visible", timeout: 5000 });
 
   console.log("1c. Live follow locate (mock GPS → follow → stop)...");
   // Client-side only: Playwright grants geo; SPA uses watchPosition (no server proxy).
@@ -249,8 +269,10 @@ async function runProfile(browser, profile) {
     await sleep(200);
   }
 
-  console.log("2. Preset SF → LA...");
-  await page.locator('#carPresetRow .preset-tag:has-text("SF→LA")').tap();
+  console.log("2. Edit → SF→LA preset in plan form...");
+  await page.locator("#btnCarSheetPlan").click({ force: true });
+  await page.waitForSelector('body[data-sheet="plan"]', { timeout: 5000 });
+  await page.locator('#route-tab .preset-tag:has-text("SF → LA")').tap();
   await page.waitForSelector("html[data-plan-stops]", { timeout: 45000 });
   await page.waitForSelector('body[data-sheet="peek"]', { timeout: 8000 });
   const stops = parseInt((await page.getAttribute("html", "data-plan-stops")) || "0", 10);

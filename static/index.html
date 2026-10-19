@@ -55,14 +55,17 @@
           <div class="car-peek-brand">
             <div class="car-peek-text">
               <strong><span class="car-mode-chip" id="carModeChip" title="Car layout active">CAR</span></strong>
-              <span class="car-peek-summary" id="carPeekSummary">Preset</span>
+              <span class="car-peek-summary" id="carPeekSummary">Tap map to hide</span>
             </div>
           </div>
-          <div class="car-preset-row" id="carPresetRow" role="group" aria-label="Popular routes">
-            <button type="button" class="preset-tag" data-orig="San Francisco, CA" data-dest="Los Angeles, CA">SF→LA</button>
-            <button type="button" class="preset-tag" data-orig="Los Angeles, CA" data-dest="Las Vegas, NV">LA→Vegas</button>
-            <button type="button" class="preset-tag" data-orig="New York, NY" data-dest="Washington, DC">NYC→DC</button>
-            <button type="button" class="preset-tag" data-orig="Seattle, WA" data-dest="Portland, OR">SEA→PDX</button>
+          <!-- Peek tabs replace suggested-route chips (2026-10-18) -->
+          <div class="car-peek-tabs" id="carPeekTabs" role="tablist" aria-label="Planner sections">
+            <button type="button" class="car-peek-tab active" id="btnCarTabRoute" role="tab" aria-selected="true" data-tab="route-tab">
+              <i class="fa-solid fa-route" aria-hidden="true"></i> Route
+            </button>
+            <button type="button" class="car-peek-tab" id="btnCarTabExplore" role="tab" aria-selected="false" data-tab="explore-tab">
+              <i class="fa-solid fa-magnifying-glass-location" aria-hidden="true"></i> Explore
+            </button>
           </div>
           <div class="car-peek-actions">
             <button type="button" class="car-peek-btn car-peek-locate" id="btnCarSheetLocate"
@@ -369,6 +372,13 @@
           <span>Replan from here</span>
         </button>
       </div>
+
+      <!-- Shown when map tap hid the bottom chrome — restore peek -->
+      <button type="button" class="car-show-sheet" id="btnCarShowSheet" hidden
+        aria-label="Show planner" title="Show planner">
+        <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
+        <span>Plan</span>
+      </button>
 
       <!-- Map Floating Controls & Overlays -->
       <div class="map-floating-bar">

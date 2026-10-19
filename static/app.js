@@ -60,6 +60,8 @@ const state = {
   carShell: false,
   /** peek | plan | itinerary — default peek so map dominates on load */
   sheetMode: "peek",
+  /** Map tap hid the bottom chrome (full-bleed map + Plan FAB). */
+  carChromeHidden: false,
   /**
    * Client-side live location (browser Geolocation only — never POSTed to our server).
    * Shared by /mobile, /tesla, and desktop SPA.
@@ -378,6 +380,9 @@ function setupCarShell() {
   const planBtn = document.getElementById("btnCarSheetPlan");
   const itinBtn = document.getElementById("btnCarSheetItinerary");
   const locateBtn = document.getElementById("btnCarSheetLocate");
+  const showSheetBtn = document.getElementById("btnCarShowSheet");
+  const peekRoute = document.getElementById("btnCarTabRoute");
+  const peekExplore = document.getElementById("btnCarTabExplore");
   if (handle) {
     // Tap/drag owned by setupCarSheetDrag (pointer events). Click is a fallback
     // for keyboard / non-pointer activation only.
@@ -387,22 +392,88 @@ function setupCarShell() {
         e.preventDefault();
         return;
       }
+      setCarChromeHidden(false);
       cycleCarSheet();
     });
     setupCarSheetDrag(handle);
   }
   if (planBtn) {
-    planBtn.addEventListener("click", () => setCarSheet("plan"));
+    planBtn.addEventListener("click", () => {
+      setCarChromeHidden(false);
+      switchTab("route-tab");
+      syncCarPeekTabs("route-tab");
+      setCarSheet("plan");
+    });
   }
   if (itinBtn) {
     itinBtn.addEventListener("click", () => {
+      setCarChromeHidden(false);
+      switchTab("route-tab");
+      syncCarPeekTabs("route-tab");
       setCarSheet("itinerary");
     });
   }
   if (locateBtn) {
     locateBtn.addEventListener("click", () => toggleLiveLocation());
   }
+  if (showSheetBtn) {
+    showSheetBtn.addEventListener("click", () => {
+      setCarChromeHidden(false);
+      setCarSheet("peek");
+    });
+  }
+  if (peekRoute) {
+    peekRoute.addEventListener("click", () => activateCarPeekTab("route-tab"));
+  }
+  if (peekExplore) {
+    peekExplore.addEventListener("click", () => activateCarPeekTab("explore-tab"));
+  }
 }
+
+/** Peek bar Route | Explore — expand sheet and show that panel. */
+function activateCarPeekTab(tabId) {
+  if (!state.carShell) return;
+  setCarChromeHidden(false);
+  switchTab(tabId);
+  syncCarPeekTabs(tabId);
+  if (tabId === "explore-tab") {
+    scheduleLoadMapBoundsChargers(0);
+  }
+  if (state.sheetMode === "peek") {
+    setCarSheet("plan");
+  }
+}
+
+function syncCarPeekTabs(tabId) {
+  const routeBtn = document.getElementById("btnCarTabRoute");
+  const exploreBtn = document.getElementById("btnCarTabExplore");
+  const isRoute = tabId === "route-tab";
+  if (routeBtn) {
+    routeBtn.classList.toggle("active", isRoute);
+    routeBtn.setAttribute("aria-selected", isRoute ? "true" : "false");
+  }
+  if (exploreBtn) {
+    exploreBtn.classList.toggle("active", !isRoute);
+    exploreBtn.setAttribute("aria-selected", !isRoute ? "true" : "false");
+  }
+}
+
+/** Hide/show bottom chrome after map tap. Leaflet click does not fire after a pan/drag. */
+function setCarChromeHidden(hidden) {
+  if (!state.carShell && hidden) return;
+  state.carChromeHidden = !!hidden;
+  document.body.classList.toggle("car-chrome-hidden", state.carChromeHidden);
+  const fab = document.getElementById("btnCarShowSheet");
+  if (fab) {
+    if (state.carChromeHidden) fab.removeAttribute("hidden");
+    else fab.setAttribute("hidden", "");
+  }
+  requestAnimationFrame(() => {
+    if (state.map) state.map.invalidateSize({ animate: false });
+  });
+}
+
+window.setCarChromeHidden = setCarChromeHidden;
 
 /**
  * Drag the sheet handle: swipe up expands (peek→half→full), down collapses.
@@ -471,10 +542,15 @@ function applyCarShell() {
   if (enable) {
     if (!was) setCarSheet("peek");
     else setCarSheet(state.sheetMode || "peek");
+    syncCarPeekTabs("route-tab");
   } else {
+    state.carChromeHidden = false;
+    document.body.classList.remove("car-chrome-hidden");
     document.body.removeAttribute("data-sheet");
     document.documentElement.removeAttribute("data-plan-stops");
     document.documentElement.removeAttribute("data-forced-count");
+    const fab = document.getElementById("btnCarShowSheet");
+    if (fab) fab.setAttribute("hidden", "");
   }
   syncCarTestHooks();
   requestAnimationFrame(() => {
@@ -494,11 +570,13 @@ function syncCarTestHooks() {
 
 function setCarSheet(mode) {
   if (!state.carShell) return;
+  setCarChromeHidden(false);
   const next = mode === "peek" || mode === "plan" || mode === "itinerary" ? mode : "peek";
   state.sheetMode = next;
   document.body.setAttribute("data-sheet", next);
-  if (next === "plan" || next === "itinerary") {
+  if (next === "itinerary") {
     switchTab("route-tab");
+    syncCarPeekTabs("route-tab");
   }
   if (next === "itinerary" && state.activePlan) {
     const results = document.getElementById("routeResults");
@@ -537,7 +615,7 @@ function updateCarPeek() {
     } else if (state.origin) {
       summary.textContent = "Set destination";
     } else {
-      summary.textContent = "Tap a preset";
+      summary.textContent = "Tap map to hide";
     }
   }
   if (itinBtn) itinBtn.hidden = !(state.activePlan && state.activePlan.summary);
@@ -626,9 +704,15 @@ function initMap() {
 
   setupLiveLocationLifecycle();
 
-  // Map click handler for origin/destination when not in area selection mode
+  // Map click: car shell → hide bottom chrome (Leaflet skips click after pan/drag).
+  // When chrome already hidden, same tap sets origin/destination as before.
   state.map.on("click", (e) => {
     if (state.areaSelectMode) return;
+
+    if (state.carShell && !state.carChromeHidden) {
+      setCarChromeHidden(true);
+      return;
+    }
 
     if (!state.origin) {
       setOrigin({

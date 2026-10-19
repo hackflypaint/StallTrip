@@ -203,7 +203,9 @@ async function main() {
     console.log("4. Verifying Tesla Car Shell (/tesla) & Mobile Shell (/mobile) responsiveness...");
     await page.setViewportSize({ width: 773, height: 601 });
     await page.goto(`${BASE_URL}/tesla`, { waitUntil: "networkidle", timeout: 20000 });
-    await page.locator('#carPresetRow button.preset-tag[data-orig="San Francisco, CA"]').click();
+    await page.locator("#btnCarSheetPlan").click();
+    await page.waitForSelector('body[data-sheet="plan"]', { timeout: 5000 });
+    await page.locator('#route-tab button.preset-tag[data-orig="San Francisco, CA"]').click();
     await page.waitForTimeout(3500);
     const teslaShot = path.join(ARTIFACTS_DIR, "weather_wind_tesla_car.png");
     await page.screenshot({ path: teslaShot, fullPage: false });

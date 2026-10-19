@@ -543,7 +543,9 @@ async function runVerification() {
         return 77;
       };
     });
-    await page.locator('#carPresetRow .preset-tag:has-text("SF→LA")').click();
+    await page.locator('#btnCarSheetPlan').click();
+    await page.waitForSelector('body[data-sheet="plan"]', { timeout: 5000 });
+    await page.locator('#route-tab .preset-tag:has-text("SF → LA")').click();
     await page.waitForSelector('#elevationStrip:not([hidden])', { state: 'visible', timeout: 25000 });
     await page.waitForSelector('#mapWeatherPill:not([hidden])', { state: 'visible', timeout: 20000 });
     await page.locator('#btnLocateMe').click();

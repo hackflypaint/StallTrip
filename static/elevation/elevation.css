@@ -319,7 +319,8 @@ body.car-shell .elevation-strip {
 }
 
 body.car-shell[data-sheet="plan"] .elevation-strip,
-body.car-shell[data-sheet="itinerary"] .elevation-strip {
+body.car-shell[data-sheet="itinerary"] .elevation-strip,
+body.car-shell.car-chrome-hidden .elevation-strip {
   display: none !important;
 }
 

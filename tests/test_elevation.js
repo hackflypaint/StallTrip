@@ -361,7 +361,9 @@ async function runPlaywrightVerification() {
     await page.setViewportSize({ width: 773, height: 601 });
     await page.goto(`${BASE}/tesla`, { waitUntil: "domcontentloaded", timeout: 20000 });
     await page.waitForSelector("body.car-shell", { timeout: 8000 });
-    await page.locator('#carPresetRow .preset-tag:has-text("SF→LA")').click();
+    await page.locator("#btnCarSheetPlan").click();
+    await page.waitForSelector('body[data-sheet="plan"]', { timeout: 5000 });
+    await page.locator('#route-tab .preset-tag:has-text("SF → LA")').click();
     await page.waitForSelector("html[data-plan-stops]", { timeout: 45000 });
     await page.waitForSelector("#elevationStrip:not([hidden])", {
       state: "visible",
