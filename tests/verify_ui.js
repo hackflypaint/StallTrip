@@ -1,8 +1,26 @@
-const { chromium } = require('playwright');
+let chromium;
+try {
+  ({ chromium } = require('playwright'));
+} catch (_) {
+  ({ chromium } = require('/tmp/pw/node_modules/playwright'));
+}
 const fs = require('fs');
 const path = require('path');
 
 const MEDIA_DIR = '/tmp/tesla-planner-media';
+const TMP_SHOT_DIR = '/tmp/tesla-planner-artifacts/screenshots';
+
+async function saveShot(page, filename) {
+  fs.mkdirSync(TMP_SHOT_DIR, { recursive: true });
+  fs.mkdirSync(MEDIA_DIR, { recursive: true });
+  const tmpPath = path.join(TMP_SHOT_DIR, filename);
+  await page.screenshot({ path: tmpPath });
+  try {
+    fs.copyFileSync(tmpPath, path.join(MEDIA_DIR, filename));
+  } catch (_) {
+    /* ignore transient FUSE EIO on copy */
+  }
+}
 
 async function runVerification() {
   console.log('Launching browser for comprehensive UI verification...');
@@ -69,7 +87,7 @@ async function runVerification() {
       throw new Error(`Expected multiple stops in Visit Maximizer mode, but got ${stopsCount}`);
     }
 
-    await page.screenshot({ path: path.join(MEDIA_DIR, '01_visit_maximizer_route.png') });
+    await saveShot(page, '01_visit_maximizer_route.png');
     console.log('Saved 01_visit_maximizer_route.png');
 
     // 2a. Strategy toggle multiple times must replan (Max → Min → Max)
@@ -127,7 +145,7 @@ async function runVerification() {
       throw new Error('Topographic radio was not checked after click');
     }
 
-    await page.screenshot({ path: path.join(MEDIA_DIR, 'topo_layer.png') });
+    await saveShot(page, 'topo_layer.png');
     console.log('Saved topo_layer.png');
 
     // Switch back to Streets
@@ -164,7 +182,7 @@ async function runVerification() {
     });
     await page.waitForTimeout(1500);
 
-    await page.screenshot({ path: path.join(MEDIA_DIR, 'foliage_layer.png') });
+    await saveShot(page, 'foliage_layer.png');
     console.log('Saved foliage_layer.png');
 
     // Disable foliage so it does not obscure airspace check
@@ -206,7 +224,7 @@ async function runVerification() {
       throw new Error('Foliage toggle missing after airspace enable');
     }
 
-    await page.screenshot({ path: path.join(MEDIA_DIR, 'airspace_layer.png') });
+    await saveShot(page, 'airspace_layer.png');
     console.log('Saved airspace_layer.png');
 
     await page.locator('#airspaceToggle').uncheck();
@@ -242,7 +260,7 @@ async function runVerification() {
       throw new Error('Force-Included Stops sidebar panel must be removed');
     }
 
-    await page.screenshot({ path: path.join(MEDIA_DIR, '02_drawer_force_include.png') });
+    await saveShot(page, '02_drawer_force_include.png');
     console.log('Saved 02_drawer_force_include.png');
 
     await page.locator('#btnCloseDrawer').click();
@@ -284,7 +302,7 @@ async function runVerification() {
     }
     const boxForced = await page.evaluate(() => window.appState.forcedChargers.size);
     console.log(`Forced count after box select: ${boxForced}`);
-    await page.screenshot({ path: path.join(MEDIA_DIR, '03_area_selected_route.png') });
+    await saveShot(page, '03_area_selected_route.png');
     console.log('Saved 03_area_selected_route.png');
 
     // 4a2. Clear selection (top-right) restores pan/zoom and drops area-forced chargers
@@ -315,7 +333,7 @@ async function runVerification() {
     if (afterClear.areaIds !== 0) {
       throw new Error(`Expected areaForcedIds empty after Clear selection, got ${afterClear.areaIds}`);
     }
-    await page.screenshot({ path: path.join(MEDIA_DIR, '03a_clear_selection.png') });
+    await saveShot(page, '03a_clear_selection.png');
     console.log('Saved 03a_clear_selection.png');
 
     // Test freehand as additional option (Clear selection already dropped area batch)
@@ -350,7 +368,7 @@ async function runVerification() {
 
     const updatedForced = await page.evaluate(() => window.appState.forcedChargers.size);
     console.log(`Updated Forced Count after freehand select: ${updatedForced}`);
-    await page.screenshot({ path: path.join(MEDIA_DIR, '03b_freehand_area_selected.png') });
+    await saveShot(page, '03b_freehand_area_selected.png');
     console.log('Saved 03b_freehand_area_selected.png');
 
     // Mid-draw Clear selection cancels freehand without leaving draw mode stuck
@@ -384,7 +402,7 @@ async function runVerification() {
     const countText = await page.locator('#chargerListCount').textContent();
     console.log(`Explore Chargers count: ${countText}`);
 
-    await page.screenshot({ path: path.join(MEDIA_DIR, '04_explore_tab.png') });
+    await saveShot(page, '04_explore_tab.png');
     console.log('Saved 04_explore_tab.png');
 
     // 6. Test Mobile Viewport
@@ -393,8 +411,199 @@ async function runVerification() {
     await page.locator('#tabRoute').click();
     await page.waitForTimeout(1500);
 
-    await page.screenshot({ path: path.join(MEDIA_DIR, '05_mobile_responsive.png') });
+    await saveShot(page, '05_mobile_responsive.png');
     console.log('Saved 05_mobile_responsive.png');
+
+    // 7. Test Client-Side Live Driving / Follow-Me Mode (mock watchPosition + Wake Lock + HUD + Re-center)
+    console.log('7. Testing Client-Side Live Driving / Follow-Me Mode (watchPosition + HUD + Re-center)...');
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.evaluate(() => {
+      window.__mockWatchCallbacks = {};
+      window.__wakeLockRequested = 0;
+      const mockWakeLock = {
+        request: async (type) => {
+          window.__wakeLockRequested++;
+          return {
+            type,
+            addEventListener: () => {},
+            release: async () => {},
+          };
+        },
+      };
+      try {
+        Object.defineProperty(navigator, 'wakeLock', {
+          value: mockWakeLock,
+          configurable: true,
+        });
+      } catch (_) {
+        navigator.wakeLock = mockWakeLock;
+      }
+      navigator.geolocation.watchPosition = (success, error, opts) => {
+        window.__mockWatchCallbacks = { success, error, opts };
+        setTimeout(() => {
+          success({
+            coords: {
+              latitude: 37.65,
+              longitude: -122.38,
+              accuracy: 18,
+              heading: 135,
+              speed: 29.0576, // 65 mph
+            },
+          });
+        }, 30);
+        return 42;
+      };
+      navigator.geolocation.clearWatch = () => {
+        window.__mockWatchCleared = true;
+      };
+    });
+
+    await page.locator('#btnLocateMe').click();
+    await page.waitForSelector('#liveDriveHud:not([hidden])', { timeout: 5000 });
+    await page.waitForSelector('.user-location-dot', { timeout: 5000 });
+    const hudCheck = await page.evaluate(() => ({
+      speedText: document.getElementById('liveHudSpeed')?.textContent || '',
+      nextText: document.getElementById('liveHudNextStop')?.textContent || '',
+      wakeLocks: window.__wakeLockRequested,
+      following: window.appState.liveLocation.follow,
+    }));
+    console.log(`  Live HUD: speed="${hudCheck.speedText}" next="${hudCheck.nextText}" wakeLocks=${hudCheck.wakeLocks}`);
+    if (!/65 mph/i.test(hudCheck.speedText) || !/SE 135/i.test(hudCheck.speedText)) {
+      throw new Error(`Expected speed/heading in HUD, got: ${hudCheck.speedText}`);
+    }
+    if (!/mi/i.test(hudCheck.nextText)) {
+      throw new Error(`Expected distance to next planned stop in HUD, got: ${hudCheck.nextText}`);
+    }
+    if (hudCheck.wakeLocks < 1) {
+      throw new Error('Expected navigator.wakeLock.request("screen") to be called');
+    }
+
+    // Simulate manual map drag -> pauses follow and reveals Re-center pill
+    await page.evaluate(() => {
+      window.appState.map.fire('dragstart');
+    });
+    await page.waitForSelector('#btnLiveRecenter:not([hidden])', { timeout: 3000 });
+    await page.locator('#btnLiveRecenter').click();
+    const resumed = await page.evaluate(() => window.appState.liveLocation.follow);
+    if (!resumed) {
+      throw new Error('Expected Re-center pill to resume live follow');
+    }
+    // Stop live follow
+    await page.locator('#btnLocateMe').click();
+    const stopped = await page.evaluate(() => !window.appState.liveLocation.watching);
+    if (!stopped) {
+      throw new Error('Expected second tap while following to stop live watch');
+    }
+    console.log('  Live Drive mode + HUD + Wake Lock + Re-center verified!');
+
+    // 8. Combined Unified Check: Route Planned + Live Drive HUD + Weather Radar + Elevation Strip simultaneously
+    console.log('8. Verifying ALL 3 features simultaneously across Desktop (1440x900), Mobile (390x844), and Tesla (773x601)...');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Enable Live Drive HUD
+    await page.locator('#btnLocateMe').click();
+    await page.waitForSelector('#liveDriveHud:not([hidden])', { timeout: 5000 });
+    // Enable Weather Radar
+    await page.locator('#btnToggleLayers').click();
+    await page.waitForSelector('#weatherRadarToggle', { state: 'visible', timeout: 5000 });
+    await page.locator('#weatherRadarToggle').check();
+    await page.waitForSelector('#weatherRadarPill.is-visible', { state: 'visible', timeout: 5000 });
+    await page.locator('#btnToggleLayers').click();
+    // Ensure Elevation Strip & Map Weather Pill are visible
+    await page.waitForSelector('#elevationStrip:not([hidden])', { state: 'visible', timeout: 10000 });
+    await page.waitForSelector('#mapWeatherPill:not([hidden])', { state: 'visible', timeout: 15000 });
+
+    const rectsIntersect = (a, b) =>
+      a && b && !(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y);
+
+    const deskHudBox = await page.locator('#liveDriveHud').boundingBox();
+    const deskWeatherPillBox = await page.locator('#mapWeatherPill').boundingBox();
+    const deskRadarPillBox = await page.locator('#weatherRadarPill').boundingBox();
+    const deskElevBox = await page.locator('#elevationStrip').boundingBox();
+
+    if (rectsIntersect(deskHudBox, deskWeatherPillBox)) {
+      throw new Error(`Desktop overlap between #liveDriveHud (${JSON.stringify(deskHudBox)}) and #mapWeatherPill (${JSON.stringify(deskWeatherPillBox)})`);
+    }
+    if (rectsIntersect(deskRadarPillBox, deskElevBox)) {
+      throw new Error(`Desktop overlap between #weatherRadarPill (${JSON.stringify(deskRadarPillBox)}) and #elevationStrip (${JSON.stringify(deskElevBox)})`);
+    }
+    console.log('  Desktop (1440x900) unified zero-overlap check PASSED!');
+    await saveShot(page, 'unified_release_desktop.png');
+    console.log('Saved unified_release_desktop.png');
+
+    // Check Tesla Car-Shell (773x601) with all 3 features active
+    await page.setViewportSize({ width: 773, height: 601 });
+    await page.goto('http://localhost:8080/tesla', { waitUntil: 'networkidle', timeout: 20000 });
+    await page.evaluate(() => {
+      navigator.geolocation.watchPosition = (success) => {
+        setTimeout(() => {
+          success({
+            coords: { latitude: 37.65, longitude: -122.38, accuracy: 18, heading: 135, speed: 29.0576 },
+          });
+        }, 20);
+        return 77;
+      };
+    });
+    await page.locator('#btnCarSheetPlan').click();
+    await page.waitForSelector('body[data-sheet="plan"]', { timeout: 5000 });
+    await page.locator('#route-tab .preset-tag:has-text("SF → LA")').click();
+    await page.waitForSelector('#elevationStrip:not([hidden])', { state: 'visible', timeout: 25000 });
+    await page.waitForSelector('#mapWeatherPill:not([hidden])', { state: 'visible', timeout: 20000 });
+    await page.locator('#btnLocateMe').click();
+    await page.waitForSelector('#liveDriveHud:not([hidden])', { state: 'visible', timeout: 5000 });
+    await page.locator('#btnToggleLayers').click();
+    await page.locator('#weatherRadarToggle').check();
+    await page.waitForSelector('#weatherRadarPill.is-visible', { state: 'visible', timeout: 5000 });
+    await page.locator('#btnToggleLayers').click();
+
+    const carHudBox = await page.locator('#liveDriveHud').boundingBox();
+    const carWeatherPillBox = await page.locator('#mapWeatherPill').boundingBox();
+    const carRadarPillBox = await page.locator('#weatherRadarPill').boundingBox();
+    const carElevBox = await page.locator('#elevationStrip').boundingBox();
+    if (rectsIntersect(carHudBox, carWeatherPillBox)) {
+      throw new Error(`Tesla car-shell overlap between #liveDriveHud and #mapWeatherPill`);
+    }
+    if (rectsIntersect(carRadarPillBox, carElevBox)) {
+      throw new Error(`Tesla car-shell overlap between #weatherRadarPill and #elevationStrip`);
+    }
+    console.log('  Tesla car-shell (773x601) unified zero-overlap check PASSED!');
+    await saveShot(page, 'unified_release_tesla.png');
+    console.log('Saved unified_release_tesla.png');
+
+    // Check Mobile Shell (/mobile 390x844) with all 3 features active
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('http://localhost:8080/mobile?sheet=1', { waitUntil: 'networkidle', timeout: 20000 });
+    await page.evaluate(() => {
+      navigator.geolocation.watchPosition = (success) => {
+        setTimeout(() => {
+          success({
+            coords: { latitude: 37.65, longitude: -122.38, accuracy: 18, heading: 135, speed: 29.0576 },
+          });
+        }, 20);
+        return 88;
+      };
+    });
+    await page.selectOption('#maxStopsSelect', '6');
+    await page.locator('button.preset-tag:has-text("SF → LA")').click();
+    await page.waitForSelector('#elevationStrip:not([hidden])', { state: 'visible', timeout: 25000 });
+    await page.waitForSelector('#mapWeatherPill:not([hidden])', { state: 'visible', timeout: 20000 });
+    await page.locator('#btnLocateMe').click();
+    await page.waitForSelector('#liveDriveHud:not([hidden])', { state: 'visible', timeout: 5000 });
+    await page.locator('#btnToggleLayers').click();
+    await page.locator('#weatherRadarToggle').check();
+    await page.waitForSelector('#weatherRadarPill.is-visible', { state: 'visible', timeout: 5000 });
+    await page.locator('#btnToggleLayers').click();
+
+    const mobHudBox = await page.locator('#liveDriveHud').boundingBox();
+    const mobWeatherPillBox = await page.locator('#mapWeatherPill').boundingBox();
+    const mobRadarPillBox = await page.locator('#weatherRadarPill').boundingBox();
+    const mobElevBox = await page.locator('#elevationStrip').boundingBox();
+    if (rectsIntersect(mobHudBox, mobWeatherPillBox)) {
+      throw new Error(`Mobile overlap between #liveDriveHud (${JSON.stringify(mobHudBox)}) and #mapWeatherPill (${JSON.stringify(mobWeatherPillBox)})`);
+    }
+    if (rectsIntersect(mobRadarPillBox, mobElevBox)) {
+      throw new Error(`Mobile overlap between #weatherRadarPill (${JSON.stringify(mobRadarPillBox)}) and #elevationStrip (${JSON.stringify(mobElevBox)})`);
+    }
+    console.log('  Mobile shell (390x844) unified zero-overlap check PASSED!');
 
     console.log('\n=============================================');
     console.log('ALL PLAYWRIGHT VERIFICATION CHECKS PASSED!');
@@ -405,6 +614,7 @@ async function runVerification() {
   } finally {
     await browser.close();
   }
+  process.exit(0);
 }
 
 runVerification();
