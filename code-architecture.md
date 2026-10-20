@@ -18,7 +18,7 @@ Approximate sizes from the packaged app tree (~5k LOC excluding `data/` and foli
 | `Dockerfile` | ~49 | Multi-stage Red Hat HI Python 3.12 build |
 | `docker-compose.yml` | ~16 | Service `supercharger-planner`, HI build arg, image tag `hi-3.12` |
 | `.dockerignore` | — | Drops `__pycache__`, `node_modules`, etc. |
-| `README.md` | — | Quick start: git clone/pull via git + Docker |
+| `README.md` | — | Quick start: git clone/pull + Docker |
 
 ### Data & scripts
 

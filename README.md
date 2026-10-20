@@ -5,7 +5,6 @@ Plan EV road trips that **maximize Supercharger visits** along a corridor (or mi
 ## Quick start (git)
 
 ```bash
-***REMOVED***
 git clone <repository-url> tesla-supercharger-planner
 cd tesla-supercharger-planner
 git checkout main
@@ -18,14 +17,14 @@ curl -fsS http://localhost:8080/api/health
 Everyday update:
 
 ```bash
-***REMOVED***/tesla-supercharger-planner
+cd tesla-supercharger-planner
 git pull --ff-only origin main
 docker compose up -d --build
 ```
 
 Local Python (no Docker): `python3 server.py 8080` — **stdlib only**, no `pip install`.
 
-**Mobile:** map-first web shell at **`/mobile`** (`COST_PROFILE=lean`) — separate from desktop `/` and Tesla car shell. Soft UA redirect stays **off**. Deploy notes: [mobile-deploy.md](./mobile-deploy.md). *(You may optionally tunnel with ngrok himself; agents do not run ngrok.)*
+**Mobile:** map-first web shell at **`/mobile`** (`COST_PROFILE=lean`) — separate from desktop `/` and Tesla car shell. Soft UA redirect stays **off**. Deploy notes: [mobile-deploy.md](./mobile-deploy.md). Optional public tunnel: `./scripts/mobile-ngrok.sh` (uses local ngrok config; never commit tokens).
 
 ### Mobile verify
 ```bash
@@ -46,10 +45,10 @@ COST_PROFILE=lean python3 server.py 8080
 
 ## Tesla in-car
 
-- **Canonical car entry:** `GET /tesla` — planner with car mode ON (map-first sheet). Bookmark this over ngrok.
+- **Canonical car entry:** `GET /tesla` — planner with car mode ON (map-first sheet). Bookmark this over a public HTTPS URL.
 - Optional force on desktop `/`: `?car=1`. Phone shell stays `/mobile` (separate).
 - **Probe:** `GET /tesla-probe` — fingerprint (UA, DPR, touch, geolocation). Not the planner.
-- Car cannot hit LAN/localhost — public HTTPS (Project store `docs/https-car-access.md`).
+- Car cannot hit LAN/localhost — use public HTTPS in front of the container.
 - Playwright: `node tests/verify_tesla_ui.js` hits `/tesla` at 773×601 / half-MCU / 1254×784.
 
 ## Docs

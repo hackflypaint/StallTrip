@@ -7,8 +7,8 @@ try {
 const fs = require('fs');
 const path = require('path');
 
-const MEDIA_DIR = '/tmp/tesla-planner-media';
-const TMP_SHOT_DIR = '/tmp/tesla-planner-artifacts/screenshots';
+const MEDIA_DIR = process.env.UI_MEDIA_DIR || '/tmp/tesla-planner-media';
+const TMP_SHOT_DIR = process.env.UI_ARTIFACTS_DIR || '/tmp/tesla-planner-artifacts/screenshots';
 
 async function saveShot(page, filename) {
   fs.mkdirSync(TMP_SHOT_DIR, { recursive: true });

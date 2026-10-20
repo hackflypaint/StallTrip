@@ -18,8 +18,8 @@ const path = require("path");
 
 const PORT = process.env.PORT || 8080;
 const BASE_URL = `http://localhost:${PORT}`;
-const ARTIFACTS_DIR = "/tmp/tesla-planner-artifacts/screenshots";
-const STORE_MEDIA_DIR = "/tmp/tesla-planner-media";
+const ARTIFACTS_DIR = process.env.UI_ARTIFACTS_DIR || "/tmp/tesla-planner-artifacts/screenshots";
+const STORE_MEDIA_DIR = process.env.UI_MEDIA_DIR || "/tmp/tesla-planner-media";
 
 function assert(cond, msg) {
   if (!cond) {

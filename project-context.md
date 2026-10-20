@@ -4,17 +4,16 @@
 Tesla Supercharger Route Planner — maximize Supercharger visits along a route, with map area force-include and Docker packaging (Red Hat HI multi-stage).
 
 ## Workflow
-- **Cloud** is the source of truth: all development and automated tests run there.
-- **Local** checkout lives under `tesla-supercharger-planner` and stays current with **git** (`clone` / `pull`).
-- Never document personal absolute home paths. Never run automated test suites on the local machine unless  asks.
+- Automated development and tests are the preferred path for contributors.
+- Local checkout stays current with **git** (`clone` / `pull`).
+- Never document personal absolute home paths. Prefer cloud/CI test runs unless you intentionally run suites locally.
 
 ## Repo
-`<owner>/<repo>` — work from `main`.
+Public GitHub (or your fork) — work from `main`. Clone URL is whatever remote you configured (see README).
 
 ## Sync with git
 
 ```bash
-***REMOVED***
 git clone <repository-url> tesla-supercharger-planner
 cd tesla-supercharger-planner
 git checkout main
@@ -26,7 +25,7 @@ docker compose up -d --build
 Everyday update:
 
 ```bash
-***REMOVED***/tesla-supercharger-planner
+cd tesla-supercharger-planner
 git pull --ff-only origin main
 docker compose up -d --build
 ```

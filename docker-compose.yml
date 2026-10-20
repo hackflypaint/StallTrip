@@ -39,7 +39,7 @@ services:
           "CMD",
           "python3",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=2)",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=5)",
         ]
       interval: 15s
       timeout: 3s

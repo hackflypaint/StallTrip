@@ -11,7 +11,7 @@ Phone entry is the **web shell** at `/mobile` (same stdlib / HI container as des
 | Tesla car shell | **`/tesla`** (preferred) or `/` + heuristics / `?car=1` | `body.car-shell` — not `/mobile` |
 | Tesla probe | `/tesla-probe` | Fingerprint page |
 
-Agents **do not** start ngrok. You may optionally use `./scripts/mobile-ngrok.sh` himself for a public URL.
+Optional public URL: `./scripts/mobile-ngrok.sh` (local ngrok config / `NGROK_AUTHTOKEN` — never commit tokens).
 
 ## HI container (preferred host)
 

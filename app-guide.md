@@ -96,7 +96,6 @@ Prefer `git pull` then `docker compose up -d --build` so the HI image is rebuilt
 
 ### Sync with git (recommended)
 ```bash
-***REMOVED***
 git clone <repository-url> tesla-supercharger-planner
 cd tesla-supercharger-planner
 git pull --ff-only origin main
@@ -105,7 +104,7 @@ docker compose up -d --build
 ```
 
 ### Option 1: Docker Compose
-From the repository root (`tesla-supercharger-planner`):
+From the repository root:
 ```bash
 # Build (HI multi-stage) and start the container in background
 docker compose up -d --build

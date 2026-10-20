@@ -26,8 +26,8 @@ def main() -> None:
         fail("runtime must drop to UID 65532")
     if re.search(r"HEALTHCHECK.*\n.*CMD \[\"/bin/sh", DOCKERFILE):
         fail("HI runtime has no /bin/sh — healthcheck must be exec-form python")
-    if "timeout=2" not in DOCKERFILE:
-        fail("healthcheck urlopen must set timeout=2")
+    if "timeout=5" not in DOCKERFILE:
+        fail("healthcheck urlopen must set timeout=5")
     if "ENTRYPOINT [\"python3\", \"server.py\"]" not in DOCKERFILE:
         fail("entrypoint must be exec-form python3 server.py")
     if re.search(r"^\s*RUN\b.*pip\s+install", DOCKERFILE, flags=re.I | re.M):

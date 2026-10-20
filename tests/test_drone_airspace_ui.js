@@ -7,10 +7,10 @@ const fs = require("fs");
 const path = require("path");
 
 const MEDIA_DIR =
-  "/tmp/tesla-planner-media/drone-airspace";
+  process.env.DRONE_MEDIA_DIR || "/tmp/tesla-planner-media/drone-airspace";
 const PARITY_DIR =
-  "/tmp/tesla-planner-media/autopylot-parity";
-const ARTIFACTS = "/tmp/tesla-planner-artifacts";
+  process.env.DRONE_PARITY_DIR || "/tmp/tesla-planner-media/autopylot-parity";
+const ARTIFACTS = process.env.UI_ARTIFACTS_DIR || "/tmp/tesla-planner-artifacts";
 
 async function main() {
   fs.mkdirSync(MEDIA_DIR, { recursive: true });
