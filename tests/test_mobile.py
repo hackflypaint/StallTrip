@@ -87,6 +87,13 @@ class TestMobileShell(unittest.TestCase):
         lower = {k.lower(): v for k, v in headers.items()}
         self.assertIn("no-store", lower.get("cache-control", ""))
 
+    def test_root_health_is_empty_200(self):
+        status, headers, body = self._get("/health")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"")
+        lower = {k.lower(): v for k, v in headers.items()}
+        self.assertIn("no-store", lower.get("cache-control", ""))
+
     def test_mobile_path_serves_spa(self):
         status, headers, body = self._get("/mobile")
         self.assertEqual(status, 200)
