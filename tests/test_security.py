@@ -91,6 +91,20 @@ class TestSecurityHardening(unittest.TestCase):
         data = json.loads(body)
         self.assertEqual(data["status"], "healthy")
 
+    def test_root_health_is_empty_200(self):
+        """Production probe: GET /health → 200 with empty body (status code only)."""
+        status, headers, body = self._get("/health")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"")
+        lower = {k.lower(): v for k, v in headers.items()}
+        self.assertEqual(lower.get("content-length"), "0")
+        self.assertIn("no-store", lower.get("cache-control", ""))
+        # /api/health stays JSON and must remain distinct
+        status_api, _, body_api = self._get("/api/health")
+        self.assertEqual(status_api, 200)
+        self.assertNotEqual(body_api, b"")
+        self.assertEqual(json.loads(body_api)["status"], "healthy")
+
     def test_options_rejects_cors_preflight(self):
         req = urllib.request.Request(
             self.base + "/api/plan-route",

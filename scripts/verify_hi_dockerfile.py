@@ -28,6 +28,10 @@ def main() -> None:
         fail("HI runtime has no /bin/sh — healthcheck must be exec-form python")
     if "timeout=5" not in DOCKERFILE:
         fail("healthcheck urlopen must set timeout=5")
+    if "/health" not in DOCKERFILE or "os.environ.get('PORT'" not in DOCKERFILE:
+        fail("HEALTHCHECK must probe /health using PORT env (default 8080)")
+    if "/health" not in COMPOSE:
+        fail("compose healthcheck must probe /health")
     if "ENTRYPOINT [\"python3\", \"server.py\"]" not in DOCKERFILE:
         fail("entrypoint must be exec-form python3 server.py")
     if re.search(r"^\s*RUN\b.*pip\s+install", DOCKERFILE, flags=re.I | re.M):
