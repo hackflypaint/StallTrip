@@ -5,6 +5,7 @@ Zero extra third-party dependencies: Built with Python's high performance standa
 """
 
 import http.server
+import ipaddress
 import json
 import os
 import re
@@ -86,6 +87,65 @@ def _wants_desktop_escape(query: Dict[str, List[str]]) -> bool:
 def cost_profile_lean() -> bool:
     """HI-friendly lean profile: tighter upstream geo/plan budgets."""
     return os.environ.get("COST_PROFILE", "").strip().lower() in ("lean", "low", "cheap")
+
+
+def trust_proxy_enabled() -> bool:
+    """Honor X-Forwarded-For / Forwarded only when explicitly enabled.
+
+    Default OFF so a directly exposed process cannot have rate-limit keys
+    spoofed via client-supplied forwarded headers. Set TRUST_PROXY=1 only
+    behind a reverse proxy that overwrites/strips untrusted Forwarded values.
+    """
+    return os.environ.get("TRUST_PROXY", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _normalize_ip_token(raw: str) -> Optional[str]:
+    """Return a canonical IP string, or None if raw is not a bare address."""
+    if not raw:
+        return None
+    s = raw.strip().strip('"').strip("'")
+    if not s or any(c in s for c in ("/", " ", "\t", "\r", "\n")):
+        return None
+    if s.startswith("["):
+        end = s.find("]")
+        if end <= 1:
+            return None
+        s = s[1:end]
+    elif s.count(":") == 1 and "." in s:
+        # IPv4:port from some proxies
+        host, _, port = s.partition(":")
+        if port.isdigit():
+            s = host
+    try:
+        return str(ipaddress.ip_address(s))
+    except ValueError:
+        return None
+
+
+def client_ip_from_headers(headers, peer_ip: str) -> str:
+    """Resolve rate-limit client identity from peer + optional proxy headers."""
+    fallback = peer_ip or "unknown"
+    if not trust_proxy_enabled():
+        return fallback
+
+    xff = headers.get("X-Forwarded-For") or headers.get("x-forwarded-for")
+    if xff:
+        first = xff.split(",")[0].strip()
+        parsed = _normalize_ip_token(first)
+        if parsed:
+            return parsed
+
+    forwarded = headers.get("Forwarded") or headers.get("forwarded")
+    if forwarded:
+        for part in forwarded.split(","):
+            for directive in part.split(";"):
+                directive = directive.strip()
+                if directive.lower().startswith("for="):
+                    parsed = _normalize_ip_token(directive[4:].strip())
+                    if parsed:
+                        return parsed
+                    break
+    return fallback
 
 
 def _clamp_int(value: Any, default: int, lo: int, hi: int) -> int:
@@ -188,6 +248,8 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "platform_ua_redirect": redirect_on,
                     # Legacy alias — same flag as platform_ua_redirect
                     "mobile_ua_redirect": redirect_on,
+                    # Rate-limit key uses X-Forwarded-For only when TRUST_PROXY=1
+                    "trust_proxy": trust_proxy_enabled(),
                 },
             })
             return
@@ -333,7 +395,8 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         return data
 
     def _client_ip(self) -> str:
-        return self.client_address[0] if self.client_address else "unknown"
+        peer = self.client_address[0] if self.client_address else "unknown"
+        return client_ip_from_headers(self.headers, peer)
 
     def _rate_limit_allowed(
         self,
@@ -689,15 +752,20 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         # Removable modules: foliage (Explore Fall) + airspace (FAA/NPS ArcGIS).
         # Same-origin UI — no Access-Control-Allow-Origin (prevents cross-site OSRM proxying).
+        # CDN allowlists pin exact Leaflet / Font Awesome paths (SRI in index.html); no bare unpkg.com.
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; "
-            "script-src 'self' https://unpkg.com; "
-            "style-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
-            "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com data:; "
+            "script-src 'self' https://unpkg.com/leaflet@1.9.4/dist/leaflet.js; "
+            "style-src 'self' 'unsafe-inline' https://unpkg.com/leaflet@1.9.4/dist/leaflet.css "
+            "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css "
+            "https://fonts.googleapis.com; "
+            "font-src 'self' https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/webfonts/ "
+            "https://fonts.gstatic.com data:; "
             # OSM uses bare tile.openstreetmap.org (wildcard *.tile. does not match that host).
             "img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org "
-            "https://*.tile.opentopomap.org https://unpkg.com https://www.explorefall.com "
+            "https://*.tile.opentopomap.org https://unpkg.com/leaflet@1.9.4/dist/images/ "
+            "https://www.explorefall.com "
             "https://tilecache.rainviewer.com https://*.rainviewer.com; "
             "connect-src 'self' https://services6.arcgis.com https://services1.arcgis.com https://*.arcgis.com "
             "https://api.rainviewer.com https://api.open-meteo.com; "
@@ -760,6 +828,9 @@ def run_server(port: int = PORT):
               f"(Tesla→/tesla, mobile→/mobile; ?desktop=1 escape)")
         print(f"  Cost:     profile={profile}  plans={PLAN_RATE_LIMIT}/min  "
               f"geocode={GEOCODE_RATE_LIMIT}/min  concurrent={MAX_CONCURRENT_PLANS}")
+        proxy_mode = "on" if trust_proxy_enabled() else "off"
+        print(f"  Proxy:    TRUST_PROXY={proxy_mode} "
+              f"(rate-limit IP from X-Forwarded-For only when on)")
         print("============================================================")
         try:
             httpd.serve_forever()

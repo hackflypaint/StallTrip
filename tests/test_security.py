@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import unittest
 import urllib.error
@@ -88,8 +89,56 @@ class TestSecurityHardening(unittest.TestCase):
         self.assertIn("services1.arcgis.com", csp)
         self.assertIn("*.arcgis.com", csp)
         self.assertIn("explorefall.com", csp)
+        # Pin Leaflet / FA paths — reject bare https://unpkg.com host allow
+        self.assertIn("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js", csp)
+        self.assertIn("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css", csp)
+        self.assertNotIn("script-src 'self' https://unpkg.com;", csp)
+        self.assertNotRegex(csp, r"script-src[^;]*https://unpkg.com[;\s]")
         data = json.loads(body)
         self.assertEqual(data["status"], "healthy")
+        limits = data.get("limits") or {}
+        self.assertIn("trust_proxy", limits)
+        self.assertFalse(limits.get("trust_proxy"))
+
+    def test_client_ip_ignores_xff_when_trust_proxy_off(self):
+        prev = os.environ.pop("TRUST_PROXY", None)
+        try:
+            self.assertFalse(server.trust_proxy_enabled())
+            ip = server.client_ip_from_headers(
+                {"X-Forwarded-For": "203.0.113.9, 10.0.0.1"},
+                "127.0.0.1",
+            )
+            self.assertEqual(ip, "127.0.0.1")
+        finally:
+            if prev is not None:
+                os.environ["TRUST_PROXY"] = prev
+
+    def test_client_ip_honors_xff_when_trust_proxy_on(self):
+        prev = os.environ.get("TRUST_PROXY")
+        os.environ["TRUST_PROXY"] = "1"
+        try:
+            self.assertTrue(server.trust_proxy_enabled())
+            ip = server.client_ip_from_headers(
+                {"X-Forwarded-For": "203.0.113.9, 10.0.0.1"},
+                "127.0.0.1",
+            )
+            self.assertEqual(ip, "203.0.113.9")
+            ip6 = server.client_ip_from_headers(
+                {"Forwarded": 'for="[2001:db8::1]";proto=https'},
+                "127.0.0.1",
+            )
+            self.assertEqual(ip6, "2001:db8::1")
+            # Garbage XFF falls back to peer
+            bad = server.client_ip_from_headers(
+                {"X-Forwarded-For": "not-an-ip"},
+                "10.1.2.3",
+            )
+            self.assertEqual(bad, "10.1.2.3")
+        finally:
+            if prev is None:
+                os.environ.pop("TRUST_PROXY", None)
+            else:
+                os.environ["TRUST_PROXY"] = prev
 
     def test_options_rejects_cors_preflight(self):
         req = urllib.request.Request(

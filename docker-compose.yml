@@ -22,6 +22,8 @@ services:
       # - PLAN_RATE_LIMIT=4
       # - MAX_CONCURRENT_PLANS=2
       # - STATIC_CACHE_MAX_AGE=300
+      # Behind a reverse proxy that sets/overwrites X-Forwarded-For (default OFF — avoids spoofing):
+      # - TRUST_PROXY=1
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

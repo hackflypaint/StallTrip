@@ -1,5 +1,8 @@
 # Explore Fall data source notes
 
+Legal / redistribution notes for operators: see repo-root
+[`ATTRIBUTION.md`](../../ATTRIBUTION.md).
+
 Inspected `https://www.explorefall.com/fall-foliage-map` (network + `js/fall-foliage-map.js`):
 
 - Daily rasters: `/maps/2026/{YYYYMMDD}.png` (low-res) and `/maps/2026-highres/{YYYYMMDD}.png`

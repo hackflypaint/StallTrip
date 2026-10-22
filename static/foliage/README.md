@@ -4,6 +4,9 @@ Isolated Explore Fall daily foliage raster overlay + day slider.
 
 ## Source & attribution
 
+**Full credit / terms:** see repo-root [`ATTRIBUTION.md`](../../ATTRIBUTION.md)
+(Explore Fall section). Do not invent a license beyond what that file records.
+
 - Daily CONUS PNGs from [Explore Fall](https://www.explorefall.com/fall-foliage-map)
   (`https://www.explorefall.com/maps/2026/{YYYYMMDD}.png`)
 - Image bounds (lng/lat corners from Explore Fall’s map JS):
@@ -12,7 +15,8 @@ Isolated Explore Fall daily foliage raster overlay + day slider.
   this module uses their **public daily map rasters** (CORS `*`) which power the same
   interactive map, plus a small local cache under `cache/` for offline demos.
 - **Required credit:** any UI showing this overlay must link to
-  [ExploreFall.com](https://www.explorefall.com/).
+  [ExploreFall.com](https://www.explorefall.com/). KML program terms:
+  https://www.explorefall.com/blog/2023/fall-foliage-kml
 
 ## Files
 
