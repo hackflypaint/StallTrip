@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mobile shell tests: /mobile entry, health hint, UA redirect flag (off by default)."""
+"""Mobile shell tests: /mobile entry, health hint, platform UA redirect helpers."""
 
 from __future__ import annotations
 
@@ -71,7 +71,9 @@ class TestMobileShell(unittest.TestCase):
         limits = data.get("limits") or {}
         self.assertIn("geocode_per_min", limits)
         self.assertIn("plan_per_min", limits)
-        self.assertFalse(limits.get("mobile_ua_redirect"))
+        # Platform UA redirect is ON by default (see tests.test_platform_redirect)
+        self.assertTrue(limits.get("platform_ua_redirect"))
+        self.assertTrue(limits.get("mobile_ua_redirect"))
 
     def test_static_js_has_short_cache(self):
         status, headers, _ = self._get("/app.js")
@@ -144,16 +146,17 @@ class TestMobileShell(unittest.TestCase):
         self.assertIn(b"function subsampleMarkers", body)
         self.assertIn(b"optionalOverlaysMounted", body)
 
-    def test_phase4_compose_keeps_ua_redirect_off(self):
+    def test_phase4_compose_documents_platform_ua_redirect(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(root, "docker-compose.yml"), encoding="utf-8") as fh:
             compose = fh.read()
         active = "\n".join(
             line for line in compose.splitlines() if line.strip() and not line.lstrip().startswith("#")
         )
-        # Must not enable soft UA redirect in default (non-comment) compose lines
-        self.assertNotIn("MOBILE_UA_REDIRECT=1", active)
-        self.assertIn("MOBILE_UA_REDIRECT", compose)  # documented as optional
+        # Redirect is ON by default in code — compose must not force it off unless intentional
+        self.assertNotIn("PLATFORM_UA_REDIRECT=0", active)
+        self.assertNotIn("MOBILE_UA_REDIRECT=0", active)
+        self.assertIn("PLATFORM_UA_REDIRECT", compose)  # documented opt-out
         self.assertIn("COST_PROFILE=lean", active)
 
     def test_mobile_deploy_doc_exists(self):
@@ -234,26 +237,11 @@ class TestMobileShell(unittest.TestCase):
         self.assertIn(b"--mobile-chrome-bottom", css)
         self.assertIn(b"var(--mobile-plan-h)", css)
 
-    def test_no_ua_redirect_by_default(self):
-        prev = os.environ.pop("MOBILE_UA_REDIRECT", None)
+    def test_ua_redirect_on_by_default(self):
+        prev_p = os.environ.pop("PLATFORM_UA_REDIRECT", None)
+        prev_m = os.environ.pop("MOBILE_UA_REDIRECT", None)
         try:
-            self.assertFalse(server.mobile_ua_redirect_enabled())
-            status, headers, body = self._get(
-                "/",
-                headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"},
-            )
-            self.assertEqual(status, 200)
-            self.assertNotEqual(headers.get("Location"), "/mobile")
-            self.assertIn(b"Supercharge", body)
-        finally:
-            if prev is not None:
-                os.environ["MOBILE_UA_REDIRECT"] = prev
-
-    def test_ua_redirect_when_enabled(self):
-        prev = os.environ.get("MOBILE_UA_REDIRECT")
-        os.environ["MOBILE_UA_REDIRECT"] = "1"
-        try:
-            self.assertTrue(server.mobile_ua_redirect_enabled())
+            self.assertTrue(server.platform_ua_redirect_enabled())
             status, headers, body = self._get(
                 "/",
                 headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"},
@@ -262,33 +250,52 @@ class TestMobileShell(unittest.TestCase):
             self.assertEqual(headers.get("Location"), "/mobile")
             self.assertEqual(body, b"")
         finally:
+            if prev_p is not None:
+                os.environ["PLATFORM_UA_REDIRECT"] = prev_p
+            if prev_m is not None:
+                os.environ["MOBILE_UA_REDIRECT"] = prev_m
+
+    def test_ua_redirect_kill_switch(self):
+        prev = os.environ.get("PLATFORM_UA_REDIRECT")
+        os.environ["PLATFORM_UA_REDIRECT"] = "0"
+        try:
+            self.assertFalse(server.platform_ua_redirect_enabled())
+            status, headers, body = self._get(
+                "/",
+                headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"},
+            )
+            self.assertEqual(status, 200)
+            self.assertNotEqual(headers.get("Location"), "/mobile")
+            self.assertIn(b"Supercharge", body)
+        finally:
             if prev is None:
-                os.environ.pop("MOBILE_UA_REDIRECT", None)
+                os.environ.pop("PLATFORM_UA_REDIRECT", None)
             else:
-                os.environ["MOBILE_UA_REDIRECT"] = prev
+                os.environ["PLATFORM_UA_REDIRECT"] = prev
 
     def test_ua_helpers(self):
         self.assertTrue(server.looks_like_mobile_ua("iPhone"))
         self.assertTrue(server.looks_like_mobile_ua("Mozilla/5.0 (Linux; Android 14)"))
+        self.assertTrue(server.looks_like_mobile_ua("iPad"))
         self.assertFalse(server.looks_like_mobile_ua("Mozilla/5.0 (Macintosh; Intel Mac OS X)"))
         self.assertFalse(server.looks_like_mobile_ua(""))
+        self.assertTrue(server.looks_like_tesla_ua("Tesla/2020.16.2.1-abc QtCarBrowser"))
+        self.assertEqual(server.platform_entry_for_ua("iPhone"), "/mobile")
+        self.assertEqual(
+            server.platform_entry_for_ua(
+                "Mozilla/5.0 (X11; GNU/Linux) Tesla/2020.1-abc"
+            ),
+            "/tesla",
+        )
 
     def test_api_never_ua_redirected(self):
-        prev = os.environ.get("MOBILE_UA_REDIRECT")
-        os.environ["MOBILE_UA_REDIRECT"] = "1"
-        try:
-            status, headers, body = self._get(
-                "/api/health",
-                headers={"User-Agent": "Mozilla/5.0 (iPhone)"},
-            )
-            self.assertEqual(status, 200)
-            self.assertIsNone(headers.get("Location"))
-            self.assertEqual(json.loads(body)["status"], "healthy")
-        finally:
-            if prev is None:
-                os.environ.pop("MOBILE_UA_REDIRECT", None)
-            else:
-                os.environ["MOBILE_UA_REDIRECT"] = prev
+        status, headers, body = self._get(
+            "/api/health",
+            headers={"User-Agent": "Mozilla/5.0 (iPhone)"},
+        )
+        self.assertEqual(status, 200)
+        self.assertIsNone(headers.get("Location"))
+        self.assertEqual(json.loads(body)["status"], "healthy")
 
 
 if __name__ == "__main__":

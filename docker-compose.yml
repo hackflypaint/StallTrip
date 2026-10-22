@@ -14,8 +14,9 @@ services:
       - PORT=8080
       # HI publish defaults — cost-conscious (no Amplify/Lambda/S3 app path)
       - COST_PROFILE=lean
-      # Soft phone→/mobile redirect stays OFF. Phones use explicit /mobile.
-      # - MOBILE_UA_REDIRECT=1
+      # Platform UA redirect on `/` is ON by default (Tesla→/tesla, mobile→/mobile).
+      # Escape hatch per request: ?desktop=1. To disable redirects entirely:
+      # - PLATFORM_UA_REDIRECT=0
       # Optional overrides (lean defaults: geocode 12/min, plan 4/min, concurrent 2):
       # - GEOCODE_RATE_LIMIT=12
       # - PLAN_RATE_LIMIT=4

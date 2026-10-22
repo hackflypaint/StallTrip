@@ -24,13 +24,13 @@ docker compose up -d --build
 
 Local Python (no Docker): `python3 server.py 8080` — **stdlib only**, no `pip install`.
 
-**Mobile:** map-first web shell at **`/mobile`** (`COST_PROFILE=lean`) — separate from desktop `/` and Tesla car shell. Soft UA redirect stays **off**. Deploy notes: [mobile-deploy.md](./mobile-deploy.md). Optional public tunnel: `./scripts/mobile-ngrok.sh` (uses local ngrok config; never commit tokens).
+**Mobile / Tesla entry:** hitting **`/`** redirects by User-Agent — phone/tablet → **`/mobile`**, Tesla in-car browser → **`/tesla`**, desktop stays **`/`**. Escape hatch: **`/?desktop=1`**. Opt out: `PLATFORM_UA_REDIRECT=0`. Deploy notes: [mobile-deploy.md](./mobile-deploy.md). Optional public tunnel: `./scripts/mobile-ngrok.sh` (uses local ngrok config; never commit tokens).
 
-### Mobile verify
+### Mobile / platform verify
 ```bash
-python3 -m unittest tests.test_mobile tests.test_security -v
+python3 -m unittest tests.test_platform_redirect tests.test_mobile tests.test_security -v
 COST_PROFILE=lean python3 server.py 8080
-# phones → http://localhost:8080/mobile
+# phones → http://localhost:8080/  (302 → /mobile) or explicit /mobile
 ```
 
 ## What’s in the box
@@ -46,7 +46,8 @@ COST_PROFILE=lean python3 server.py 8080
 ## Tesla in-car
 
 - **Canonical car entry:** `GET /tesla` — planner with car mode ON (map-first sheet). Bookmark this over a public HTTPS URL.
-- Optional force on desktop `/`: `?car=1`. Phone shell stays `/mobile` (separate).
+- **UA on `/`:** Tesla MCU browser (`QtCarBrowser` / `Tesla/<fw>`) → 302 `/tesla`. Phones/tablets → `/mobile`. Desktop UA stays on `/`.
+- Optional force car chrome on desktop `/`: `?car=1`. Force desktop shell: `?desktop=1`.
 - **Probe:** `GET /tesla-probe` — fingerprint (UA, DPR, touch, geolocation). Not the planner.
 - Car cannot hit LAN/localhost — use public HTTPS in front of the container.
 - Playwright: `node tests/verify_tesla_ui.js` hits `/tesla` at 773×601 / half-MCU / 1254×784.

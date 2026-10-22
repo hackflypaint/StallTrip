@@ -88,7 +88,8 @@ window.appState = state;
 
 /**
  * Mobile shell detection: explicit /mobile path or ?ui=mobile.
- * Do not rely on User-Agent here — server may soft-redirect UA→/mobile behind an env flag.
+ * Do not rely on User-Agent here — server redirects `/` by UA to /mobile or /tesla
+ * (see server.py platform_entry_for_ua); ?desktop=1 keeps the desktop entry.
  */
 function isMobileShell() {
   const path = (location.pathname || "/").replace(/\/+$/, "") || "/";
