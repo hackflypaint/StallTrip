@@ -314,6 +314,67 @@ class TestSecurityHardening(unittest.TestCase):
     def test_osrm_uses_https_by_default(self):
         self.assertTrue(routing.OSRM_BASE_URL.startswith("https://"))
 
+    def test_favicon_is_icon_not_html(self):
+        status, headers, body = self._get("/favicon.ico")
+        self.assertEqual(status, 200)
+        lower = {k.lower(): v for k, v in headers.items()}
+        ctype = lower.get("content-type", "")
+        self.assertTrue(
+            "icon" in ctype or "octet-stream" in ctype or ctype.startswith("image/"),
+            f"unexpected favicon content-type: {ctype}",
+        )
+        self.assertFalse(ctype.startswith("text/html"))
+        self.assertGreater(len(body), 64)
+        # ICO magic: reserved(0) + type(1)
+        self.assertEqual(body[0:4], b"\x00\x00\x01\x00")
+
+    def test_server_header_hides_python_version(self):
+        status, headers, _ = self._get("/api/health")
+        self.assertEqual(status, 200)
+        lower = {k.lower(): v for k, v in headers.items()}
+        server_hdr = lower.get("server", "")
+        self.assertNotIn("python", server_hdr.lower())
+        self.assertNotRegex(server_hdr, r"Python/\d")
+
+    def test_rate_bypass_requires_matching_secret(self):
+        """Wrong/missing secret must not clear limits; matching secret may."""
+        prev = os.environ.pop("ALLOW_TEST_RATE_BYPASS", None)
+        try:
+            self.assertFalse(server.test_rate_bypass_enabled())
+            # Header alone (env unset) → no clear; health must not advertise bypass
+            status, _, body = self._get(
+                "/api/health?reset_rate_limit=1",
+                headers={"X-Test-Rate-Bypass": "nope"},
+            )
+            self.assertEqual(status, 200)
+            data = json.loads(body)
+            self.assertNotIn("test_rate_bypass", data.get("limits") or {})
+
+            os.environ["ALLOW_TEST_RATE_BYPASS"] = "e2e-secret-token"
+            server.clear_rate_limit_state()
+            with server._plan_lock:
+                server._plan_hits["10.0.0.1"] = (0.0, 99)
+            # Wrong header → buckets remain
+            self._get(
+                "/api/health?reset_rate_limit=1",
+                headers={"X-Test-Rate-Bypass": "wrong"},
+            )
+            with server._plan_lock:
+                self.assertIn("10.0.0.1", server._plan_hits)
+            # Matching secret → clear
+            self._get(
+                "/api/health?reset_rate_limit=1",
+                headers={"X-Test-Rate-Bypass": "e2e-secret-token"},
+            )
+            with server._plan_lock:
+                self.assertEqual(server._plan_hits, {})
+        finally:
+            if prev is None:
+                os.environ.pop("ALLOW_TEST_RATE_BYPASS", None)
+            else:
+                os.environ["ALLOW_TEST_RATE_BYPASS"] = prev
+            server.clear_rate_limit_state()
+
 
 if __name__ == "__main__":
     unittest.main()
