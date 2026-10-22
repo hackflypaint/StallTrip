@@ -66,6 +66,7 @@ podman run -d --name tesla-supercharger-planner -p 8080:8080 \
 | `COST_PROFILE` | `lean` | Tighter rate defaults |
 | `GEOCODE_RATE_LIMIT` | 12 / min / IP | |
 | `PLAN_RATE_LIMIT` | 4 / min / IP | Each plan hits OSRM |
+| `TRUST_PROXY` | off | Set `1` only behind a reverse proxy that overwrites `X-Forwarded-For` so rate limits key per real client |
 | `MAX_CONCURRENT_PLANS` | 2 | |
 | `STATIC_CACHE_MAX_AGE` | 300 | JS/CSS/images |
 | `PLATFORM_UA_REDIRECT` | on (default) | Set `0` to disable `/` UA redirects |

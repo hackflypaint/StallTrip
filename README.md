@@ -70,3 +70,18 @@ COST_PROFILE=lean python3 server.py 8080
 ## Image tag
 
 `tesla-supercharger-planner:hi-3.12` — see [HI build process](./code-architecture.md#hi-build-process).
+Dockerfile HI bases are **pinned by digest** (refresh digests when bumping the HI stream).
+
+## License & attribution
+
+- **Application code:** [MIT](./LICENSE) — `Copyright (c) 2026 Contributors`
+- **Bundled data / foliage cache:** not under MIT — see [ATTRIBUTION.md](./ATTRIBUTION.md)
+  (supercharge.info station JSON; Explore Fall daily PNGs and `static/foliage/cache/`)
+
+## Reverse proxy / rate limits
+
+Geocode and plan-route limits key by client IP. Direct expose uses the TCP peer
+address only. If you terminate TLS or load-balance in front of the container, set
+`TRUST_PROXY=1` so limits honor `X-Forwarded-For` / `Forwarded` (left-most client).
+**Only enable when the proxy overwrites untrusted client forwarded headers** —
+otherwise clients can spoof IPs and evade or share buckets.

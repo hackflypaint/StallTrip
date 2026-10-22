@@ -3,13 +3,17 @@
 # Catalog: https://images.redhat.com  |  Docs: Red Hat Hardened Images builder/runtime model
 #
 # Images are public (no Red Hat subscription required for HI pulls from registry.access.redhat.com).
+# Base images are pinned by digest (tag kept for humans). Refresh digests when bumping HI.
 
 ARG PYTHON_HI_VERSION=3.12
+# Digests resolved 2026-10-22 via crane digest registry.access.redhat.com/hi/python:…
+ARG PYTHON_HI_BUILDER_DIGEST=sha256:09959a4cca4236bd065e0fd7fb59b08daa491e9879e423901c20fd670ffcff3c
+ARG PYTHON_HI_RUNTIME_DIGEST=sha256:2764c1d9a5e45115f42b334e3c3dc1b501f18eaf09550ff345f81a564f3b3f49
 
 # ---------------------------------------------------------------------------
 # Stage 1 — builder: stage app, byte-compile, import-check
 # ---------------------------------------------------------------------------
-FROM registry.access.redhat.com/hi/python:${PYTHON_HI_VERSION}-builder AS builder
+FROM registry.access.redhat.com/hi/python:${PYTHON_HI_VERSION}-builder@${PYTHON_HI_BUILDER_DIGEST} AS builder
 
 USER 0
 WORKDIR /build
@@ -25,7 +29,7 @@ RUN ["python3", "-c", "import routing; import server"]
 # ---------------------------------------------------------------------------
 # Stage 2 — runtime: minimal HI Python (no shell)
 # ---------------------------------------------------------------------------
-FROM registry.access.redhat.com/hi/python:${PYTHON_HI_VERSION}
+FROM registry.access.redhat.com/hi/python:${PYTHON_HI_VERSION}@${PYTHON_HI_RUNTIME_DIGEST}
 
 USER 0
 WORKDIR /app
