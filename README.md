@@ -85,3 +85,9 @@ address only. If you terminate TLS or load-balance in front of the container, se
 `TRUST_PROXY=1` so limits honor `X-Forwarded-For` / `Forwarded` (left-most client).
 **Only enable when the proxy overwrites untrusted client forwarded headers** —
 otherwise clients can spoof IPs and evade or share buckets.
+
+Tune with `PLAN_RATE_LIMIT`, `GEOCODE_RATE_LIMIT`, and `PLAN_RATE_WINDOW_SEC`.
+For local E2E only, set `ALLOW_TEST_RATE_BYPASS` to a shared secret and send the
+same value in `X-Test-Rate-Bypass`; that skips plan/geocode limits and can clear
+windows via `GET /api/health?reset_rate_limit=1`. Never set the env var on a
+public host (compose leaves it unset).

@@ -120,13 +120,23 @@ async function main() {
   );
   console.log("status DC:", statusDc);
 
+  // Zoom in — wait for a *fresh* UASFM count (not stale z11 status) + labels.
+  // FAA UASFM envelopes need a minimum span; overlay expands tight z13 bboxes.
   await page.evaluate(() => {
     window.appState.map.setView([38.851, -77.04], 13);
   });
-  await waitStatus((t) => /UASFM\s+[1-9]\d*/.test(t), 30000);
-  // Allow labels to paint after debounced refresh
-  await page.waitForTimeout(2000);
-  const labelCount = await page.locator(".airspace-uasfm-label").count();
+  const statusZ13 = await waitStatus((t) => /UASFM\s+[1-9]\d*/.test(t), 30000);
+  console.log("status DC z13:", statusZ13);
+  // Poll for ceiling labels (debounced refresh + Leaflet paint)
+  let labelCount = 0;
+  {
+    const start = Date.now();
+    while (Date.now() - start < 15000) {
+      labelCount = await page.locator(".airspace-uasfm-label").count();
+      if (labelCount >= 1) break;
+      await page.waitForTimeout(400);
+    }
+  }
   console.log("uasfm labels:", labelCount);
   if (labelCount < 1) {
     throw new Error("Expected UASFM ceiling labels at zoom ≥11");

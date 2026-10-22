@@ -54,6 +54,20 @@ async function runVerification() {
   });
 
   try {
+    // Soften back-to-back E2E plan-route rate limits when the server opts in
+    // (ALLOW_TEST_RATE_BYPASS=<secret> matching X-Test-Rate-Bypass). No-op otherwise.
+    try {
+      const bypass = process.env.ALLOW_TEST_RATE_BYPASS || process.env.X_TEST_RATE_BYPASS || '';
+      if (bypass && bypass !== '0' && bypass.toLowerCase() !== 'false') {
+        await page.request.get('http://localhost:8080/api/health?reset_rate_limit=1', {
+          headers: { 'X-Test-Rate-Bypass': bypass },
+          timeout: 5000,
+        });
+      }
+    } catch (_) {
+      /* server may not have bypass enabled */
+    }
+
     console.log('1. Navigating to http://localhost:8080 ...');
     await page.goto('http://localhost:8080/', { waitUntil: 'networkidle', timeout: 15000 });
 

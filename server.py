@@ -192,6 +192,25 @@ MAX_CONCURRENT_PLANS = _env_int("MAX_CONCURRENT_PLANS", 2 if _LEAN else 4, 1, 16
 # Browser cache for static assets (seconds) — cuts repeat egress; APIs stay no-store.
 STATIC_CACHE_MAX_AGE = _env_int("STATIC_CACHE_MAX_AGE", 300, 0, 86400)
 
+
+def test_rate_bypass_secret() -> Optional[str]:
+    """Shared secret for E2E rate-limit bypass, or None when disabled.
+
+    Set ALLOW_TEST_RATE_BYPASS to a non-empty secret (not 0/false/off). Requests
+    must send the *same* value in X-Test-Rate-Bypass. Prefer a long random
+    token; never set this on a public host. Docker compose leaves it unset.
+    """
+    raw = os.environ.get("ALLOW_TEST_RATE_BYPASS", "").strip()
+    if not raw or raw.lower() in ("0", "false", "no", "off"):
+        return None
+    return raw
+
+
+def test_rate_bypass_enabled() -> bool:
+    """True when a bypass secret is configured (still requires matching header)."""
+    return test_rate_bypass_secret() is not None
+
+
 # Simple in-memory rate limiters: ip -> (window_start, count)
 _geocode_hits: Dict[str, Tuple[float, int]] = {}
 _plan_hits: Dict[str, Tuple[float, int]] = {}
@@ -200,8 +219,20 @@ _plan_lock = threading.Lock()
 _plan_semaphore = threading.Semaphore(MAX_CONCURRENT_PLANS)
 
 
+def clear_rate_limit_state() -> None:
+    """Drop in-memory geocode/plan rate-limit windows (test harness only)."""
+    with _geocode_lock:
+        _geocode_hits.clear()
+    with _plan_lock:
+        _plan_hits.clear()
+
+
 class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
     """Handles static files and REST API endpoints for Tesla Supercharger planning."""
+
+    # Do not leak Python version via the Server response header.
+    server_version = "SuperchargerPlanner"
+    sys_version = ""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=STATIC_DIR, **kwargs)
@@ -212,6 +243,9 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.connection.settimeout(REQUEST_SOCKET_TIMEOUT_SEC)
         except OSError:
             pass
+
+    def version_string(self) -> str:
+        return self.server_version
 
     def do_OPTIONS(self):
         """Same-origin app — reject cross-origin preflight abuse."""
@@ -233,6 +267,11 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_stats()
             return
         if path == "/api/health":
+            # E2E isolation: clear RL windows when secret header matches env.
+            if self._test_rate_bypass_request() and (query.get("reset_rate_limit") or [""])[
+                0
+            ] in ("1", "true", "yes"):
+                clear_rate_limit_state()
             redirect_on = platform_ua_redirect_enabled()
             self.send_json_response({
                 "status": "healthy",
@@ -432,12 +471,22 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             hits[ip] = (start, count + 1)
             return True
 
+    def _test_rate_bypass_request(self) -> bool:
+        secret = test_rate_bypass_secret()
+        if not secret:
+            return False
+        return self.headers.get("X-Test-Rate-Bypass", "").strip() == secret
+
     def _geocode_allowed(self) -> bool:
+        if self._test_rate_bypass_request():
+            return True
         return self._rate_limit_allowed(
             _geocode_hits, _geocode_lock, GEOCODE_RATE_LIMIT, GEOCODE_RATE_WINDOW_SEC
         )
 
     def _plan_allowed(self) -> bool:
+        if self._test_rate_bypass_request():
+            return True
         return self._rate_limit_allowed(
             _plan_hits, _plan_lock, PLAN_RATE_LIMIT, PLAN_RATE_WINDOW_SEC
         )
@@ -780,15 +829,19 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
 
     def send_json_response(self, data: Any, status: int = 200):
         body = json.dumps(data).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-        if getattr(self, "close_connection", False):
-            self.send_header("Connection", "close")
-        self._api_response = True
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            if getattr(self, "close_connection", False):
+                self.send_header("Connection", "close")
+            self._api_response = True
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # Browser navigated away / closed mid-response (common on long plan-route).
+            self.close_connection = True
 
     def end_headers(self):
         if not getattr(self, "_api_response", False):
@@ -803,6 +856,33 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self._send_security_headers()
         super().end_headers()
+
+    def copyfile(self, source, outputfile):
+        """Serve static files; ignore client disconnect mid-stream."""
+        try:
+            super().copyfile(source, outputfile)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
+
+    def log_message(self, fmt: str, *args) -> None:
+        # Suppress noisy traceback-like client-disconnect lines from base logger.
+        try:
+            super().log_message(fmt, *args)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
+
+    def handle_one_request(self) -> None:
+        """Same as base, but treat client disconnect as a quiet close."""
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
+
+    def finish(self) -> None:
+        try:
+            super().finish()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
 
 def run_server(port: int = PORT):
