@@ -21,17 +21,66 @@ import routing
 PORT = int(os.environ.get("PORT", 8080))
 STATIC_DIR = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"))
 
-# Soft mobile UA redirect is OFF by default. Prefer explicit /mobile for tests & bookmarks.
-# Enable with MOBILE_UA_REDIRECT=1 only when you want phones on / to land on the mobile shell.
-_MOBILE_UA_RE = re.compile(r"Mobile|Android|iPhone|iPad|iPod", re.IGNORECASE)
+# Platform UA redirect on GET/HEAD `/` (ON by default):
+#   Tesla in-car browser → /tesla
+#   Phone / tablet mobile → /mobile  (iPhone, Android phones/tablets, iPad, iPod, …)
+#   Desktop / unknown     → stay on /
+# Escape hatch: ?desktop=1 (or ?ui=desktop). Opt out entirely: PLATFORM_UA_REDIRECT=0
+# (MOBILE_UA_REDIRECT still accepted as a legacy alias for the same kill switch.)
+#
+# iPad: treated as mobile shell (/mobile). Use ?desktop=1 for the classic sidebar.
+# iPadOS “Request Desktop Website” often sends a Macintosh UA — server cannot see that;
+# those clients stay on / unless they open /mobile explicitly.
+_MOBILE_UA_RE = re.compile(
+    r"Android|iPhone|iPad|iPod|Windows Phone|BlackBerry|BB10|webOS|"
+    r"Mobile|Opera Mini|IEMobile|Kindle|Silk/",
+    re.IGNORECASE,
+)
+# Known Tesla MCU browser tokens (QtCarBrowser legacy + Chromium Tesla/<fw>).
+_TESLA_UA_RE = re.compile(r"QtCarBrowser|\bTesla/", re.IGNORECASE)
+
+
+def platform_ua_redirect_enabled() -> bool:
+    """ON by default; set PLATFORM_UA_REDIRECT=0 (or MOBILE_UA_REDIRECT=0) to disable."""
+    for key in ("PLATFORM_UA_REDIRECT", "MOBILE_UA_REDIRECT"):
+        raw = os.environ.get(key)
+        if raw is not None and str(raw).strip() != "":
+            return str(raw).strip().lower() in ("1", "true", "yes", "on")
+    return True
 
 
 def mobile_ua_redirect_enabled() -> bool:
-    return os.environ.get("MOBILE_UA_REDIRECT", "").strip().lower() in ("1", "true", "yes")
+    """Backward-compatible alias for platform_ua_redirect_enabled()."""
+    return platform_ua_redirect_enabled()
+
+
+def looks_like_tesla_ua(user_agent: str) -> bool:
+    return bool(user_agent and _TESLA_UA_RE.search(user_agent))
 
 
 def looks_like_mobile_ua(user_agent: str) -> bool:
-    return bool(user_agent and _MOBILE_UA_RE.search(user_agent))
+    """Phone/tablet-class browsers. Tesla car UA is checked separately (and first)."""
+    if not user_agent or looks_like_tesla_ua(user_agent):
+        return False
+    return bool(_MOBILE_UA_RE.search(user_agent))
+
+
+def platform_entry_for_ua(user_agent: str) -> Optional[str]:
+    """Return `/tesla`, `/mobile`, or None (desktop / unknown) for a User-Agent."""
+    if looks_like_tesla_ua(user_agent):
+        return "/tesla"
+    if looks_like_mobile_ua(user_agent):
+        return "/mobile"
+    return None
+
+
+def _wants_desktop_escape(query: Dict[str, List[str]]) -> bool:
+    """True when the client asked to stay on the desktop entry (`/` )."""
+    desktop = (query.get("desktop") or [""])[0].strip().lower()
+    if desktop in ("1", "true", "yes", "on"):
+        return True
+    ui = (query.get("ui") or [""])[0].strip().lower()
+    return ui == "desktop"
 
 
 def cost_profile_lean() -> bool:
@@ -124,6 +173,7 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_stats()
             return
         if path == "/api/health":
+            redirect_on = platform_ua_redirect_enabled()
             self.send_json_response({
                 "status": "healthy",
                 "service": "Tesla Supercharger Route Planner",
@@ -135,7 +185,9 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "plan_per_min": PLAN_RATE_LIMIT,
                     "max_concurrent_plans": MAX_CONCURRENT_PLANS,
                     "static_cache_max_age": STATIC_CACHE_MAX_AGE,
-                    "mobile_ua_redirect": mobile_ua_redirect_enabled(),
+                    "platform_ua_redirect": redirect_on,
+                    # Legacy alias — same flag as platform_ua_redirect
+                    "mobile_ua_redirect": redirect_on,
                 },
             })
             return
@@ -148,7 +200,7 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.path = "/tesla-probe.html"
             return super().do_GET()
 
-        if self._maybe_mobile_ua_redirect(path):
+        if self._maybe_platform_ua_redirect(path, query):
             return
 
         self._map_spa_path(path)
@@ -159,6 +211,7 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         self._api_response = False
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        query = urllib.parse.parse_qs(parsed.query)
 
         if path.startswith("/api/"):
             # JSON APIs are GET/POST oriented; HEAD → 405 keeps surface small.
@@ -172,25 +225,39 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             self.path = "/tesla-probe.html"
             return super().do_HEAD()
 
-        if self._maybe_mobile_ua_redirect(path):
+        if self._maybe_platform_ua_redirect(path, query):
             return
 
         self._map_spa_path(path)
         return super().do_HEAD()
 
+    def _maybe_platform_ua_redirect(
+        self, path: str, query: Optional[Dict[str, List[str]]] = None
+    ) -> bool:
+        """Redirect `/` by User-Agent to /tesla or /mobile. Returns True if response sent.
+
+        Only applies to the desktop entry `/`. Already on `/mobile` or `/tesla` → no-op
+        (no redirect loops). APIs and static assets are never redirected.
+        """
+        if path != "/":
+            return False
+        if not platform_ua_redirect_enabled():
+            return False
+        if _wants_desktop_escape(query or {}):
+            return False
+        target = platform_entry_for_ua(self.headers.get("User-Agent", ""))
+        if not target:
+            return False
+        self.send_response(302)
+        self.send_header("Location", target)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        return True
+
     def _maybe_mobile_ua_redirect(self, path: str) -> bool:
-        """Optional soft UA redirect (HTML entry only). Returns True if response sent."""
-        if (
-            path == "/"
-            and mobile_ua_redirect_enabled()
-            and looks_like_mobile_ua(self.headers.get("User-Agent", ""))
-        ):
-            self.send_response(302)
-            self.send_header("Location", "/mobile")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return True
-        return False
+        """Deprecated alias — prefer _maybe_platform_ua_redirect."""
+        return self._maybe_platform_ua_redirect(path, {})
 
     def _map_spa_path(self, path: str) -> None:
         """Rewrite mobile / tesla + unknown paths onto index.html (same SPA)."""
@@ -682,12 +749,15 @@ def run_server(port: int = PORT):
 
     with ThreadedReusableServer(("", port), SuperchargerRequestHandler) as httpd:
         profile = "lean" if cost_profile_lean() else "default"
+        ua_mode = "on" if platform_ua_redirect_enabled() else "off"
         print("============================================================")
         print(f"  Tesla Supercharger Route Planner on port {port}")
         print(f"  Desktop:  http://localhost:{port}/")
         print(f"  Mobile:   http://localhost:{port}/mobile")
         print(f"  Tesla:    http://localhost:{port}/tesla")
         print(f"  Probe:    http://localhost:{port}/tesla-probe")
+        print(f"  UA / →    platform redirect {ua_mode} "
+              f"(Tesla→/tesla, mobile→/mobile; ?desktop=1 escape)")
         print(f"  Cost:     profile={profile}  plans={PLAN_RATE_LIMIT}/min  "
               f"geocode={GEOCODE_RATE_LIMIT}/min  concurrent={MAX_CONCURRENT_PLANS}")
         print("============================================================")

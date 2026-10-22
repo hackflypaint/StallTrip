@@ -174,12 +174,12 @@ node tests/verify_ui.js
 ```
 
 ### Mobile shell smoke (`/mobile`)
-Phone viewport Playwright checks for map-first shell, Plan sheet, SF→LA plan, and default-off UA redirect:
+Phone viewport Playwright checks for map-first shell, Plan sheet, SF→LA plan, and `/` UA → `/mobile`:
 ```bash
 # requires Chrome + playwright (npm install --no-save playwright)
 node tests/verify_mobile.js
 ```
-Soft UA redirect (`MOBILE_UA_REDIRECT`) remains **disabled** in Docker compose unless explicitly set. Phones use **`/mobile`** (separate from desktop and Tesla car shell).
+Platform UA redirect on **`/`** is **on by default**: any phone/tablet mobile → **`/mobile`**, Tesla MCU browser → **`/tesla`**, desktop stays **`/`**. Escape: `/?desktop=1`. Kill switch: `PLATFORM_UA_REDIRECT=0`.
 
 ### Tesla landscape suite (in-car profiles)
 Chromium with `deviceScaleFactor: 1.53`, `hasTouch: true`, viewports **773×601** and **1254×784**. Smoke: **`/tesla`** (car mode) → preset plan → drawer → box select → layers (+ `/tesla-probe`). Screenshots go to the TESLA Project store `media/tesla-emulation/car-shell/` when run:
@@ -190,7 +190,8 @@ node tests/verify_tesla_ui.js
 
 ### Tesla in-car entry + probe
 - **Canonical car planner:** `GET /tesla` — map-first car shell ON (bookmark over HTTPS/ngrok).
-- Optional on `/`: `?car=1`. Phone shell: `/mobile` (separate).
+- **UA on `/`:** `QtCarBrowser` / `Tesla/<fw>` → 302 `/tesla`.
+- Optional on `/`: `?car=1` (car chrome) or `?desktop=1` (skip UA redirect). Phone/tablet shell: `/mobile`.
 - **Fingerprint probe:** `GET /tesla-probe` (also `/tesla-probe.html`) — UA, Chromium, viewport/screen, DPR, touch, MQs, geolocation.
 - Needs **public HTTPS** in the car — LAN/localhost are blocked (see Project store `docs/https-car-access.md`).
 

@@ -98,8 +98,9 @@ async function run() {
     await page.screenshot({ path: path.join(MEDIA_DIR, "04-mobile-sheet-query.png") });
     console.log("5. /mobile?sheet=1 opens planner");
 
-    // 6. Default: no UA redirect on /
-    const desktop = await context.request.get(`${BASE}/`, {
+    // 6. Platform UA redirect: phone → /mobile (server-side; fetch cannot override UA,
+    // so probe via Node request with maxRedirects: 0)
+    const redirected = await context.request.get(`${BASE}/`, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
@@ -107,23 +108,14 @@ async function run() {
       },
       maxRedirects: 0,
     });
-    // Playwright request follows redirects by default — check final URL stays /
-    // Use API-style check via evaluate fetch instead:
-    const redirected = await page.evaluate(async (base) => {
-      const res = await fetch(base + "/", {
-        method: "GET",
-        redirect: "manual",
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
-        },
-      });
-      return { status: res.status, location: res.headers.get("Location") };
-    }, BASE);
-    if (redirected.status === 302 && redirected.location === "/mobile") {
-      throw new Error("UA redirect unexpectedly enabled on /");
+    if (redirected.status() !== 302) {
+      throw new Error(`expected 302 from / with iPhone UA, got ${redirected.status()}`);
     }
-    console.log("6. UA redirect remains OFF by default");
+    const loc = redirected.headers()["location"];
+    if (loc !== "/mobile") {
+      throw new Error(`expected Location /mobile, got ${loc}`);
+    }
+    console.log("6. UA redirect ON — iPhone / → /mobile");
 
     console.log("\nMOBILE PLAYWRIGHT SMOKE PASSED");
     console.log(`Screenshots → ${MEDIA_DIR}`);
