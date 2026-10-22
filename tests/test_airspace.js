@@ -78,6 +78,22 @@ function run() {
   assert(t.AP.blockRed.toUpperCase() === "#F60726", "AP block token");
   assert(t.AP.parkPurple.toUpperCase() === "#7C1C8D", "AP park token");
   assert(t.MIN_ZOOM_LABELS === 11, "label minzoom (Autopylot uses 12; Leaflet 11)");
+  assert(
+    t.MIN_UASFM_BBOX_HALF_SPAN_DEG >= 0.3,
+    "UASFM min bbox half-span (FAA empty envelopes)"
+  );
+  assert(typeof t.expandBboxHalfSpan === "function", "expandBboxHalfSpan exported");
+  const tight = "-77.21,38.71,-76.87,38.99";
+  const expanded = t.expandBboxHalfSpan(tight, t.MIN_UASFM_BBOX_HALF_SPAN_DEG);
+  const [ew, es, ee, en] = expanded.split(",").map(Number);
+  assert(ee - ew >= t.MIN_UASFM_BBOX_HALF_SPAN_DEG * 2 - 1e-9, "expand lon span");
+  assert(en - es >= t.MIN_UASFM_BBOX_HALF_SPAN_DEG * 2 - 1e-9, "expand lat span");
+  const uasfmUrl = t.buildQueryUrl(t.LAYERS.uasfm, tight);
+  assert(uasfmUrl.includes("geometry="), "uasfm has geometry");
+  // Expanded geometry must appear (not the tiny raw viewport)
+  assert(!decodeURIComponent(uasfmUrl).includes(tight), "uasfm geometry expanded");
+  assert(t.LAYERS.uasfm.outFields.includes("LATITUDE"), "uasfm outFields LATITUDE");
+  assert(t.LAYERS.uasfm.outFields.includes("LONGITUDE"), "uasfm outFields LONGITUDE");
 
   // Map-canvas legend markup lives in the overlay module source
   const overlaySrc = fs.readFileSync(
