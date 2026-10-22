@@ -6,10 +6,25 @@ Phone entry is the **web shell** at `/mobile` (same stdlib / HI container as des
 
 | Surface | Entry | Notes |
 | --- | --- | --- |
-| Desktop planner | `/` | Default SPA |
-| **Phone mobile shell** | **`/mobile`** | Map-first; `body.ui-mobile` |
-| Tesla car shell | **`/tesla`** (preferred) or `/` + heuristics / `?car=1` | `body.car-shell` — not `/mobile` |
+| Desktop planner | `/` | Default SPA; also `/?desktop=1` escape |
+| **Phone / tablet shell** | **`/mobile`** | Map-first; `body.ui-mobile` |
+| Tesla car shell | **`/tesla`** | `body.car-shell` — not `/mobile` |
 | Tesla probe | `/tesla-probe` | Fingerprint page |
+
+### Platform User-Agent redirect (on by default)
+
+Hitting **`/`** (GET/HEAD) may 302 before the SPA:
+
+| User-Agent class | Redirect | Tokens / notes |
+| --- | --- | --- |
+| Tesla in-car browser | `/tesla` | `QtCarBrowser`, `Tesla/<firmware>` |
+| Phone / tablet mobile | `/mobile` | Android (phone + tablet), iPhone, iPod, **iPad**, Windows Phone, generic `Mobile`, … |
+| Desktop / unknown | _(none)_ | Stay on `/` |
+
+- Already on `/mobile` or `/tesla` → no redirect (no loops). APIs/static never redirected.
+- **iPad** → `/mobile` (tablet uses the phone shell). iPadOS “Request Desktop Website” often looks like Macintosh and stays on `/`.
+- Escape hatch: **`/?desktop=1`** or **`/?ui=desktop`**.
+- Disable entirely: `PLATFORM_UA_REDIRECT=0` (legacy alias: `MOBILE_UA_REDIRECT=0`).
 
 Optional public URL: `./scripts/mobile-ngrok.sh` (local ngrok config / `NGROK_AUTHTOKEN` — never commit tokens).
 
@@ -51,9 +66,11 @@ podman run -d --name tesla-supercharger-planner -p 8080:8080 \
 | `COST_PROFILE` | `lean` | Tighter rate defaults |
 | `GEOCODE_RATE_LIMIT` | 12 / min / IP | |
 | `PLAN_RATE_LIMIT` | 4 / min / IP | Each plan hits OSRM |
+| `TRUST_PROXY` | off | Set `1` only behind a reverse proxy that overwrites `X-Forwarded-For` so rate limits key per real client |
 | `MAX_CONCURRENT_PLANS` | 2 | |
 | `STATIC_CACHE_MAX_AGE` | 300 | JS/CSS/images |
-| `MOBILE_UA_REDIRECT` | unset/off | Keep off |
+| `PLATFORM_UA_REDIRECT` | on (default) | Set `0` to disable `/` UA redirects |
+| `MOBILE_UA_REDIRECT` | _(alias)_ | Legacy name for the same kill switch |
 | `PORT` | 8080 | |
 ## Optional: ngrok (local only)
 
@@ -66,8 +83,9 @@ COST_PROFILE=lean python3 server.py 8080
 ## Verify
 
 ```bash
-python3 -m unittest tests.test_mobile tests.test_security tests.test_routing -v
+python3 -m unittest tests.test_platform_redirect tests.test_mobile tests.test_security tests.test_routing -v
 curl -fsSI http://localhost:8080/mobile | head -15
+curl -fsSI -A "Mozilla/5.0 (iPhone)" http://localhost:8080/ | head -15   # → Location: /mobile
 curl -fsS http://localhost:8080/api/health
 # optional: npm install --no-save playwright && node tests/verify_mobile.js
 ```

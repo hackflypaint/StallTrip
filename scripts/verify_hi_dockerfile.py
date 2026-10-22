@@ -20,8 +20,23 @@ def fail(msg: str) -> None:
 def main() -> None:
     if "registry.access.redhat.com/hi/python:" not in DOCKERFILE:
         fail("must use Red Hat HI python image")
-    if "-builder AS builder" not in DOCKERFILE and "-builder as builder" not in DOCKERFILE.lower():
-        fail("multi-stage builder stage missing")
+    if not re.search(r"-builder@\$\{PYTHON_HI_BUILDER_DIGEST\}\s+AS\s+builder", DOCKERFILE, flags=re.I):
+        fail("multi-stage builder stage missing (digest-pinned FROM … AS builder)")
+    # Pin builder + runtime by digest (not floating tag alone)
+    if "PYTHON_HI_BUILDER_DIGEST" not in DOCKERFILE or "PYTHON_HI_RUNTIME_DIGEST" not in DOCKERFILE:
+        fail("Dockerfile must declare PYTHON_HI_BUILDER_DIGEST and PYTHON_HI_RUNTIME_DIGEST")
+    if "sha256:" not in DOCKERFILE:
+        fail("digest ARG defaults must include sha256:… values")
+    if not re.search(
+        r"FROM registry\.access\.redhat\.com/hi/python:\$\{PYTHON_HI_VERSION\}-builder@\$\{PYTHON_HI_BUILDER_DIGEST\}",
+        DOCKERFILE,
+    ):
+        fail("builder FROM must use PYTHON_HI_VERSION-builder@PYTHON_HI_BUILDER_DIGEST")
+    if not re.search(
+        r"FROM registry\.access\.redhat\.com/hi/python:\$\{PYTHON_HI_VERSION\}@\$\{PYTHON_HI_RUNTIME_DIGEST\}",
+        DOCKERFILE,
+    ):
+        fail("runtime FROM must use PYTHON_HI_VERSION@PYTHON_HI_RUNTIME_DIGEST")
     if "USER 65532" not in DOCKERFILE:
         fail("runtime must drop to UID 65532")
     if re.search(r"HEALTHCHECK.*\n.*CMD \[\"/bin/sh", DOCKERFILE):

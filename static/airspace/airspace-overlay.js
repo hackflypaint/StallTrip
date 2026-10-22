@@ -29,6 +29,12 @@
 
   const DEBOUNCE_MS = 350;
   const BBOX_PAD_DEG = 0.08;
+  /**
+   * FAA UASFM FeatureServer returns empty GeoJSON for tight envelopes
+   * (empirically empty below ~0.5–0.6° span around DC). Expand UASFM
+   * queries to at least this half-span so zoom ≥11 still gets cells + labels.
+   */
+  const MIN_UASFM_BBOX_HALF_SPAN_DEG = 0.35;
   const MAX_CLASS = 800;
   const MAX_SUA = 500;
   const MAX_UASFM = 1500;
@@ -164,10 +170,12 @@
     uasfm: {
       path: "FAA_UAS_FacilityMap_Data/FeatureServer/0",
       where: "1=1",
-      outFields: "CEILING,UNIT,APT1_FAAID,APT1_NAME,APT1_ICAO",
+      outFields: "CEILING,UNIT,APT1_FAAID,APT1_NAME,APT1_ICAO,LATITUDE,LONGITUDE",
       max: MAX_UASFM,
       minZoom: MIN_ZOOM_UASFM,
       constraint: CONSTRAINT.auth,
+      /** Expand tight viewports — see MIN_UASFM_BBOX_HALF_SPAN_DEG. */
+      minBboxHalfSpanDeg: MIN_UASFM_BBOX_HALF_SPAN_DEG,
     },
     stadiums: {
       path: "Stadiums/FeatureServer/0",
@@ -207,9 +215,13 @@
 
   function buildQueryUrl(layerDef, bboxStr) {
     const base = layerDef.base || FAA_ORG;
+    const geom =
+      layerDef.minBboxHalfSpanDeg != null
+        ? expandBboxHalfSpan(bboxStr, layerDef.minBboxHalfSpanDeg)
+        : bboxStr;
     const params = new URLSearchParams({
       where: layerDef.where,
-      geometry: bboxStr,
+      geometry: geom,
       geometryType: "esriGeometryEnvelope",
       inSR: "4326",
       spatialRel: "esriSpatialRelIntersects",
@@ -230,6 +242,29 @@
     const south = Math.max(-90, sw.lat - pad);
     const east = Math.min(180, ne.lng + pad);
     const north = Math.min(90, ne.lat + pad);
+    return `${west},${south},${east},${north}`;
+  }
+
+  /**
+   * Expand a west,south,east,north envelope so each axis is at least
+   * 2 * minHalfSpanDeg (centered). Needed for FAA UASFM spatial queries.
+   */
+  function expandBboxHalfSpan(bboxStr, minHalfSpanDeg) {
+    const parts = String(bboxStr || "").split(",").map(Number);
+    if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) {
+      return bboxStr;
+    }
+    let [west, south, east, north] = parts;
+    const minHalf = Math.max(0, Number(minHalfSpanDeg) || 0);
+    if (minHalf <= 0) return bboxStr;
+    const midLon = (west + east) / 2;
+    const midLat = (south + north) / 2;
+    const halfLon = Math.max((east - west) / 2, minHalf);
+    const halfLat = Math.max((north - south) / 2, minHalf);
+    west = Math.max(-180, midLon - halfLon);
+    east = Math.min(180, midLon + halfLon);
+    south = Math.max(-90, midLat - halfLat);
+    north = Math.min(90, midLat + halfLat);
     return `${west},${south},${east},${north}`;
   }
 
@@ -308,6 +343,9 @@
       MIN_ZOOM_UASFM,
       MIN_ZOOM_POINTS,
       MIN_ZOOM_LABELS,
+      MIN_UASFM_BBOX_HALF_SPAN_DEG,
+      expandBboxHalfSpan,
+      paddedBbox,
     },
 
     /**
@@ -543,6 +581,14 @@
     },
 
     _featureCentroid(feat) {
+      const p = feat && feat.properties;
+      if (p) {
+        const lat = Number(p.LATITUDE);
+        const lng = Number(p.LONGITUDE);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          return [lat, lng];
+        }
+      }
       const g = feat && feat.geometry;
       if (!g) return null;
       let ring = null;
