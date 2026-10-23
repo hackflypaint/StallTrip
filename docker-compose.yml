@@ -24,6 +24,10 @@ services:
       # - STATIC_CACHE_MAX_AGE=300
       # Behind a reverse proxy that sets/overwrites X-Forwarded-For (default OFF — avoids spoofing):
       # - TRUST_PROXY=1
+      # Logging (stdout → `docker compose logs`; no paid SaaS required):
+      # - LOG_LEVEL=INFO
+      # - CLIENT_LOG_RATE_LIMIT=20
+      # - ACCESS_LOG_STATIC_SAMPLE=20
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

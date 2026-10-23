@@ -110,6 +110,197 @@ function isTeslaPath() {
 
 window.isTeslaPath = isTeslaPath;
 
+/**
+ * Browser console → server bridge (Lightsail-friendly).
+ * Patches console.error / warn (+ selective info), batches POST /api/client-logs.
+ * Failures never break the UI; identical lines are deduped briefly.
+ */
+(function installClientLogBridge() {
+  if (typeof window === "undefined" || window.__stalltripClientLogInstalled) return;
+  window.__stalltripClientLogInstalled = true;
+
+  const MAX_BATCH = 12;
+  const MAX_MESSAGE = 500;
+  const MAX_STACK = 1500;
+  const FLUSH_MS = 2000;
+  const DEDUPE_MS = 8000;
+  const ENDPOINT = "/api/client-logs";
+
+  const orig = {
+    error: console.error.bind(console),
+    warn: console.warn.bind(console),
+    info: console.info.bind(console),
+  };
+
+  let queue = [];
+  let flushTimer = null;
+  let posting = false;
+  const recent = new Map(); // key -> timestamp
+
+  function currentShell() {
+    try {
+      if (typeof isTeslaPath === "function" && isTeslaPath()) return "tesla";
+      if (typeof isMobileShell === "function" && isMobileShell()) return "mobile";
+    } catch (_) { /* ignore */ }
+    return "desktop";
+  }
+
+  function truncate(text, max) {
+    const s = String(text == null ? "" : text);
+    if (s.length <= max) return s;
+    return s.slice(0, max - 1) + "…";
+  }
+
+  function redact(text) {
+    return String(text || "").replace(
+      /(authorization|api[_-]?key|token|password|secret|bearer)\s*[:=]\s*\S+/gi,
+      "$1=[redacted]"
+    );
+  }
+
+  function serializeArg(arg) {
+    if (arg == null) return String(arg);
+    if (typeof arg === "string") return arg;
+    if (arg instanceof Error) {
+      return arg.message || String(arg);
+    }
+    try {
+      return JSON.stringify(arg);
+    } catch (_) {
+      return String(arg);
+    }
+  }
+
+  function stackFromArgs(args) {
+    for (const a of args) {
+      if (a instanceof Error && a.stack) return truncate(redact(a.stack), MAX_STACK);
+    }
+    return "";
+  }
+
+  function shouldCaptureInfo(message) {
+    // Keep signal, drop chatty noise. Wake Lock / similar are useful on Tesla.
+    const m = message.toLowerCase();
+    if (m.includes("wake lock")) return true;
+    if (m.includes("geolocation") || m.includes("watchposition")) return true;
+    return false;
+  }
+
+  function enqueue(level, args, extraStack) {
+    try {
+      const message = truncate(
+        redact(Array.from(args).map(serializeArg).join(" ")),
+        MAX_MESSAGE
+      );
+      if (!message) return;
+      if (level === "info" && !shouldCaptureInfo(message)) return;
+
+      const key = level + "|" + message;
+      const now = Date.now();
+      const last = recent.get(key) || 0;
+      if (now - last < DEDUPE_MS) return;
+      recent.set(key, now);
+      if (recent.size > 80) {
+        for (const [k, t] of recent) {
+          if (now - t > DEDUPE_MS) recent.delete(k);
+        }
+      }
+
+      queue.push({
+        level,
+        message,
+        stack: extraStack || stackFromArgs(args),
+        url: truncate(location.pathname + location.search, 300),
+        shell: currentShell(),
+        ts: now / 1000,
+      });
+      if (queue.length >= MAX_BATCH) {
+        flush();
+      } else if (!flushTimer) {
+        flushTimer = setTimeout(flush, FLUSH_MS);
+      }
+    } catch (_) {
+      // Never throw from logging.
+    }
+  }
+
+  function flush() {
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    if (posting || queue.length === 0) return;
+    const entries = queue.splice(0, MAX_BATCH);
+    posting = true;
+    const body = JSON.stringify({ entries });
+    // Prefer sendBeacon on unload; fetch otherwise (keepalive for pagehide).
+    const send = () => {
+      if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function" && document.visibilityState === "hidden") {
+        try {
+          const blob = new Blob([body], { type: "application/json" });
+          if (navigator.sendBeacon(ENDPOINT, blob)) {
+            posting = false;
+            if (queue.length) flush();
+            return;
+          }
+        } catch (_) { /* fall through */ }
+      }
+      fetch(ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        keepalive: true,
+        credentials: "same-origin",
+      })
+        .catch(() => { /* swallow — logging must not break UI */ })
+        .finally(() => {
+          posting = false;
+          if (queue.length) flush();
+        });
+    };
+    try {
+      send();
+    } catch (_) {
+      posting = false;
+    }
+  }
+
+  console.error = function bridgedError(...args) {
+    try { enqueue("error", args); } catch (_) { /* ignore */ }
+    return orig.error(...args);
+  };
+  console.warn = function bridgedWarn(...args) {
+    try { enqueue("warn", args); } catch (_) { /* ignore */ }
+    return orig.warn(...args);
+  };
+  console.info = function bridgedInfo(...args) {
+    try { enqueue("info", args); } catch (_) { /* ignore */ }
+    return orig.info(...args);
+  };
+
+  window.addEventListener("error", (ev) => {
+    const msg = ev && ev.message ? ev.message : "window.onerror";
+    const stack = ev && ev.error && ev.error.stack ? String(ev.error.stack) : "";
+    enqueue("error", [msg], truncate(redact(stack), MAX_STACK));
+  });
+  window.addEventListener("unhandledrejection", (ev) => {
+    const reason = ev && ev.reason;
+    if (reason instanceof Error) {
+      enqueue("error", ["unhandledrejection", reason.message], truncate(redact(reason.stack || ""), MAX_STACK));
+    } else {
+      enqueue("error", ["unhandledrejection", reason]);
+    }
+  });
+  window.addEventListener("pagehide", () => { try { flush(); } catch (_) { /* ignore */ } });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      try { flush(); } catch (_) { /* ignore */ }
+    }
+  });
+
+  window.__stalltripFlushClientLogs = flush;
+})();
+
 /** Escape text for safe interpolation into HTML / Leaflet popups. */
 function escapeHtml(value) {
   return String(value ?? "")
