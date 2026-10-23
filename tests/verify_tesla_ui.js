@@ -142,22 +142,36 @@ async function runProfile(browser, profile) {
     throw new Error(`car mode badge missing text: ${badgeText}`);
   }
 
-  // Use getBoundingClientRect (CSS height) — more reliable than locator union box
+  // Use getBoundingClientRect (CSS height) — more reliable than locator union box.
+  // Peek owns locate while chrome is visible; map #btnLocateMe returns when chrome is hidden.
   const metrics = await page.locator("body").evaluate((body) => {
     const sb = document.getElementById("sidebar");
     const btn = document.getElementById("btnToggleLayers");
-    const locate = document.getElementById("btnLocateMe");
+    const mapLocate = document.getElementById("btnLocateMe");
+    const peekLocate = document.getElementById("btnCarSheetLocate");
     const sheetH = sb ? sb.getBoundingClientRect().height : 0;
     const layersH = btn ? btn.getBoundingClientRect().height : 0;
-    const locateH = locate ? locate.getBoundingClientRect().height : 0;
+    const mapLocateH = mapLocate ? mapLocate.getBoundingClientRect().height : 0;
+    const peekLocateH = peekLocate ? peekLocate.getBoundingClientRect().height : 0;
+    const locateH = Math.max(mapLocateH, peekLocateH);
     const varH = getComputedStyle(body).getPropertyValue("--car-sheet-h").trim();
-    return { sheetH, layersH, locateH, varH, sheet: body.getAttribute("data-sheet") };
+    return {
+      sheetH,
+      layersH,
+      locateH,
+      mapLocateH,
+      peekLocateH,
+      varH,
+      sheet: body.getAttribute("data-sheet"),
+    };
   });
   if (metrics.layersH < 40) {
     throw new Error(`map control hit area too small: ${metrics.layersH}px`);
   }
   if (metrics.locateH < 40) {
-    throw new Error(`locate control hit area too small: ${metrics.locateH}px`);
+    throw new Error(
+      `locate control hit area too small: ${metrics.locateH}px (map=${metrics.mapLocateH} peek=${metrics.peekLocateH})`
+    );
   }
   const sheetH = metrics.sheetH;
   const mapShare = 1 - sheetH / profile.height;
