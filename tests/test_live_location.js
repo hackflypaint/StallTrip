@@ -149,6 +149,133 @@ function isOffRouteCorridor(lat, lng, plan, thresholdMiles = 25) {
   return Number.isFinite(minMiles) && minMiles > thresholdMiles;
 }
 
+function liveFollowReplanDefaults() {
+  return {
+    minOriginDriftMiles: 5,
+    passStopRadiusMiles: 0.6,
+    offCorridorAutoMiles: 12,
+    cooldownMs: 45_000,
+    maxAccuracyM: 100,
+    maxJumpMiles: 5,
+    jumpGraceMs: 30_000,
+  };
+}
+
+function shouldAcceptLiveFixForReplan(ctx) {
+  const opts = { ...liveFollowReplanDefaults(), ...(ctx && ctx.opts) };
+  const { firstFix, prevLat, prevLng, prevAt, lat, lng, accuracy, now } = ctx || {};
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (firstFix) return true;
+  if (Number.isFinite(accuracy) && accuracy > opts.maxAccuracyM) return false;
+  if (
+    Number.isFinite(prevLat) &&
+    Number.isFinite(prevLng) &&
+    Number.isFinite(prevAt) &&
+    Number.isFinite(now)
+  ) {
+    const jump = haversineDistanceMiles(prevLat, prevLng, lat, lng);
+    const dt = now - prevAt;
+    if (jump != null && jump > opts.maxJumpMiles && dt >= 0 && dt < opts.jumpGraceMs) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function plannedStopKey(stop) {
+  if (!stop) return null;
+  if (stop.id != null && stop.id !== "") return String(stop.id);
+  if (stop.stop_index != null) return `idx:${stop.stop_index}`;
+  if (Number.isFinite(stop.lat) && Number.isFinite(stop.lng)) {
+    return `ll:${Number(stop.lat).toFixed(4)},${Number(stop.lng).toFixed(4)}`;
+  }
+  return null;
+}
+
+function findNewlyPassedStop(lat, lng, plan, passedIds, radiusMiles) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !plan || !Array.isArray(plan.stops)) {
+    return null;
+  }
+  const radius = Number.isFinite(radiusMiles) ? radiusMiles : liveFollowReplanDefaults().passStopRadiusMiles;
+  const seen = passedIds instanceof Set ? passedIds : new Set();
+  let best = null;
+  for (const stop of plan.stops) {
+    if (!stop || stop.type !== "SUPERCHARGER") continue;
+    const key = plannedStopKey(stop);
+    if (!key || seen.has(key)) continue;
+    const d = haversineDistanceMiles(lat, lng, Number(stop.lat), Number(stop.lng));
+    if (d == null || d > radius) continue;
+    if (
+      !best ||
+      (Number(stop.stop_index) || 0) < (Number(best.stop_index) || 0) ||
+      (stop.stop_index === best.stop_index && d < best.distanceMiles)
+    ) {
+      best = {
+        key,
+        name: stop.name || `Stop #${stop.stop_index || ""}`,
+        stop_index: stop.stop_index,
+        distanceMiles: d,
+      };
+    }
+  }
+  return best;
+}
+
+function shouldAutoReplanLiveMove(ctx) {
+  const opts = { ...liveFollowReplanDefaults(), ...(ctx && ctx.opts) };
+  const {
+    firstFix,
+    lat,
+    lng,
+    plannedOriginLat,
+    plannedOriginLng,
+    lastAutoReplanAt,
+    now,
+    plan,
+    hasDestination,
+    planInFlight,
+    accuracy,
+    passedStop,
+  } = ctx || {};
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { replan: false, reason: null };
+  }
+
+  if (firstFix) {
+    return {
+      replan: !!hasDestination,
+      reason: hasDestination ? "first_fix" : "first_fix_origin_only",
+    };
+  }
+
+  if (!hasDestination) return { replan: false, reason: null };
+  if (planInFlight) return { replan: false, reason: null };
+  if (Number.isFinite(accuracy) && accuracy > opts.maxAccuracyM) {
+    return { replan: false, reason: null };
+  }
+
+  const since = Number.isFinite(lastAutoReplanAt) ? now - lastAutoReplanAt : Infinity;
+  if (Number.isFinite(since) && since < opts.cooldownMs) {
+    return { replan: false, reason: null };
+  }
+
+  if (passedStop) return { replan: true, reason: "passed_stop" };
+
+  if (Number.isFinite(plannedOriginLat) && Number.isFinite(plannedOriginLng)) {
+    const drift = haversineDistanceMiles(plannedOriginLat, plannedOriginLng, lat, lng);
+    if (drift != null && drift >= opts.minOriginDriftMiles) {
+      return { replan: true, reason: "origin_drift" };
+    }
+  }
+
+  if (plan && isOffRouteCorridor(lat, lng, plan, opts.offCorridorAutoMiles)) {
+    return { replan: true, reason: "off_corridor" };
+  }
+
+  return { replan: false, reason: null };
+}
+
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
 }
@@ -211,6 +338,192 @@ function run() {
   assert(nextStop.distanceMiles > 4 && nextStop.distanceMiles < 10, "distance to next stop in miles");
   assert(isOffRouteCorridor(37.65, -122.38, samplePlan, 25) === false, "on corridor");
   assert(isOffRouteCorridor(39.0, -120.0, samplePlan, 25) === true, "off corridor (>25 mi)");
+
+  // Smart follow / GPS-as-origin heuristics
+  const defs = liveFollowReplanDefaults();
+  assert(defs.minOriginDriftMiles === 5, "5 mi drift before auto-replan");
+  assert(defs.cooldownMs >= 30_000, "cooldown prevents thrash");
+  assert(defs.offCorridorAutoMiles < 25, "auto off-corridor tighter than manual pill");
+
+  assert(
+    shouldAcceptLiveFixForReplan({
+      firstFix: true,
+      lat: 41.5,
+      lng: -83.3,
+      accuracy: 20,
+      now: 1000,
+    }) === true,
+    "first fix always accepted"
+  );
+  assert(
+    shouldAcceptLiveFixForReplan({
+      firstFix: false,
+      prevLat: 37.77,
+      prevLng: -122.42,
+      prevAt: 1000,
+      lat: 41.5,
+      lng: -83.3,
+      accuracy: 20,
+      now: 2000,
+    }) === false,
+    "reject coastal→Ohio spike in 1s"
+  );
+  assert(
+    shouldAcceptLiveFixForReplan({
+      firstFix: false,
+      prevLat: 37.77,
+      prevLng: -122.42,
+      prevAt: 1000,
+      lat: 41.5,
+      lng: -83.3,
+      accuracy: 20,
+      now: 1000 + defs.jumpGraceMs + 1,
+    }) === true,
+    "accept large jump after grace (GPS recovery)"
+  );
+  assert(
+    shouldAcceptLiveFixForReplan({
+      firstFix: false,
+      prevLat: 37.77,
+      prevLng: -122.42,
+      prevAt: 1000,
+      lat: 37.78,
+      lng: -122.41,
+      accuracy: 250,
+      now: 2000,
+    }) === false,
+    "reject inaccurate fix for replan"
+  );
+
+  const firstNoDest = shouldAutoReplanLiveMove({
+    firstFix: true,
+    lat: 41.5,
+    lng: -83.3,
+    hasDestination: false,
+    now: 5000,
+  });
+  assert(firstNoDest.reason === "first_fix_origin_only" && firstNoDest.replan === false, "first fix seeds origin only");
+
+  const firstWithDest = shouldAutoReplanLiveMove({
+    firstFix: true,
+    lat: 41.5,
+    lng: -83.3,
+    hasDestination: true,
+    now: 5000,
+  });
+  assert(firstWithDest.replan === true && firstWithDest.reason === "first_fix", "first fix replans when dest set");
+
+  const jitter = shouldAutoReplanLiveMove({
+    firstFix: false,
+    lat: 37.775,
+    lng: -122.419,
+    plannedOriginLat: 37.7749,
+    plannedOriginLng: -122.4194,
+    lastAutoReplanAt: 0,
+    now: 100_000,
+    hasDestination: true,
+    planInFlight: false,
+    accuracy: 15,
+    plan: samplePlan,
+  });
+  assert(jitter.replan === false, "sub-mile jitter does not replan");
+
+  const drift = shouldAutoReplanLiveMove({
+    firstFix: false,
+    lat: 37.85,
+    lng: -122.25,
+    plannedOriginLat: 37.7749,
+    plannedOriginLng: -122.4194,
+    lastAutoReplanAt: 0,
+    now: 100_000,
+    hasDestination: true,
+    planInFlight: false,
+    accuracy: 15,
+    plan: samplePlan,
+  });
+  assert(drift.replan === true && drift.reason === "origin_drift", "≥5 mi drift replans");
+
+  const cooled = shouldAutoReplanLiveMove({
+    firstFix: false,
+    lat: 37.85,
+    lng: -122.25,
+    plannedOriginLat: 37.7749,
+    plannedOriginLng: -122.4194,
+    lastAutoReplanAt: 90_000,
+    now: 100_000,
+    hasDestination: true,
+    planInFlight: false,
+    accuracy: 15,
+    plan: samplePlan,
+  });
+  assert(cooled.replan === false, "cooldown blocks rapid auto-replan");
+
+  const busy = shouldAutoReplanLiveMove({
+    firstFix: false,
+    lat: 37.85,
+    lng: -122.25,
+    plannedOriginLat: 37.7749,
+    plannedOriginLng: -122.4194,
+    lastAutoReplanAt: 0,
+    now: 100_000,
+    hasDestination: true,
+    planInFlight: true,
+    accuracy: 15,
+    plan: samplePlan,
+  });
+  assert(busy.replan === false, "Maximize mid-calc blocks auto-replan");
+
+  const nearStop = findNewlyPassedStop(37.563, -122.3255, samplePlan, new Set(), 0.6);
+  assert(nearStop && nearStop.name === "San Mateo, CA", "detect passed Supercharger");
+  const passed = shouldAutoReplanLiveMove({
+    firstFix: false,
+    lat: 37.563,
+    lng: -122.3255,
+    plannedOriginLat: 37.7749,
+    plannedOriginLng: -122.4194,
+    lastAutoReplanAt: 0,
+    now: 100_000,
+    hasDestination: true,
+    planInFlight: false,
+    accuracy: 15,
+    plan: samplePlan,
+    passedStop: nearStop,
+  });
+  assert(passed.replan === true && passed.reason === "passed_stop", "passing a stop replans");
+
+  const offAuto = shouldAutoReplanLiveMove({
+    firstFix: false,
+    lat: 39.0,
+    lng: -120.0,
+    plannedOriginLat: 39.01,
+    plannedOriginLng: -120.01,
+    lastAutoReplanAt: 0,
+    now: 100_000,
+    hasDestination: true,
+    planInFlight: false,
+    accuracy: 15,
+    plan: samplePlan,
+  });
+  assert(offAuto.replan === true && offAuto.reason === "off_corridor", "12 mi off-corridor auto-replans");
+
+  // Locate-with-origin-already-set must still force replan (same as firstFix).
+  const locateOverride = shouldAutoReplanLiveMove({
+    firstFix: true, // armLocate / forceOrigin treats locate like firstFix
+    lat: 41.45,
+    lng: -83.36,
+    plannedOriginLat: 37.7749,
+    plannedOriginLng: -122.4194,
+    lastAutoReplanAt: Date.now(),
+    now: Date.now(),
+    hasDestination: true,
+    planInFlight: true, // even mid-calc, locate/firstFix must win
+    accuracy: 15,
+    plan: samplePlan,
+  });
+  assert(
+    locateOverride.replan === true && locateOverride.reason === "first_fix",
+    "locate/firstFix overrides pre-set origin even while planInFlight"
+  );
 
   console.log("test_live_location.js: all checks passed");
 }
