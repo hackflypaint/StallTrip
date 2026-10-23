@@ -151,11 +151,12 @@ async function run() {
     },
     { label: "preset-then-locate overwrites origin" }
   );
-  // Stale coastal plan must clear immediately; then GPS plan ORIGIN arrives.
+  // Soft-clear: coastal itinerary identity drops immediately (geometry may remain
+  // until the GPS plan paints — avoids blank→fitBounds flicker).
   await waitUntil(
     page,
-    () => window.appState.activePlan == null,
-    { timeout: 5000, label: "stale plan cleared on locate" }
+    () => window.appState.activePlan == null || window.appState.planInFlight,
+    { timeout: 5000, label: "stale plan cleared or replan in flight" }
   );
   const deadlinePosts = Date.now() + 20000;
   let sawGpsPost = false;

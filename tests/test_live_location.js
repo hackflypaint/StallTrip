@@ -525,6 +525,30 @@ function run() {
     "locate/firstFix overrides pre-set origin even while planInFlight"
   );
 
+  // H1 camera: skip fitBounds while live follow owns panTo GPS.
+  function shouldSkipFitBoundsForLiveFollow(live) {
+    return !!(live && live.watching && live.follow);
+  }
+  assert(
+    shouldSkipFitBoundsForLiveFollow({ watching: true, follow: true }) === true,
+    "skip fitBounds while following"
+  );
+  assert(
+    shouldSkipFitBoundsForLiveFollow({ watching: true, follow: false }) === false,
+    "allow fitBounds when follow paused"
+  );
+  assert(
+    shouldSkipFitBoundsForLiveFollow({ watching: false, follow: false }) === false,
+    "allow fitBounds when not watching"
+  );
+
+  // Soft-clear keeps geometry flag for live replan paths.
+  function clearActivePlanOpts(willReplan) {
+    return { keepMapGeometry: !!willReplan };
+  }
+  assert(clearActivePlanOpts(true).keepMapGeometry === true, "replan keeps map geometry");
+  assert(clearActivePlanOpts(false).keepMapGeometry === false, "no-dest clears geometry");
+
   console.log("test_live_location.js: all checks passed");
 }
 

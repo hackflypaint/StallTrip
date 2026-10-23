@@ -689,8 +689,8 @@ async function runVerification() {
     console.log('Saved unified_release_desktop.png');
 
     // Check Tesla Car-Shell (773x601) with all 3 features active.
-    // Peek owns locate while chrome is visible (map #btnLocateMe intentionally hidden);
-    // Leaflet +/- zoom is also hidden in car-shell.
+    // Top-right #btnLocateMe must stay visible; peek locate may also show.
+    // Leaflet +/- zoom stays hidden in car-shell (pinch/scroll still work).
     await page.setViewportSize({ width: 773, height: 601 });
     await page.goto('http://localhost:8080/tesla', { waitUntil: 'networkidle', timeout: 20000 });
     await page.waitForSelector('body.car-shell:not(.car-chrome-hidden)', { timeout: 8000 });
@@ -711,8 +711,19 @@ async function runVerification() {
       const mapLocateStyle = mapLocate ? getComputedStyle(mapLocate) : null;
       const peekLocateStyle = peekLocate ? getComputedStyle(peekLocate) : null;
       const zoomStyle = zoom ? getComputedStyle(zoom) : null;
+      const mapLocateRect = mapLocate ? mapLocate.getBoundingClientRect() : null;
       return {
         mapLocateDisplay: mapLocateStyle ? mapLocateStyle.display : 'missing',
+        mapLocateVisible: !!(
+          mapLocate &&
+          mapLocateStyle &&
+          mapLocateStyle.display !== 'none' &&
+          mapLocateStyle.visibility !== 'hidden' &&
+          mapLocateRect &&
+          mapLocateRect.height >= 40 &&
+          mapLocateRect.width >= 40
+        ),
+        mapLocateH: mapLocateRect ? mapLocateRect.height : 0,
         peekLocateVisible: !!(
           peekLocate &&
           peekLocateStyle &&
@@ -724,9 +735,9 @@ async function runVerification() {
         zoomDisplay: zoomStyle ? zoomStyle.display : 'missing',
       };
     });
-    if (teslaChrome.mapLocateDisplay !== 'none') {
+    if (!teslaChrome.mapLocateVisible) {
       throw new Error(
-        `Expected map #btnLocateMe hidden in car-shell (peek owns locate), got display=${teslaChrome.mapLocateDisplay}`
+        `Expected map #btnLocateMe always visible in car-shell, display=${teslaChrome.mapLocateDisplay} h=${teslaChrome.mapLocateH}`
       );
     }
     if (teslaChrome.zoomDisplay !== 'none') {
@@ -740,7 +751,7 @@ async function runVerification() {
       );
     }
     console.log(
-      `  Tesla chrome: map locate hidden, zoom hidden, peek locate ≈${Math.round(teslaChrome.peekLocateH)}px`
+      `  Tesla chrome: map locate visible (≈${Math.round(teslaChrome.mapLocateH)}px), zoom hidden, peek locate ≈${Math.round(teslaChrome.peekLocateH)}px`
     );
 
     await page.locator('#btnCarSheetPlan').click();
