@@ -89,6 +89,11 @@ const state = {
     /** Supercharger stop ids already treated as passed this watch session. */
     passedStopIds: null,
     lastReplanReason: null,
+    /**
+     * Set when the user taps Locate (start/resume). Next accepted GPS fix must
+     * overwrite trip origin even if a typed/geocoded start was already set.
+     */
+    forceOriginOnNextFix: false,
   },
   userLocationLayer: null,
 };
@@ -1729,6 +1734,7 @@ function applyOriginFromGeolocation(place) {
   }
   // On mobile, open the planner so the user can set a destination next
   if (isMobileShell()) openMobileSheet();
+  if (state.activePlan) clearActivePlan();
   if (state.destination) {
     planRoute();
   }
@@ -2312,10 +2318,15 @@ function markLivePlannedOrigin(lat, lng, reason) {
 
 /**
  * Commit GPS as trip origin; replan when destination exists.
- * Preserves destination, strategy, max stops, forced chargers (via planRoute payload).
+ * Always overwrites a pre-set typed/geocoded/preset origin.
+ * Clears any stale active plan immediately so itinerary "Starting Location"
+ * / route geometry cannot keep coastal coords while LIVE GPS has moved.
+ * Preserves destination, strategy, max stops, forced chargers (via planRoute).
  */
 function commitGpsAsTripOrigin(lat, lng, { name, reason, toast } = {}) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  const live = state.liveLocation;
+  live.forceOriginOnNextFix = false;
   setOrigin({
     name: name || "Current Location",
     lat,
@@ -2324,13 +2335,41 @@ function commitGpsAsTripOrigin(lat, lng, { name, reason, toast } = {}) {
   });
   markLivePlannedOrigin(lat, lng, reason || "gps");
   if (typeof updateCarPeek === "function") updateCarPeek();
+
   const willReplan = !!state.destination;
+  // Drop stale route/itinerary before replan so origin marker and plan ORIGIN agree.
+  if (state.activePlan) {
+    clearActivePlan();
+  }
   if (willReplan) {
     planRoute();
   }
   if (toast) showToast(toast, 2400);
   return willReplan;
 }
+
+/**
+ * User tapped Locate / resume follow: GPS must become trip origin.
+ * If a fix is already available, commit immediately; otherwise arm the next fix.
+ */
+function armLocateOriginCommit(reason) {
+  const live = state.liveLocation;
+  live.forceOriginOnNextFix = true;
+  if (Number.isFinite(live.lat) && Number.isFinite(live.lng)) {
+    const hasDest = !!state.destination;
+    commitGpsAsTripOrigin(live.lat, live.lng, {
+      name: "Current Location",
+      reason: reason || "locate",
+      toast: hasDest
+        ? "Updating route from your location…"
+        : "Starting point set to your location.",
+    });
+    return true;
+  }
+  return false;
+}
+
+window.armLocateOriginCommit = armLocateOriginCommit;
 
 window.markLivePlannedOrigin = markLivePlannedOrigin;
 window.commitGpsAsTripOrigin = commitGpsAsTripOrigin;
@@ -2363,16 +2402,20 @@ function onLivePositionSuccess(pos) {
     panMapToLiveLocation(latitude, longitude, { initial: firstFix });
   }
 
-  const acceptForReplan = shouldAcceptLiveFixForReplan({
-    firstFix,
-    prevLat,
-    prevLng,
-    prevAt,
-    lat: latitude,
-    lng: longitude,
-    accuracy: acc,
-    now,
-  });
+  // Locate arm / first fix always accepted for origin commit (ignore spike/accuracy gates).
+  const forceOrigin = !!(live.forceOriginOnNextFix || firstFix);
+  const acceptForReplan =
+    forceOrigin ||
+    shouldAcceptLiveFixForReplan({
+      firstFix,
+      prevLat,
+      prevLng,
+      prevAt,
+      lat: latitude,
+      lng: longitude,
+      accuracy: acc,
+      now,
+    });
 
   if (acceptForReplan) {
     if (!live.passedStopIds) live.passedStopIds = new Set();
@@ -2385,7 +2428,7 @@ function onLivePositionSuccess(pos) {
     );
 
     const decision = shouldAutoReplanLiveMove({
-      firstFix,
+      firstFix: forceOrigin ? true : firstFix,
       lat: latitude,
       lng: longitude,
       plannedOriginLat: live.plannedOriginLat,
@@ -2394,19 +2437,25 @@ function onLivePositionSuccess(pos) {
       now,
       plan: state.activePlan,
       hasDestination: !!state.destination,
-      planInFlight: !!state.planInFlight && !firstFix,
-      accuracy: acc,
-      passedStop,
+      planInFlight: !!state.planInFlight && !forceOrigin,
+      accuracy: forceOrigin ? null : acc,
+      passedStop: forceOrigin ? null : passedStop,
     });
 
-    if (firstFix || decision.replan) {
+    if (forceOrigin || decision.replan) {
       // Only mark passed after we commit — if planInFlight blocked us, retry next tick.
-      if (passedStop && decision.replan) live.passedStopIds.add(passedStop.key);
-      const reason = firstFix ? "first_fix" : decision.reason || "auto";
+      if (passedStop && decision.replan && !forceOrigin) {
+        live.passedStopIds.add(passedStop.key);
+      }
+      const reason = forceOrigin
+        ? firstFix
+          ? "first_fix"
+          : "locate_override"
+        : decision.reason || "auto";
       let toastMsg = null;
-      if (firstFix && state.destination) {
+      if (forceOrigin && state.destination) {
         toastMsg = "Updating route from your location…";
-      } else if (firstFix) {
+      } else if (forceOrigin) {
         toastMsg = "Starting point set to your location.";
       } else if (decision.reason === "passed_stop") {
         toastMsg = "Passed a stop — updating route…";
@@ -2415,9 +2464,9 @@ function onLivePositionSuccess(pos) {
       } else if (decision.replan) {
         toastMsg = "Updating route from your location…";
       }
-      // firstFix always overwrites origin (even if a preset/coastal origin was set).
+      // Always overwrites a pre-set typed/geocoded/preset origin.
       commitGpsAsTripOrigin(latitude, longitude, {
-        name: firstFix ? "Current Location" : "Current Location (Live)",
+        name: forceOrigin ? "Current Location" : "Current Location (Live)",
         reason,
         toast: toastMsg,
       });
@@ -2455,6 +2504,8 @@ function startLiveLocation() {
     if (Number.isFinite(state.liveLocation.lat) && Number.isFinite(state.liveLocation.lng)) {
       panMapToLiveLocation(state.liveLocation.lat, state.liveLocation.lng, { initial: false });
     }
+    // Already watching: still force GPS → trip origin (typed start must not win).
+    armLocateOriginCommit("locate_resume");
     return;
   }
 
@@ -2478,6 +2529,8 @@ function startLiveLocation() {
   state.liveLocation.lastFixAt = 0;
   state.liveLocation.passedStopIds = new Set();
   state.liveLocation.lastReplanReason = null;
+  // Next fix must overwrite any pre-set origin (order: type start → Locate Me).
+  state.liveLocation.forceOriginOnNextFix = true;
   setLocateBusy(true);
   syncLiveLocationUi();
   showToast("Following your location…", 2200);
@@ -2522,6 +2575,7 @@ function stopLiveLocation({ silent } = {}) {
   state.liveLocation.lastFixAt = 0;
   state.liveLocation.passedStopIds = null;
   state.liveLocation.lastReplanReason = null;
+  state.liveLocation.forceOriginOnNextFix = false;
   if (state.userLocationLayer) state.userLocationLayer.clearLayers();
   releaseLiveWakeLock();
   setLocateBusy(false);
@@ -2531,6 +2585,7 @@ function stopLiveLocation({ silent } = {}) {
 
 /**
  * Map / car locate control: start follow → (drag pauses) → tap resumes → tap stops.
+ * Start and resume always make GPS the trip origin (even if origin was typed first).
  * Shared implementation for phone browsers and Tesla in-car browser.
  */
 function toggleLiveLocation() {
@@ -2545,7 +2600,7 @@ function toggleLiveLocation() {
     if (Number.isFinite(live.lat) && Number.isFinite(live.lng)) {
       panMapToLiveLocation(live.lat, live.lng, { initial: false });
     }
-    showToast("Following again.", 1800);
+    armLocateOriginCommit("locate_resume");
     return;
   }
   stopLiveLocation();
@@ -2562,7 +2617,7 @@ function resumeLiveFollow() {
   if (Number.isFinite(live.lat) && Number.isFinite(live.lng)) {
     panMapToLiveLocation(live.lat, live.lng, { initial: false });
   }
-  showToast("Following again.", 1800);
+  armLocateOriginCommit("locate_resume");
 }
 
 /**
@@ -2626,6 +2681,7 @@ function detectCurrentLocation() {
       // Also show a static blue-dot for this one-shot (no watch).
       updateUserLocationMarker(coords.lat, coords.lng, pos.coords.accuracy, pos.coords.heading);
       if (typeof updateCarPeek === "function") updateCarPeek();
+      if (state.activePlan) clearActivePlan();
       if (state.destination) {
         showToast("Updating route from your location…", 2800);
         planRoute();

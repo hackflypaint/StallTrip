@@ -506,6 +506,25 @@ function run() {
   });
   assert(offAuto.replan === true && offAuto.reason === "off_corridor", "12 mi off-corridor auto-replans");
 
+  // Locate-with-origin-already-set must still force replan (same as firstFix).
+  const locateOverride = shouldAutoReplanLiveMove({
+    firstFix: true, // armLocate / forceOrigin treats locate like firstFix
+    lat: 41.45,
+    lng: -83.36,
+    plannedOriginLat: 37.7749,
+    plannedOriginLng: -122.4194,
+    lastAutoReplanAt: Date.now(),
+    now: Date.now(),
+    hasDestination: true,
+    planInFlight: true, // even mid-calc, locate/firstFix must win
+    accuracy: 15,
+    plan: samplePlan,
+  });
+  assert(
+    locateOverride.replan === true && locateOverride.reason === "first_fix",
+    "locate/firstFix overrides pre-set origin even while planInFlight"
+  );
+
   console.log("test_live_location.js: all checks passed");
 }
 
