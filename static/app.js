@@ -152,10 +152,20 @@ window.isTeslaPath = isTeslaPath;
   }
 
   function redact(text) {
-    return String(text || "").replace(
-      /(authorization|api[_-]?key|token|password|secret|bearer)\s*[:=]\s*\S+/gi,
-      "$1=[redacted]"
-    );
+    return String(text || "")
+      .replace(
+        /authorization\s*[:=]\s*bearer\s+\S+/gi,
+        "[redacted]"
+      )
+      .replace(
+        /(authorization|api[_-]?key|token|password|secret)\s*[:=]\s*\S+/gi,
+        "$1=[redacted]"
+      )
+      .replace(/\bbearer\s+[A-Za-z0-9\-._~+/]+=*/gi, "bearer=[redacted]")
+      .replace(
+        /\b(lat(?:itude)?|lon(?:gitude)?|lng)\s*[:=]\s*-?\d+(?:\.\d+)?/gi,
+        "$1=[redacted]"
+      );
   }
 
   function serializeArg(arg) {
