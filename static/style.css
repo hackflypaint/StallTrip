@@ -2176,36 +2176,9 @@ body.car-shell .map-btn.is-active:active {
   border-color: var(--tesla-red);
 }
 
-body.car-shell .leaflet-top.leaflet-right {
-  top: 12px;
-  right: calc(12px + (var(--car-touch) * 3) + 22px);
-  margin-top: 0;
-  z-index: calc(var(--map-chrome-z, 1100) - 10);
-}
-
+/* Tesla: no +/- zoom chrome — pinch / scroll / double-tap still work; desktop keeps control */
 body.car-shell .leaflet-control-zoom {
-  border: 1px solid var(--border-color) !important;
-  border-radius: 8px !important;
-  overflow: hidden;
-  box-shadow: var(--shadow-md);
-}
-
-body.car-shell .leaflet-control-zoom a {
-  /* Match dark map chrome — avoid bright white Leaflet default */
-  width: 30px !important;
-  height: 30px !important;
-  line-height: 30px !important;
-  font-size: 14px !important;
-  padding: 5px !important;
-  box-sizing: content-box !important;
-  background: rgba(26, 30, 36, 0.92) !important;
-  color: var(--text-main) !important;
-  border-bottom-color: var(--border-color) !important;
-}
-
-body.car-shell .leaflet-control-zoom a:hover {
-  background: var(--bg-tertiary) !important;
-  color: #fff !important;
+  display: none !important;
 }
 
 /* Legend competed with tools at 773×601 — hide in car mode */
