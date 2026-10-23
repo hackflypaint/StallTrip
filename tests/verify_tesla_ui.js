@@ -143,7 +143,7 @@ async function runProfile(browser, profile) {
   }
 
   // Use getBoundingClientRect (CSS height) — more reliable than locator union box.
-  // Peek owns locate while chrome is visible; map #btnLocateMe returns when chrome is hidden.
+  // Top-right #btnLocateMe must always be visible in car-shell (peek locate may also show).
   const metrics = await page.locator("body").evaluate((body) => {
     const sb = document.getElementById("sidebar");
     const btn = document.getElementById("btnToggleLayers");
@@ -151,8 +151,18 @@ async function runProfile(browser, profile) {
     const peekLocate = document.getElementById("btnCarSheetLocate");
     const sheetH = sb ? sb.getBoundingClientRect().height : 0;
     const layersH = btn ? btn.getBoundingClientRect().height : 0;
-    const mapLocateH = mapLocate ? mapLocate.getBoundingClientRect().height : 0;
+    const mapLocateStyle = mapLocate ? getComputedStyle(mapLocate) : null;
+    const mapLocateRect = mapLocate ? mapLocate.getBoundingClientRect() : null;
+    const mapLocateH = mapLocateRect ? mapLocateRect.height : 0;
     const peekLocateH = peekLocate ? peekLocate.getBoundingClientRect().height : 0;
+    const mapLocateVisible = !!(
+      mapLocate &&
+      mapLocateStyle &&
+      mapLocateStyle.display !== "none" &&
+      mapLocateStyle.visibility !== "hidden" &&
+      mapLocateH >= 40 &&
+      mapLocateRect.width >= 40
+    );
     const locateH = Math.max(mapLocateH, peekLocateH);
     const varH = getComputedStyle(body).getPropertyValue("--car-sheet-h").trim();
     return {
@@ -160,6 +170,7 @@ async function runProfile(browser, profile) {
       layersH,
       locateH,
       mapLocateH,
+      mapLocateVisible,
       peekLocateH,
       varH,
       sheet: body.getAttribute("data-sheet"),
@@ -167,6 +178,11 @@ async function runProfile(browser, profile) {
   });
   if (metrics.layersH < 40) {
     throw new Error(`map control hit area too small: ${metrics.layersH}px`);
+  }
+  if (!metrics.mapLocateVisible) {
+    throw new Error(
+      `map #btnLocateMe must stay visible in car-shell (h=${metrics.mapLocateH})`
+    );
   }
   if (metrics.locateH < 40) {
     throw new Error(
@@ -254,11 +270,11 @@ async function runProfile(browser, profile) {
 
   console.log("1c. Live follow locate (mock GPS → follow → stop)...");
   // Client-side only: Playwright grants geo; SPA uses watchPosition (no server proxy).
-  // Peek chrome owns locate while visible; map #btnLocateMe returns when chrome is hidden.
+  // Prefer top-right map locate (always visible); peek locate remains as a duplicate.
   const ctx = page.context();
   await ctx.grantPermissions(["geolocation"]).catch(() => null);
   await ctx.setGeolocation({ latitude: 37.7749, longitude: -122.4194, accuracy: 25 });
-  const locateSel = "#btnCarSheetLocate";
+  const locateSel = "#btnLocateMe";
   await page.locator(locateSel).tap();
   await Promise.race([
     page.waitForSelector(`${locateSel}.is-live-follow`, { timeout: 12000 }),

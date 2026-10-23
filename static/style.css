@@ -981,14 +981,18 @@ body, html {
   z-index: 0;
 }
 
-/* Subtle sleek dark contrast filter for standard OSM tiles */
+/*
+ * Darken OSM tiles without CSS filter on the tile pane.
+ * filter + Leaflet's CSS transform zoom/pinch re-rasterizes every frame → flicker
+ * (Tesla Chromium, mobile, desktop). Opacity composites cleanly during zoomanim.
+ */
 .leaflet-tile-pane {
-  filter: brightness(0.85) contrast(1.1) saturate(0.9);
+  opacity: 0.88;
 }
 
 /* Topographic basemap: keep terrain colors readable under dark chrome */
 #map.basemap-topo .leaflet-tile-pane {
-  filter: brightness(0.95) contrast(1.05) saturate(1.05);
+  opacity: 0.96;
 }
 
 .leaflet-control-attribution {
@@ -2120,17 +2124,11 @@ body.car-shell .map-floating-bar {
   top: 8px;
   right: 8px;
   gap: 5px;
-  /* Stay above tiles; clamp so tools never sink under the bottom sheet */
+  /* Stay above tiles; never scroll/clip — My Location must remain visible */
   z-index: var(--map-chrome-z, 1100);
-  max-height: calc(100% - var(--car-sheet-h, 72px) - 20px);
-  overflow-y: auto;
-  overflow-x: visible;
+  max-height: none;
+  overflow: visible;
   flex-shrink: 0;
-  scrollbar-width: none;
-}
-
-body.car-shell .map-floating-bar::-webkit-scrollbar {
-  display: none;
 }
 
 body.car-shell .map-area-tools,
@@ -2157,9 +2155,9 @@ body.car-shell .map-btn {
   box-sizing: border-box;
 }
 
-/* Peek already has locate — hide map duplicate until chrome is dismissed */
-body.car-shell:not(.car-chrome-hidden) #btnLocateMe {
-  display: none;
+/* Top-right My Location (#btnLocateMe) stays visible in car-shell (peek duplicate OK) */
+body.car-shell #btnLocateMe {
+  display: flex;
 }
 
 body.car-shell .map-btn:hover {
@@ -2617,9 +2615,15 @@ body.ui-mobile #mapModeBanner {
   z-index: calc(var(--map-chrome-z, 1100) - 10);
 }
 
+/*
+ * Leaflet owns pan + pinch (default touch-action: none on .leaflet-container).
+ * pan-x pan-y blocks pinch-zoom and fights touchZoom → janky / flickering zoom.
+ */
 body.ui-mobile .map-container,
-body.ui-mobile #map {
-  touch-action: pan-x pan-y;
+body.ui-mobile #map,
+body.car-shell .map-container,
+body.car-shell #map {
+  touch-action: none;
 }
 
 body.ui-mobile.area-drawing .map-container,
