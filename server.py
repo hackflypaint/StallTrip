@@ -801,7 +801,9 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         # Removable modules: foliage (Explore Fall) + airspace (FAA/NPS ArcGIS).
         # Same-origin UI — no Access-Control-Allow-Origin (prevents cross-site OSRM proxying).
-        # CDN allowlists pin exact Leaflet / Font Awesome paths (SRI in index.html); no bare unpkg.com.
+        # CDN allowlists pin exact Leaflet / Font Awesome paths (SRI in index.html).
+        # script-src stays path-pinned (no bare unpkg host). connect-src allows https://unpkg.com
+        # so DevTools can fetch leaflet.js.map without widening executable script hosts.
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; "
@@ -816,7 +818,8 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             "https://*.tile.opentopomap.org https://unpkg.com/leaflet@1.9.4/dist/images/ "
             "https://www.explorefall.com "
             "https://tilecache.rainviewer.com https://*.rainviewer.com; "
-            "connect-src 'self' https://services6.arcgis.com https://services1.arcgis.com https://*.arcgis.com "
+            "connect-src 'self' https://unpkg.com https://cdnjs.cloudflare.com "
+            "https://services6.arcgis.com https://services1.arcgis.com https://*.arcgis.com "
             "https://api.rainviewer.com https://api.open-meteo.com; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
