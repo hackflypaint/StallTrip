@@ -81,7 +81,11 @@ class TestClientLogs(unittest.TestCase):
         data = json.loads(body)
         limits = data.get("limits") or {}
         self.assertIn("client_log_per_min", limits)
+        self.assertIn("client_log_global_per_min", limits)
         self.assertEqual(limits["client_log_max_entries"], server.CLIENT_LOG_MAX_ENTRIES)
+        self.assertEqual(
+            limits["client_log_global_per_min"], server.CLIENT_LOG_GLOBAL_RATE_LIMIT
+        )
 
     def test_accepts_valid_batch(self):
         status, _, body = self._post(
@@ -217,8 +221,98 @@ class TestClientLogs(unittest.TestCase):
     def test_sanitize_log_text_strips_controls(self):
         out = server.sanitize_log_text("hi\x00there\napi_key=abc123", 200)
         self.assertNotIn("\x00", out)
+        self.assertNotIn("\n", out)
         self.assertIn("[redacted]", out)
         self.assertNotIn("abc123", out)
+
+    def test_sanitize_strips_unicode_c_and_line_separators(self):
+        # Cf zero-width, U+2028 line sep, U+2029 para sep
+        dirty = "ok\u200bmid\u2028line\u2029end"
+        out = server.sanitize_log_text(dirty, 200)
+        self.assertNotIn("\u200b", out)
+        self.assertNotIn("\u2028", out)
+        self.assertNotIn("\u2029", out)
+        self.assertIn("ok", out)
+        self.assertIn("end", out)
+
+    def test_redacts_authorization_bearer_and_geo(self):
+        accepted, rejected = server.validate_client_log_entries(
+            {
+                "entries": [
+                    {
+                        "level": "error",
+                        "message": (
+                            "Authorization: Bearer super-secret-token "
+                            "lat=37.7749 lon=-122.4194"
+                        ),
+                        "stack": "bearer eyJhbGciOiJIUzI1NiJ9.payload.sig",
+                    }
+                ]
+            }
+        )
+        self.assertEqual(rejected, 0)
+        self.assertEqual(len(accepted), 1)
+        msg = accepted[0]["message"]
+        stack = accepted[0]["stack"]
+        self.assertIn("[redacted]", msg)
+        self.assertNotIn("super-secret-token", msg)
+        self.assertNotIn("37.7749", msg)
+        self.assertNotIn("-122.4194", msg)
+        self.assertNotIn("eyJhbGciOiJIUzI1NiJ9", stack)
+
+    def test_global_budget_returns_429(self):
+        prev_global = server.CLIENT_LOG_GLOBAL_RATE_LIMIT
+        prev_ip = server.CLIENT_LOG_RATE_LIMIT
+        server.CLIENT_LOG_GLOBAL_RATE_LIMIT = 3
+        server.CLIENT_LOG_RATE_LIMIT = 100  # per-IP must not mask global
+        server.clear_rate_limit_state()
+        try:
+            payload = {"entries": [{"level": "error", "message": "global-rl"}]}
+            codes = []
+            for _ in range(5):
+                status, _, _ = self._post("/api/client-logs", payload)
+                codes.append(status)
+            self.assertEqual(codes[:3], [200, 200, 200])
+            self.assertTrue(any(c == 429 for c in codes[3:]), codes)
+        finally:
+            server.CLIENT_LOG_GLOBAL_RATE_LIMIT = prev_global
+            server.CLIENT_LOG_RATE_LIMIT = prev_ip
+            server.clear_rate_limit_state()
+
+    def test_test_rate_bypass_excluded_from_client_logs(self):
+        prev = os.environ.get("ALLOW_TEST_RATE_BYPASS")
+        prev_limit = server.CLIENT_LOG_RATE_LIMIT
+        os.environ["ALLOW_TEST_RATE_BYPASS"] = "e2e-secret-token"
+        server.CLIENT_LOG_RATE_LIMIT = 2
+        server.clear_rate_limit_state()
+        try:
+            payload = {"entries": [{"level": "error", "message": "bypass-probe"}]}
+            codes = []
+            for _ in range(4):
+                raw = json.dumps(payload).encode("utf-8")
+                req = urllib.request.Request(
+                    self.base + "/api/client-logs",
+                    data=raw,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Test-Rate-Bypass": "e2e-secret-token",
+                    },
+                    method="POST",
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        codes.append(resp.status)
+                except urllib.error.HTTPError as e:
+                    codes.append(e.code)
+            self.assertEqual(codes[:2], [200, 200])
+            self.assertTrue(any(c == 429 for c in codes[2:]), codes)
+        finally:
+            if prev is None:
+                os.environ.pop("ALLOW_TEST_RATE_BYPASS", None)
+            else:
+                os.environ["ALLOW_TEST_RATE_BYPASS"] = prev
+            server.CLIENT_LOG_RATE_LIMIT = prev_limit
+            server.clear_rate_limit_state()
 
 
 class TestAccessLogSampling(unittest.TestCase):
