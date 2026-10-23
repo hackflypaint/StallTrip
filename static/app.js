@@ -961,8 +961,27 @@ function setupEventListeners() {
   });
 
   document.getElementById("btnToggleLayers").addEventListener("click", () => {
+    // Opening Layers while drawing — leave draw mode so banner cannot steal the hit
+    if (state.areaSelectMode) {
+      clearSelectionShape();
+      deactivateAreaSelectMode();
+    }
     toggleLayersPanel();
   });
+
+  document.getElementById("btnMapReset")?.addEventListener("click", () => {
+    if (state.areaSelectMode) {
+      clearSelectionShape();
+      deactivateAreaSelectMode();
+    }
+  }, true);
+
+  document.getElementById("btnLocateMe")?.addEventListener("click", () => {
+    if (state.areaSelectMode) {
+      clearSelectionShape();
+      deactivateAreaSelectMode();
+    }
+  }, true);
 
   document.querySelectorAll('input[name="basemapRadio"]').forEach((el) => {
     el.addEventListener("change", () => {

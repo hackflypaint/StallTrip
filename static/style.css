@@ -441,12 +441,15 @@ body, html {
   outline: none;
 }
 
-/* Map Mode Notification Banner */
+/* Map Mode Notification Banner — stay clear of top-right floating tools (BUG-1) */
 .map-mode-banner {
   position: absolute;
   top: 18px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 16px;
+  right: 72px; /* room for .map-floating-bar (~52px + gutter) */
+  width: auto;
+  max-width: none;
+  transform: none;
   background: rgba(26, 30, 36, 0.95);
   backdrop-filter: blur(8px);
   border: 2px solid var(--accent-cyan);
@@ -459,13 +462,20 @@ body, html {
   display: flex;
   align-items: center;
   gap: 12px;
-  z-index: 1100;
+  /* Below floating tools so Layers / Locate / Reset stay clickable */
+  z-index: calc(var(--map-chrome-z, 1100) - 10);
+  pointer-events: auto;
   animation: bannerSlideDown 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.map-mode-banner > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 @keyframes bannerSlideDown {
-  from { transform: translate(-50%, -15px); opacity: 0; }
-  to { transform: translate(-50%, 0); opacity: 1; }
+  from { transform: translateY(-12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 .pulse-icon {
@@ -2224,10 +2234,13 @@ body.car-shell .layers-option {
 body.car-shell .map-mode-banner {
   top: 12px;
   left: 12px;
-  right: calc(12px + var(--car-touch) + 16px);
-  font-size: 0.9rem;
-  padding: 12px 14px;
+  /* Clear horizontal area tools + view tools cluster */
+  right: calc(12px + (var(--car-touch) * 3) + 28px);
+  transform: none;
+  font-size: 0.85rem;
+  padding: 10px 12px;
   gap: 10px;
+  z-index: calc(var(--map-chrome-z, 1100) - 10);
 }
 
 body.car-shell .cancel-banner-btn {
@@ -2620,12 +2633,15 @@ body.ui-mobile .primary-btn {
 
 body.ui-mobile #mapModeBanner {
   left: calc(10px + var(--safe-left));
-  right: calc(10px + var(--safe-right));
+  /* Keep Clear of right floating toolbar */
+  right: calc(58px + var(--safe-right));
   top: calc(10px + var(--safe-top));
   width: auto;
+  transform: none;
   font-size: 0.82rem;
   padding: 10px 12px;
   line-height: 1.35;
+  z-index: calc(var(--map-chrome-z, 1100) - 10);
 }
 
 body.ui-mobile .map-container,
