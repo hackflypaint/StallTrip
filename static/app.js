@@ -50,6 +50,8 @@ const state = {
   layersPanelOpen: false,
   /** Monotonic token so overlapping planRoute calls discard stale responses. */
   planRouteSeq: 0,
+  /** True while a /api/plan-route request is in flight (blocks live auto-replan). */
+  planInFlight: false,
   /** Foliage/airspace mounted (lazy on mobile until Layers opens). */
   optionalOverlaysMounted: false,
   /** Explore bounds fetch sequencing / debounce. */
@@ -79,6 +81,14 @@ const state = {
     offCorridor: false,
     wakeLock: null,
     startedAt: 0,
+    /** Last origin committed into a plan (or first GPS seed). */
+    plannedOriginLat: null,
+    plannedOriginLng: null,
+    lastAutoReplanAt: 0,
+    lastFixAt: 0,
+    /** Supercharger stop ids already treated as passed this watch session. */
+    passedStopIds: null,
+    lastReplanReason: null,
   },
   userLocationLayer: null,
 };
@@ -1713,11 +1723,15 @@ function setupClearBtn(btnId, inputId, onClear) {
 
 function applyOriginFromGeolocation(place) {
   setOrigin(place);
+  markLivePlannedOrigin(place.lat, place.lng, "one_shot");
   if (state.map) {
     state.map.setView([place.lat, place.lng], 12);
   }
   // On mobile, open the planner so the user can set a destination next
   if (isMobileShell()) openMobileSheet();
+  if (state.destination) {
+    planRoute();
+  }
   return place;
 }
 
@@ -1852,7 +1866,8 @@ function computeNextPlannedStopTelemetry(lat, lng, plan) {
 
 /**
  * Check if the vehicle is significantly off the planned route corridor (> thresholdMiles from any
- * corridor polyline point or stop). Never auto-calls the server — only surfaces a manual replan button.
+ * corridor polyline point or stop). Used for the manual "Replan from here" pill (default 25 mi)
+ * and for smarter auto-replan at a tighter threshold.
  */
 function isOffRouteCorridor(lat, lng, plan, thresholdMiles = 25) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng) || !plan) return false;
@@ -1885,6 +1900,168 @@ function isOffRouteCorridor(lat, lng, plan, thresholdMiles = 25) {
   return Number.isFinite(minMiles) && minMiles > thresholdMiles;
 }
 
+/**
+ * Smart live-follow replan thresholds.
+ * Marker updates every accepted fix; route origin/replan only when these fire.
+ * Tuned for highway EV trips: avoid spinner thrash without stranding a coastal origin
+ * while LIVE GPS is hundreds of miles inland.
+ */
+function liveFollowReplanDefaults() {
+  return {
+    /** Miles from last planned origin before auto-replan (~4 min @ 70 mph). */
+    minOriginDriftMiles: 5,
+    /** Within this radius of a planned Supercharger → treat as passed → replan. */
+    passStopRadiusMiles: 0.6,
+    /** Auto-replan off-corridor sooner than the 25 mi manual pill. */
+    offCorridorAutoMiles: 12,
+    /** Hard floor between auto-replans (ms). */
+    cooldownMs: 45_000,
+    /** Ignore fuzzy fixes for replan decisions (marker still updates). */
+    maxAccuracyM: 100,
+    /** Reject single-tick teleports unless the gap since last fix is long. */
+    maxJumpMiles: 5,
+    /** After this gap, a large jump is treated as recovery, not a spike. */
+    jumpGraceMs: 30_000,
+  };
+}
+
+/**
+ * Whether a new GPS sample is trustworthy enough to drive origin/replan logic.
+ * Always returns true for the first fix. Spikes and awful accuracy are rejected.
+ */
+function shouldAcceptLiveFixForReplan(ctx) {
+  const opts = { ...liveFollowReplanDefaults(), ...(ctx && ctx.opts) };
+  const {
+    firstFix,
+    prevLat,
+    prevLng,
+    prevAt,
+    lat,
+    lng,
+    accuracy,
+    now,
+  } = ctx || {};
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (firstFix) return true;
+  if (Number.isFinite(accuracy) && accuracy > opts.maxAccuracyM) return false;
+  if (
+    Number.isFinite(prevLat) &&
+    Number.isFinite(prevLng) &&
+    Number.isFinite(prevAt) &&
+    Number.isFinite(now)
+  ) {
+    const jump = haversineDistanceMiles(prevLat, prevLng, lat, lng);
+    const dt = now - prevAt;
+    if (jump != null && jump > opts.maxJumpMiles && dt >= 0 && dt < opts.jumpGraceMs) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Stable id for a planned Supercharger stop (session-local). */
+function plannedStopKey(stop) {
+  if (!stop) return null;
+  if (stop.id != null && stop.id !== "") return String(stop.id);
+  if (stop.stop_index != null) return `idx:${stop.stop_index}`;
+  if (Number.isFinite(stop.lat) && Number.isFinite(stop.lng)) {
+    return `ll:${Number(stop.lat).toFixed(4)},${Number(stop.lng).toFixed(4)}`;
+  }
+  return null;
+}
+
+/**
+ * Nearest not-yet-passed SUPERCHARGER within radiusMiles, or null.
+ */
+function findNewlyPassedStop(lat, lng, plan, passedIds, radiusMiles) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !plan || !Array.isArray(plan.stops)) {
+    return null;
+  }
+  const radius = Number.isFinite(radiusMiles) ? radiusMiles : liveFollowReplanDefaults().passStopRadiusMiles;
+  const seen = passedIds instanceof Set ? passedIds : new Set();
+  let best = null;
+  for (const stop of plan.stops) {
+    if (!stop || stop.type !== "SUPERCHARGER") continue;
+    const key = plannedStopKey(stop);
+    if (!key || seen.has(key)) continue;
+    const d = haversineDistanceMiles(lat, lng, Number(stop.lat), Number(stop.lng));
+    if (d == null || d > radius) continue;
+    if (
+      !best ||
+      (Number(stop.stop_index) || 0) < (Number(best.stop_index) || 0) ||
+      (stop.stop_index === best.stop_index && d < best.distanceMiles)
+    ) {
+      best = {
+        key,
+        name: stop.name || `Stop #${stop.stop_index || ""}`,
+        stop_index: stop.stop_index,
+        distanceMiles: d,
+      };
+    }
+  }
+  return best;
+}
+
+/**
+ * Decide whether live GPS should commit origin + replan.
+ * Returns { replan: boolean, reason: string|null }.
+ * firstFix always commits origin; replan when a destination exists.
+ */
+function shouldAutoReplanLiveMove(ctx) {
+  const opts = { ...liveFollowReplanDefaults(), ...(ctx && ctx.opts) };
+  const {
+    firstFix,
+    lat,
+    lng,
+    plannedOriginLat,
+    plannedOriginLng,
+    lastAutoReplanAt,
+    now,
+    plan,
+    hasDestination,
+    planInFlight,
+    accuracy,
+    passedStop,
+  } = ctx || {};
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { replan: false, reason: null };
+  }
+
+  if (firstFix) {
+    return {
+      replan: !!hasDestination,
+      reason: hasDestination ? "first_fix" : "first_fix_origin_only",
+    };
+  }
+
+  if (!hasDestination) return { replan: false, reason: null };
+  if (planInFlight) return { replan: false, reason: null };
+  if (Number.isFinite(accuracy) && accuracy > opts.maxAccuracyM) {
+    return { replan: false, reason: null };
+  }
+
+  const since = Number.isFinite(lastAutoReplanAt) ? now - lastAutoReplanAt : Infinity;
+  if (Number.isFinite(since) && since < opts.cooldownMs) {
+    return { replan: false, reason: null };
+  }
+
+  if (passedStop) return { replan: true, reason: "passed_stop" };
+
+  if (Number.isFinite(plannedOriginLat) && Number.isFinite(plannedOriginLng)) {
+    const drift = haversineDistanceMiles(plannedOriginLat, plannedOriginLng, lat, lng);
+    if (drift != null && drift >= opts.minOriginDriftMiles) {
+      return { replan: true, reason: "origin_drift" };
+    }
+  }
+
+  if (plan && isOffRouteCorridor(lat, lng, plan, opts.offCorridorAutoMiles)) {
+    return { replan: true, reason: "off_corridor" };
+  }
+
+  return { replan: false, reason: null };
+}
+
 window.isSecureGeoContext = isSecureGeoContext;
 window.liveLocationWatchOptions = liveLocationWatchOptions;
 window.oneShotLocationOptions = oneShotLocationOptions;
@@ -1894,6 +2071,11 @@ window.headingToCardinal = headingToCardinal;
 window.formatLiveTelemetryLabel = formatLiveTelemetryLabel;
 window.computeNextPlannedStopTelemetry = computeNextPlannedStopTelemetry;
 window.isOffRouteCorridor = isOffRouteCorridor;
+window.liveFollowReplanDefaults = liveFollowReplanDefaults;
+window.shouldAcceptLiveFixForReplan = shouldAcceptLiveFixForReplan;
+window.plannedStopKey = plannedStopKey;
+window.findNewlyPassedStop = findNewlyPassedStop;
+window.shouldAutoReplanLiveMove = shouldAutoReplanLiveMove;
 
 function setLocateBusy(busy) {
   const mapBtn = document.getElementById("btnLocateMe");
@@ -2115,40 +2297,131 @@ function setupLiveLocationLifecycle() {
   });
 }
 
+/**
+ * Record the origin that the current itinerary (or seed) is planned from.
+ * Clears passed-stop memory — a new origin/plan starts a fresh pass cycle.
+ */
+function markLivePlannedOrigin(lat, lng, reason) {
+  const live = state.liveLocation;
+  live.plannedOriginLat = lat;
+  live.plannedOriginLng = lng;
+  live.lastAutoReplanAt = Date.now();
+  live.lastReplanReason = reason || null;
+  live.passedStopIds = new Set();
+}
+
+/**
+ * Commit GPS as trip origin; replan when destination exists.
+ * Preserves destination, strategy, max stops, forced chargers (via planRoute payload).
+ */
+function commitGpsAsTripOrigin(lat, lng, { name, reason, toast } = {}) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  setOrigin({
+    name: name || "Current Location",
+    lat,
+    lng,
+    source: "geolocation",
+  });
+  markLivePlannedOrigin(lat, lng, reason || "gps");
+  if (typeof updateCarPeek === "function") updateCarPeek();
+  const willReplan = !!state.destination;
+  if (willReplan) {
+    planRoute();
+  }
+  if (toast) showToast(toast, 2400);
+  return willReplan;
+}
+
+window.markLivePlannedOrigin = markLivePlannedOrigin;
+window.commitGpsAsTripOrigin = commitGpsAsTripOrigin;
+
 function onLivePositionSuccess(pos) {
   if (!state.liveLocation.watching) return;
   if (!pos || !pos.coords) return;
   const { latitude, longitude, accuracy, heading, speed } = pos.coords;
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
 
-  const firstFix = state.liveLocation.lat == null;
-  state.liveLocation.lat = latitude;
-  state.liveLocation.lng = longitude;
-  state.liveLocation.accuracy = Number.isFinite(accuracy) ? accuracy : null;
-  state.liveLocation.heading = Number.isFinite(heading) ? heading : null;
-  state.liveLocation.speedMps = Number.isFinite(speed) && speed >= 0 ? speed : null;
+  const live = state.liveLocation;
+  const now = Date.now();
+  const firstFix = live.lat == null;
+  const prevLat = live.lat;
+  const prevLng = live.lng;
+  const prevAt = live.lastFixAt || 0;
+  const acc = Number.isFinite(accuracy) ? accuracy : null;
 
-  updateUserLocationMarker(
-    latitude,
-    longitude,
-    state.liveLocation.accuracy,
-    state.liveLocation.heading
-  );
+  // Blue-dot always tracks the latest raw fix (nav-app feel).
+  live.lat = latitude;
+  live.lng = longitude;
+  live.accuracy = acc;
+  live.heading = Number.isFinite(heading) ? heading : null;
+  live.speedMps = Number.isFinite(speed) && speed >= 0 ? speed : null;
+  live.lastFixAt = now;
 
-  if (state.liveLocation.follow) {
+  updateUserLocationMarker(latitude, longitude, live.accuracy, live.heading);
+
+  if (live.follow) {
     panMapToLiveLocation(latitude, longitude, { initial: firstFix });
   }
 
-  // First fix only: seed Origin when unset so Plan Route stays one tap away.
-  // Do NOT keep rewriting origin while driving — that would thrash an active plan.
-  if (firstFix && !state.origin) {
-    setOrigin({
-      name: "Current Location",
+  const acceptForReplan = shouldAcceptLiveFixForReplan({
+    firstFix,
+    prevLat,
+    prevLng,
+    prevAt,
+    lat: latitude,
+    lng: longitude,
+    accuracy: acc,
+    now,
+  });
+
+  if (acceptForReplan) {
+    if (!live.passedStopIds) live.passedStopIds = new Set();
+    const passedStop = findNewlyPassedStop(
+      latitude,
+      longitude,
+      state.activePlan,
+      live.passedStopIds,
+      liveFollowReplanDefaults().passStopRadiusMiles
+    );
+
+    const decision = shouldAutoReplanLiveMove({
+      firstFix,
       lat: latitude,
       lng: longitude,
-      source: "geolocation",
+      plannedOriginLat: live.plannedOriginLat,
+      plannedOriginLng: live.plannedOriginLng,
+      lastAutoReplanAt: live.lastAutoReplanAt,
+      now,
+      plan: state.activePlan,
+      hasDestination: !!state.destination,
+      planInFlight: !!state.planInFlight && !firstFix,
+      accuracy: acc,
+      passedStop,
     });
-    if (typeof updateCarPeek === "function") updateCarPeek();
+
+    if (firstFix || decision.replan) {
+      // Only mark passed after we commit — if planInFlight blocked us, retry next tick.
+      if (passedStop && decision.replan) live.passedStopIds.add(passedStop.key);
+      const reason = firstFix ? "first_fix" : decision.reason || "auto";
+      let toastMsg = null;
+      if (firstFix && state.destination) {
+        toastMsg = "Updating route from your location…";
+      } else if (firstFix) {
+        toastMsg = "Starting point set to your location.";
+      } else if (decision.reason === "passed_stop") {
+        toastMsg = "Passed a stop — updating route…";
+      } else if (decision.reason === "off_corridor") {
+        toastMsg = "Off corridor — updating route…";
+      } else if (decision.replan) {
+        toastMsg = "Updating route from your location…";
+      }
+      // firstFix always overwrites origin (even if a preset/coastal origin was set).
+      commitGpsAsTripOrigin(latitude, longitude, {
+        name: firstFix ? "Current Location" : "Current Location (Live)",
+        reason,
+        toast: toastMsg,
+      });
+    }
   }
 
   setLocateBusy(false);
@@ -2199,6 +2472,12 @@ function startLiveLocation() {
   state.liveLocation.startedAt = Date.now();
   state.liveLocation.lat = null;
   state.liveLocation.lng = null;
+  state.liveLocation.plannedOriginLat = null;
+  state.liveLocation.plannedOriginLng = null;
+  state.liveLocation.lastAutoReplanAt = 0;
+  state.liveLocation.lastFixAt = 0;
+  state.liveLocation.passedStopIds = new Set();
+  state.liveLocation.lastReplanReason = null;
   setLocateBusy(true);
   syncLiveLocationUi();
   showToast("Following your location…", 2200);
@@ -2237,6 +2516,12 @@ function stopLiveLocation({ silent } = {}) {
   state.liveLocation.nextStop = null;
   state.liveLocation.offCorridor = false;
   state.liveLocation.startedAt = 0;
+  state.liveLocation.plannedOriginLat = null;
+  state.liveLocation.plannedOriginLng = null;
+  state.liveLocation.lastAutoReplanAt = 0;
+  state.liveLocation.lastFixAt = 0;
+  state.liveLocation.passedStopIds = null;
+  state.liveLocation.lastReplanReason = null;
   if (state.userLocationLayer) state.userLocationLayer.clearLayers();
   releaseLiveWakeLock();
   setLocateBusy(false);
@@ -2281,23 +2566,19 @@ function resumeLiveFollow() {
 }
 
 /**
- * Threshold-gated manual replan when vehicle is significantly off-corridor.
- * Never triggers automatically on GPS ticks — only when user taps "Replan from here".
+ * Explicit "Replan from here" (off-corridor pill). Always commits live GPS as origin.
+ * Auto-replan while driving uses shouldAutoReplanLiveMove — this bypasses cooldown.
  */
 function replanFromLiveLocation() {
   const live = state.liveLocation;
   if (!Number.isFinite(live.lat) || !Number.isFinite(live.lng)) return;
-  setOrigin({
-    name: "Current Location (Live)",
-    lat: live.lat,
-    lng: live.lng,
-    source: "geolocation",
-  });
   live.follow = true;
   syncLiveLocationUi();
-  if (state.destination) {
-    planRoute();
-  }
+  commitGpsAsTripOrigin(live.lat, live.lng, {
+    name: "Current Location (Live)",
+    reason: "manual",
+    toast: state.destination ? "Replanning from your location…" : "Starting point set to your location.",
+  });
 }
 
 window.toggleLiveLocation = toggleLiveLocation;
@@ -2340,11 +2621,17 @@ function detectCurrentLocation() {
         source: "geolocation",
       };
       setOrigin(coords);
+      markLivePlannedOrigin(coords.lat, coords.lng, "one_shot");
       if (state.map) state.map.setView([coords.lat, coords.lng], 12);
       // Also show a static blue-dot for this one-shot (no watch).
       updateUserLocationMarker(coords.lat, coords.lng, pos.coords.accuracy, pos.coords.heading);
-      showToast("Location set — pick a destination or preset.", 2800);
       if (typeof updateCarPeek === "function") updateCarPeek();
+      if (state.destination) {
+        showToast("Updating route from your location…", 2800);
+        planRoute();
+      } else {
+        showToast("Location set — pick a destination or preset.", 2800);
+      }
     },
     (err) => {
       setLocateBusy(false);
@@ -2490,6 +2777,7 @@ async function planRoute() {
   }
 
   const seq = ++state.planRouteSeq;
+  state.planInFlight = true;
   const btn = document.getElementById("btnPlanRoute");
   const origBtnText = btn.innerHTML;
   const busyLabel =
@@ -2552,6 +2840,7 @@ async function planRoute() {
     showToast("Failed to compute route. Check network connection.", 5600);
   } finally {
     if (seq === state.planRouteSeq) {
+      state.planInFlight = false;
       btn.innerHTML = origBtnText;
       btn.disabled = false;
     }
