@@ -89,11 +89,14 @@ class TestSecurityHardening(unittest.TestCase):
         self.assertIn("services1.arcgis.com", csp)
         self.assertIn("*.arcgis.com", csp)
         self.assertIn("explorefall.com", csp)
-        # Pin Leaflet / FA paths — reject bare https://unpkg.com host allow
+        # Pin Leaflet / FA paths — reject bare https://unpkg.com in script-src
         self.assertIn("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js", csp)
         self.assertIn("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css", csp)
         self.assertNotIn("script-src 'self' https://unpkg.com;", csp)
         self.assertNotRegex(csp, r"script-src[^;]*https://unpkg.com[;\s]")
+        # Source maps (leaflet.js.map / FA) need host connect; not executable script hosts
+        self.assertRegex(csp, r"connect-src[^;]*https://unpkg.com[\s;]")
+        self.assertRegex(csp, r"connect-src[^;]*https://cdnjs.cloudflare.com[\s;]")
         data = json.loads(body)
         self.assertEqual(data["status"], "healthy")
         limits = data.get("limits") or {}

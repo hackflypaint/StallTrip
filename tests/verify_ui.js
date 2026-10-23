@@ -10,6 +10,21 @@ const path = require('path');
 const MEDIA_DIR = process.env.UI_MEDIA_DIR || '/tmp/tesla-planner-media';
 const TMP_SHOT_DIR = process.env.UI_ARTIFACTS_DIR || '/tmp/tesla-planner-artifacts/screenshots';
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Poll via one-shot evaluate — CSP blocks waitForFunction (unsafe-eval). */
+async function waitUntil(page, predicate, { timeout = 10000, interval = 100, label = 'condition' } = {}) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const ok = await page.evaluate(predicate);
+    if (ok) return;
+    await sleep(interval);
+  }
+  throw new Error(`Timed out waiting for ${label} (${timeout}ms)`);
+}
+
 async function saveShot(page, filename) {
   fs.mkdirSync(TMP_SHOT_DIR, { recursive: true });
   fs.mkdirSync(MEDIA_DIR, { recursive: true });
@@ -108,10 +123,14 @@ async function runVerification() {
     console.log('2a. Toggling route strategy Max → Min → Max and verifying replan...');
     const stopsAfterMax = parseInt(await page.locator('#statStops').textContent(), 10);
     await page.locator('#btnModeMinStops').click();
-    await page.waitForFunction(() => {
-      const btn = document.getElementById('btnPlanRoute');
-      return btn && !btn.disabled;
-    }, { timeout: 40000 });
+    await waitUntil(
+      page,
+      () => {
+        const btn = document.getElementById('btnPlanRoute');
+        return !!(btn && !btn.disabled);
+      },
+      { timeout: 40000, label: 'plan button enabled after Min Stops' }
+    );
     await page.waitForTimeout(1500);
     const modeMin = await page.evaluate(() => window.appState.routingMode);
     if (modeMin !== 'MIN_STOPS') {
@@ -123,10 +142,14 @@ async function runVerification() {
       throw new Error(`Min Stops should reduce stop count (${stopsAfterMin} vs Max ${stopsAfterMax})`);
     }
     await page.locator('#btnModeMaximize').click();
-    await page.waitForFunction(() => {
-      const btn = document.getElementById('btnPlanRoute');
-      return btn && !btn.disabled;
-    }, { timeout: 40000 });
+    await waitUntil(
+      page,
+      () => {
+        const btn = document.getElementById('btnPlanRoute');
+        return !!(btn && !btn.disabled);
+      },
+      { timeout: 40000, label: 'plan button enabled after Maximize' }
+    );
     await page.waitForTimeout(1500);
     const modeMaxAgain = await page.evaluate(() => window.appState.routingMode);
     if (modeMaxAgain !== 'MAXIMIZE') {
@@ -218,12 +241,23 @@ async function runVerification() {
       }
     });
 
-    await page.waitForFunction(() => {
-      const el = document.getElementById('airspaceStatus');
-      if (!el) return false;
-      const t = el.textContent || '';
-      return /Do Not Fly\s+\d+/.test(t) || /Approval\s+\d+/.test(t) || /No-fly\s+\d+/.test(t) || /Auth\s+\d+/.test(t) || /Parks\s+\d+/.test(t) || /UASFM\s+\d+/.test(t);
-    }, { timeout: 25000 });
+    await waitUntil(
+      page,
+      () => {
+        const el = document.getElementById('airspaceStatus');
+        if (!el) return false;
+        const t = el.textContent || '';
+        return (
+          /Do Not Fly\s+\d+/.test(t) ||
+          /Approval\s+\d+/.test(t) ||
+          /No-fly\s+\d+/.test(t) ||
+          /Auth\s+\d+/.test(t) ||
+          /Parks\s+\d+/.test(t) ||
+          /UASFM\s+\d+/.test(t)
+        );
+      },
+      { timeout: 25000, label: 'airspace status counts' }
+    );
 
     const airspaceStatus = await page.locator('#airspaceStatus').textContent();
     console.log(`Drone airspace status: ${airspaceStatus}`);
@@ -544,9 +578,12 @@ async function runVerification() {
     await saveShot(page, 'unified_release_desktop.png');
     console.log('Saved unified_release_desktop.png');
 
-    // Check Tesla Car-Shell (773x601) with all 3 features active
+    // Check Tesla Car-Shell (773x601) with all 3 features active.
+    // Peek owns locate while chrome is visible (map #btnLocateMe intentionally hidden);
+    // Leaflet +/- zoom is also hidden in car-shell.
     await page.setViewportSize({ width: 773, height: 601 });
     await page.goto('http://localhost:8080/tesla', { waitUntil: 'networkidle', timeout: 20000 });
+    await page.waitForSelector('body.car-shell:not(.car-chrome-hidden)', { timeout: 8000 });
     await page.evaluate(() => {
       navigator.geolocation.watchPosition = (success) => {
         setTimeout(() => {
@@ -557,17 +594,59 @@ async function runVerification() {
         return 77;
       };
     });
+    const teslaChrome = await page.evaluate(() => {
+      const mapLocate = document.getElementById('btnLocateMe');
+      const peekLocate = document.getElementById('btnCarSheetLocate');
+      const zoom = document.querySelector('.leaflet-control-zoom');
+      const mapLocateStyle = mapLocate ? getComputedStyle(mapLocate) : null;
+      const peekLocateStyle = peekLocate ? getComputedStyle(peekLocate) : null;
+      const zoomStyle = zoom ? getComputedStyle(zoom) : null;
+      return {
+        mapLocateDisplay: mapLocateStyle ? mapLocateStyle.display : 'missing',
+        peekLocateVisible: !!(
+          peekLocate &&
+          peekLocateStyle &&
+          peekLocateStyle.display !== 'none' &&
+          peekLocateStyle.visibility !== 'hidden' &&
+          peekLocate.getBoundingClientRect().height >= 40
+        ),
+        peekLocateH: peekLocate ? peekLocate.getBoundingClientRect().height : 0,
+        zoomDisplay: zoomStyle ? zoomStyle.display : 'missing',
+      };
+    });
+    if (teslaChrome.mapLocateDisplay !== 'none') {
+      throw new Error(
+        `Expected map #btnLocateMe hidden in car-shell (peek owns locate), got display=${teslaChrome.mapLocateDisplay}`
+      );
+    }
+    if (teslaChrome.zoomDisplay !== 'none') {
+      throw new Error(
+        `Expected Leaflet zoom hidden in car-shell, got display=${teslaChrome.zoomDisplay}`
+      );
+    }
+    if (!teslaChrome.peekLocateVisible) {
+      throw new Error(
+        `Expected peek #btnCarSheetLocate visible (≥40px), height=${teslaChrome.peekLocateH}`
+      );
+    }
+    console.log(
+      `  Tesla chrome: map locate hidden, zoom hidden, peek locate ≈${Math.round(teslaChrome.peekLocateH)}px`
+    );
+
     await page.locator('#btnCarSheetPlan').click();
     await page.waitForSelector('body[data-sheet="plan"]', { timeout: 5000 });
     await page.locator('#route-tab .preset-tag:has-text("SF → LA")').click();
     await page.waitForSelector('#elevationStrip:not([hidden])', { state: 'visible', timeout: 25000 });
     await page.waitForSelector('#mapWeatherPill:not([hidden])', { state: 'visible', timeout: 20000 });
-    await page.locator('#btnLocateMe').click();
+    // Live follow via peek locate (not map #btnLocateMe)
+    await page.locator('#btnCarSheetLocate').click();
     await page.waitForSelector('#liveDriveHud:not([hidden])', { state: 'visible', timeout: 5000 });
-    await page.locator('#btnToggleLayers').click();
+    // At 773×601 the open layers panel can cover #btnToggleLayers — force open/close.
+    await page.locator('#btnToggleLayers').click({ force: true });
+    await page.waitForSelector('#layersPanel', { state: 'visible', timeout: 5000 });
     await page.locator('#weatherRadarToggle').check();
     await page.waitForSelector('#weatherRadarPill.is-visible', { state: 'visible', timeout: 5000 });
-    await page.locator('#btnToggleLayers').click();
+    await page.locator('#btnToggleLayers').click({ force: true });
 
     const carHudBox = await page.locator('#liveDriveHud').boundingBox();
     const carWeatherPillBox = await page.locator('#mapWeatherPill').boundingBox();

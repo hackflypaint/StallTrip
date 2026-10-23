@@ -1955,9 +1955,12 @@ function onLivePositionSuccess(pos) {
 }
 
 function onLivePositionError(err) {
-  console.warn("Live geolocation error:", err);
   // Transient timeout / position-unavailable: keep watching; only hard-stop on deny/unsupported.
   const code = err && err.code;
+  // Permission denied is expected UX — toast only; skip noisy console in prod.
+  if (code !== 1) {
+    console.warn("Live geolocation error:", err);
+  }
   if (code === 1) {
     stopLiveLocation({ silent: true });
     showToast(formatLiveLocationError(err));
@@ -2145,7 +2148,10 @@ function detectCurrentLocation() {
     (err) => {
       setLocateBusy(false);
       syncLiveLocationUi();
-      console.warn("Geolocation denied or error:", err);
+      // Permission denied is expected — toast/mobile fallback only; avoid console noise.
+      if (err && err.code !== 1) {
+        console.warn("Geolocation denied or error:", err);
+      }
       if (isMobileShell()) {
         applyOriginFromGeolocation(resolveGeolocationPlace(null, err));
         return;
