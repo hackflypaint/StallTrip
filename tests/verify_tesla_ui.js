@@ -240,21 +240,28 @@ async function runProfile(browser, profile) {
 
   console.log("1c. Live follow locate (mock GPS → follow → stop)...");
   // Client-side only: Playwright grants geo; SPA uses watchPosition (no server proxy).
+  // Peek chrome owns locate while visible; map #btnLocateMe returns when chrome is hidden.
   const ctx = page.context();
   await ctx.grantPermissions(["geolocation"]).catch(() => null);
   await ctx.setGeolocation({ latitude: 37.7749, longitude: -122.4194, accuracy: 25 });
-  await page.locator("#btnLocateMe").tap();
+  const locateSel = "#btnCarSheetLocate";
+  await page.locator(locateSel).tap();
   await Promise.race([
+    page.waitForSelector(`${locateSel}.is-live-follow`, { timeout: 12000 }),
     page.waitForSelector("#btnLocateMe.is-live-follow", { timeout: 12000 }),
     page.waitForSelector("#appToast:not([hidden])", { timeout: 12000 }),
   ]).catch(() => null);
   const liveState = await page.evaluate(() => {
     const t = document.getElementById("appToast");
-    const b = document.getElementById("btnLocateMe");
+    const car = document.getElementById("btnCarSheetLocate");
+    const map = document.getElementById("btnLocateMe");
     const live = window.appState && window.appState.liveLocation;
     return {
       toast: t && !t.hidden ? t.textContent : "",
-      follow: !!(b && b.classList.contains("is-live-follow")),
+      follow: !!(
+        (car && car.classList.contains("is-live-follow")) ||
+        (map && map.classList.contains("is-live-follow"))
+      ),
       watching: !!(live && live.watching),
       hasDot: !!(document.querySelector(".user-location-dot")),
     };
@@ -265,7 +272,7 @@ async function runProfile(browser, profile) {
   await shot("01d_locate");
   // Stop watch so later steps are not fighting panTo
   if (liveState.watching || liveState.follow) {
-    await page.locator("#btnLocateMe").tap();
+    await page.locator(locateSel).tap();
     await sleep(200);
   }
 

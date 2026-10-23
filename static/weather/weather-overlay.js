@@ -183,7 +183,8 @@
     _radarPillEl: null,
     _routeStripEl: null,
     _weatherMarkersLayer: null,
-    _showMapBadges: true,
+    /** Off by default — stop weather badges clutter the route; opt-in via Layers. */
+    _showMapBadges: false,
     _lastRouteAnalysis: null,
     _fetchSeq: 0,
 
@@ -307,7 +308,7 @@
               <span id="weatherOpacityVal">${pct}%</span>
             </div>
             <label class="weather-sub-toggle">
-              <input type="checkbox" id="weatherRouteBadgesToggle" checked />
+              <input type="checkbox" id="weatherRouteBadgesToggle" />
               <span>Route wind &amp; stop weather badges</span>
             </label>
             <div class="weather-status" id="weatherStatus">Ready · RainViewer + Open-Meteo</div>
@@ -595,7 +596,16 @@
     async analyzeRoutePlan(plan) {
       this._ensureRouteStrip();
       const stops = (plan && plan.stops) || [];
-      if (stops.length < 2) return null;
+      if (stops.length < 2) {
+        // Invalidate in-flight Open-Meteo responses so a cleared plan stays clear
+        this._fetchSeq += 1;
+        this._lastRouteAnalysis = null;
+        if (this._routeStripEl) this._routeStripEl.hidden = true;
+        const mapPill = document.getElementById("mapWeatherPill");
+        if (mapPill) mapPill.hidden = true;
+        this._syncMapWeatherMarkers();
+        return null;
+      }
 
       // Sample up to MAX_WAYPOINTS stops (always keeping origin, destination, and evenly spaced stops)
       let sampled = stops.slice();
