@@ -828,6 +828,10 @@ function setupEventListeners() {
   });
   // Continuous follow-me while driving (map + car peek) — same SPA path everywhere.
   document.getElementById("btnLocateMe").addEventListener("click", () => {
+    if (state.areaSelectMode) {
+      clearSelectionShape();
+      deactivateAreaSelectMode();
+    }
     toggleLiveLocation();
   });
   document.getElementById("btnLiveRecenter")?.addEventListener("click", () => {
@@ -949,8 +953,12 @@ function setupEventListeners() {
     });
   });
 
-  // Map Controls
+  // Map Controls — leave area-draw mode first so the instruction banner never steals hits
   document.getElementById("btnMapReset").addEventListener("click", () => {
+    if (state.areaSelectMode) {
+      clearSelectionShape();
+      deactivateAreaSelectMode();
+    }
     if (state.routeLayer.getLayers().length > 0) {
       state.map.fitBounds(state.routeLayer.getBounds(), { padding: [50, 50] });
     } else if (state.markersLayer.getLayers().length > 0) {
@@ -961,27 +969,12 @@ function setupEventListeners() {
   });
 
   document.getElementById("btnToggleLayers").addEventListener("click", () => {
-    // Opening Layers while drawing — leave draw mode so banner cannot steal the hit
     if (state.areaSelectMode) {
       clearSelectionShape();
       deactivateAreaSelectMode();
     }
     toggleLayersPanel();
   });
-
-  document.getElementById("btnMapReset")?.addEventListener("click", () => {
-    if (state.areaSelectMode) {
-      clearSelectionShape();
-      deactivateAreaSelectMode();
-    }
-  }, true);
-
-  document.getElementById("btnLocateMe")?.addEventListener("click", () => {
-    if (state.areaSelectMode) {
-      clearSelectionShape();
-      deactivateAreaSelectMode();
-    }
-  }, true);
 
   document.querySelectorAll('input[name="basemapRadio"]').forEach((el) => {
     el.addEventListener("change", () => {
