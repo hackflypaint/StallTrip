@@ -248,7 +248,7 @@
   position: absolute;
   left: 16px;
   bottom: 24px;
-  z-index: 1000;
+  z-index: var(--map-chrome-z, 1100);
   max-width: min(220px, calc(100vw - 40px));
   padding: 8px 10px;
   border-radius: var(--radius-md, 8px);

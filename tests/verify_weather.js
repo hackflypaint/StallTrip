@@ -171,6 +171,13 @@ async function main() {
     }
     assert(routeWeatherReady, "Expected #routeWeatherStrip and #mapWeatherPill to become visible with weather data");
 
+    // Map stop badges are opt-in (default off — less route clutter). Enable via Layers to verify.
+    await page.locator("#btnToggleLayers").click();
+    await page.waitForSelector("#weatherRouteBadgesToggle", { state: "visible", timeout: 5000 });
+    await page.locator("#weatherRouteBadgesToggle").check();
+    await page.waitForTimeout(400);
+    await page.locator("#btnToggleLayers").click();
+
     const uiWeatherSummary = await page.evaluate(() => {
       const stripHeadline = document.getElementById("weatherStripHeadline")?.textContent || "";
       const impactBadge = document.getElementById("weatherRangeImpactBadge")?.textContent?.trim() || "";
@@ -194,7 +201,7 @@ async function main() {
       `Expected temperature and wind speed in headline, got: ${uiWeatherSummary.stripHeadline}`
     );
     assert(uiWeatherSummary.timelineBadgesCount >= 2, "Expected per-stop weather rows in timeline");
-    assert(uiWeatherSummary.mapBadgesCount >= 2, "Expected weather/wind badges on map");
+    assert(uiWeatherSummary.mapBadgesCount >= 2, "Expected weather/wind badges on map after enabling Layers toggle");
 
     const desktopShot = path.join(ARTIFACTS_DIR, "weather_wind_desktop.png");
     await page.screenshot({ path: desktopShot, fullPage: false });
