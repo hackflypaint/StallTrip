@@ -266,6 +266,9 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         if path == "/api/stats":
             self.handle_stats()
             return
+        if path == "/health":
+            self.send_empty_ok()
+            return
         if path == "/api/health":
             # E2E isolation: clear RL windows when secret header matches env.
             if self._test_rate_bypass_request() and (query.get("reset_rate_limit") or [""])[
@@ -829,6 +832,14 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             "Permissions-Policy",
             "geolocation=(self), camera=(), microphone=(), payment=()",
         )
+
+    def send_empty_ok(self):
+        """Bare probe: HTTP 200, empty body (status-code-only health checks)."""
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self._api_response = True
+        self.end_headers()
 
     def send_json_response(self, data: Any, status: int = 200):
         body = json.dumps(data).encode("utf-8")
