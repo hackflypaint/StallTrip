@@ -24,11 +24,18 @@ services:
       # - STATIC_CACHE_MAX_AGE=300
       # Behind a reverse proxy that sets/overwrites X-Forwarded-For (default OFF — avoids spoofing):
       # - TRUST_PROXY=1
+      # - TRUST_PROXY_HOPS=1   # peel this many hops from the right of XFF (default 1)
       # Logging (stdout → `docker compose logs`; no paid SaaS required):
       # - LOG_LEVEL=INFO
       # - CLIENT_LOG_RATE_LIMIT=20
+      # - CLIENT_LOG_GLOBAL_RATE_LIMIT=200
       # - ACCESS_LOG_STATIC_SAMPLE=20
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     security_opt:
       - no-new-privileges:true
     cap_drop:

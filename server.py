@@ -4,6 +4,7 @@ Tesla Supercharger Route Planner - Web Application & API Server.
 Zero extra third-party dependencies: Built with Python's high performance standard library.
 """
 
+import hmac
 import http.server
 import ipaddress
 import json
@@ -15,6 +16,7 @@ import sys
 import threading
 import time
 import traceback
+import unicodedata
 import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -134,6 +136,16 @@ def trust_proxy_enabled() -> bool:
     return os.environ.get("TRUST_PROXY", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def trust_proxy_hops() -> int:
+    """How many trusted proxy hops to peel from the right of XFF / Forwarded.
+
+    Default 1: take the right-most address (the client as seen by the immediate
+    proxy). Raise when multiple trusted proxies append to the chain. Clients can
+    prepend spoofed left-most values; hop-count from the right avoids that.
+    """
+    return _env_int("TRUST_PROXY_HOPS", 1, 1, 10)
+
+
 def _normalize_ip_token(raw: str) -> Optional[str]:
     """Return a canonical IP string, or None if raw is not a bare address."""
     if not raw:
@@ -157,29 +169,47 @@ def _normalize_ip_token(raw: str) -> Optional[str]:
         return None
 
 
+def _pick_forwarded_ip(candidates: List[str], hops: int) -> Optional[str]:
+    """Pick client IP from a left→right hop list using trusted hops from the right."""
+    parsed: List[str] = []
+    for raw in candidates:
+        ip = _normalize_ip_token(raw)
+        if ip:
+            parsed.append(ip)
+    if not parsed:
+        return None
+    # hops=1 → right-most; hops=2 → second from right, etc.
+    idx = len(parsed) - hops
+    if idx < 0:
+        idx = 0
+    return parsed[idx]
+
+
 def client_ip_from_headers(headers, peer_ip: str) -> str:
     """Resolve rate-limit client identity from peer + optional proxy headers."""
     fallback = peer_ip or "unknown"
     if not trust_proxy_enabled():
         return fallback
 
+    hops = trust_proxy_hops()
     xff = headers.get("X-Forwarded-For") or headers.get("x-forwarded-for")
     if xff:
-        first = xff.split(",")[0].strip()
-        parsed = _normalize_ip_token(first)
-        if parsed:
-            return parsed
+        picked = _pick_forwarded_ip(xff.split(","), hops)
+        if picked:
+            return picked
 
     forwarded = headers.get("Forwarded") or headers.get("forwarded")
     if forwarded:
+        for_values: List[str] = []
         for part in forwarded.split(","):
             for directive in part.split(";"):
                 directive = directive.strip()
                 if directive.lower().startswith("for="):
-                    parsed = _normalize_ip_token(directive[4:].strip())
-                    if parsed:
-                        return parsed
+                    for_values.append(directive[4:].strip())
                     break
+        picked = _pick_forwarded_ip(for_values, hops)
+        if picked:
+            return picked
     return fallback
 
 
@@ -224,8 +254,21 @@ CLIENT_LOG_MAX_MESSAGE_LEN = 500
 CLIENT_LOG_MAX_STACK_LEN = 1500
 CLIENT_LOG_MAX_URL_LEN = 300
 CLIENT_LOG_ALLOWED_LEVELS = frozenset({"error", "warn", "info"})
+# Prefer Authorization: Bearer <token> before bare authorization=/bearer= forms.
 _CLIENT_SECRETISH_RE = re.compile(
-    r"(?i)(authorization|api[_-]?key|token|password|secret|bearer)\s*[:=]\s*\S+"
+    r"(?i)("
+    r"authorization\s*[:=]\s*bearer\s+\S+"
+    r"|authorization\s*[:=]\s*\S+"
+    r"|bearer\s+[A-Za-z0-9\-._~+/]+=*"
+    r"|api[_-]?key\s*[:=]\s*\S+"
+    r"|token\s*[:=]\s*\S+"
+    r"|password\s*[:=]\s*\S+"
+    r"|secret\s*[:=]\s*\S+"
+    r")"
+)
+# Live geolocation must stay client-side; scrub accidental lat/lon dumps in log text.
+_CLIENT_GEO_RE = re.compile(
+    r"(?i)\b(lat(?:itude)?|lon(?:gitude)?|lng)\s*[:=]\s*-?\d+(?:\.\d+)?"
 )
 _STATIC_ACCESS_EXTS = (
     ".js",
@@ -254,6 +297,10 @@ STATIC_CACHE_MAX_AGE = _env_int("STATIC_CACHE_MAX_AGE", 300, 0, 86400)
 # Client-log batches per IP per window (not individual console lines).
 CLIENT_LOG_RATE_LIMIT = _env_int("CLIENT_LOG_RATE_LIMIT", 20 if _LEAN else 40, 1, 120)
 CLIENT_LOG_RATE_WINDOW_SEC = float(_env_int("CLIENT_LOG_RATE_WINDOW_SEC", 60, 10, 600))
+# Global client-log budget across all IPs (hardens distributed flood of /api/client-logs).
+CLIENT_LOG_GLOBAL_RATE_LIMIT = _env_int(
+    "CLIENT_LOG_GLOBAL_RATE_LIMIT", 200 if _LEAN else 400, 1, 5000
+)
 # Sample successful static asset access lines (1 = log all; 20 = ~5%). APIs/HTML/errors always log.
 ACCESS_LOG_STATIC_SAMPLE = _env_int("ACCESS_LOG_STATIC_SAMPLE", 20, 1, 1000)
 
@@ -280,6 +327,7 @@ def test_rate_bypass_enabled() -> bool:
 _geocode_hits: Dict[str, Tuple[float, int]] = {}
 _plan_hits: Dict[str, Tuple[float, int]] = {}
 _client_log_hits: Dict[str, Tuple[float, int]] = {}
+_client_log_global: Tuple[float, int] = (0.0, 0)  # window_start, count
 _geocode_lock = threading.Lock()
 _plan_lock = threading.Lock()
 _client_log_lock = threading.Lock()
@@ -290,22 +338,35 @@ _access_static_lock = threading.Lock()
 
 def clear_rate_limit_state() -> None:
     """Drop in-memory geocode/plan/client-log rate-limit windows (test harness only)."""
+    global _client_log_global
     with _geocode_lock:
         _geocode_hits.clear()
     with _plan_lock:
         _plan_hits.clear()
     with _client_log_lock:
         _client_log_hits.clear()
+        _client_log_global = (0.0, 0)
+
+
+def _unsafe_log_char(ch: str) -> bool:
+    """True for Unicode C* controls and U+2028/U+2029 line/paragraph separators."""
+    if ch in "\t\n\r":
+        return True
+    o = ord(ch)
+    if o in (0x2028, 0x2029):
+        return True
+    return unicodedata.category(ch).startswith("C")
 
 
 def sanitize_log_text(value: Any, max_len: int) -> str:
-    """Truncate and strip control chars / secretish key=value pairs for safe logging."""
+    """Truncate and strip C*/U+2028/2029 / secretish pairs / lat-lon for safe logging."""
     if value is None:
         return ""
     text = str(value)
-    text = _CLIENT_SECRETISH_RE.sub(r"\1=[redacted]", text)
-    text = "".join(ch if ch >= " " or ch in "\t" else " " for ch in text)
-    text = text.replace("\t", " ").strip()
+    text = _CLIENT_SECRETISH_RE.sub("[redacted]", text)
+    text = _CLIENT_GEO_RE.sub(r"\1=[redacted]", text)
+    text = "".join(" " if _unsafe_log_char(ch) else ch for ch in text)
+    text = re.sub(r" {2,}", " ", text).strip()
     if len(text) > max_len:
         return text[: max_len - 1] + "…"
     return text
@@ -438,12 +499,14 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                     "max_concurrent_plans": MAX_CONCURRENT_PLANS,
                     "static_cache_max_age": STATIC_CACHE_MAX_AGE,
                     "client_log_per_min": CLIENT_LOG_RATE_LIMIT,
+                    "client_log_global_per_min": CLIENT_LOG_GLOBAL_RATE_LIMIT,
                     "client_log_max_entries": CLIENT_LOG_MAX_ENTRIES,
                     "platform_ua_redirect": redirect_on,
                     # Legacy alias — same flag as platform_ua_redirect
                     "mobile_ua_redirect": redirect_on,
                     # Rate-limit key uses X-Forwarded-For only when TRUST_PROXY=1
                     "trust_proxy": trust_proxy_enabled(),
+                    "trust_proxy_hops": trust_proxy_hops() if trust_proxy_enabled() else 0,
                 },
             })
             return
@@ -634,7 +697,15 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         secret = test_rate_bypass_secret()
         if not secret:
             return False
-        return self.headers.get("X-Test-Rate-Bypass", "").strip() == secret
+        provided = self.headers.get("X-Test-Rate-Bypass", "").strip()
+        if not provided:
+            return False
+        try:
+            return hmac.compare_digest(
+                provided.encode("utf-8"), secret.encode("utf-8")
+            )
+        except (TypeError, ValueError):
+            return False
 
     def _geocode_allowed(self) -> bool:
         if self._test_rate_bypass_request():
@@ -651,14 +722,46 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         )
 
     def _client_log_allowed(self) -> bool:
-        if self._test_rate_bypass_request():
+        """Per-IP + global client-log budgets. No test-rate-bypass (open flood surface)."""
+        global _client_log_global
+        now = time.monotonic()
+        window_sec = CLIENT_LOG_RATE_WINDOW_SEC
+        per_ip_limit = CLIENT_LOG_RATE_LIMIT
+        global_limit = CLIENT_LOG_GLOBAL_RATE_LIMIT
+        ip = self._client_ip()
+        with _client_log_lock:
+            # Global budget first — refuse before mutating per-IP counters.
+            g_start, g_count = _client_log_global
+            if g_start <= 0.0 or now - g_start >= window_sec:
+                g_start, g_count = now, 0
+            if g_count >= global_limit:
+                return False
+
+            if len(_client_log_hits) > MAX_GEOCODE_TRACKED_IPS:
+                stale = [
+                    key
+                    for key, (start, _) in _client_log_hits.items()
+                    if now - start >= window_sec
+                ]
+                for key in stale:
+                    del _client_log_hits[key]
+                if len(_client_log_hits) > MAX_GEOCODE_TRACKED_IPS:
+                    overflow = len(_client_log_hits) - (MAX_GEOCODE_TRACKED_IPS // 2)
+                    oldest = sorted(
+                        _client_log_hits.items(), key=lambda kv: kv[1][0]
+                    )[:overflow]
+                    for key, _ in oldest:
+                        del _client_log_hits[key]
+
+            start, count = _client_log_hits.get(ip, (now, 0))
+            if now - start >= window_sec:
+                start, count = now, 0
+            if count >= per_ip_limit:
+                return False
+
+            _client_log_hits[ip] = (start, count + 1)
+            _client_log_global = (g_start, g_count + 1)
             return True
-        return self._rate_limit_allowed(
-            _client_log_hits,
-            _client_log_lock,
-            CLIENT_LOG_RATE_LIMIT,
-            CLIENT_LOG_RATE_WINDOW_SEC,
-        )
 
     def handle_get_superchargers(self, query: Dict[str, list]):
         """Filter superchargers by bounds, search text, or radius."""
@@ -1104,14 +1207,15 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                 duration_ms = max(0, int((time.monotonic() - started) * 1000))
             else:
                 duration_ms = -1
-            method = getattr(self, "command", None) or "-"
+            method = sanitize_log_text(getattr(self, "command", None) or "-", 16)
+            safe_path = sanitize_log_text(path, 200)
             ua = sanitize_log_text(self.headers.get("User-Agent", ""), 80)
             ip = self._client_ip()
             _ACCESS_LOG.info(
                 '%s "%s %s" %s %sms ua="%s"',
                 ip,
-                method,
-                path,
+                method or "-",
+                safe_path or "/",
                 code,
                 duration_ms if duration_ms >= 0 else "-",
                 ua or "-",
@@ -1125,7 +1229,15 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         # Base handler uses this for misc messages; route through app logger quietly.
         try:
-            _LOG.info("%s - %s", self.address_string(), fmt % args)
+            try:
+                raw = fmt % args if args else str(fmt)
+            except Exception:
+                raw = str(fmt)
+            _LOG.info(
+                "%s - %s",
+                sanitize_log_text(self.address_string(), 64),
+                sanitize_log_text(raw, 500),
+            )
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
         except Exception:
@@ -1147,9 +1259,13 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
                 "timed out",
             )
         ):
-            _LOG.debug("client disconnect: %s", msg)
+            _LOG.debug("client disconnect: %s", sanitize_log_text(msg, 300))
             return
-        _LOG.error("%s - %s", self.address_string(), msg)
+        _LOG.error(
+            "%s - %s",
+            sanitize_log_text(self.address_string(), 64),
+            sanitize_log_text(msg, 500),
+        )
 
     def handle_one_request(self) -> None:
         """Same as base, but treat client disconnect as a quiet close; time requests."""
@@ -1193,16 +1309,19 @@ def run_server(port: int = PORT):
             ua_mode,
         )
         _LOG.info(
-            "Cost:     profile=%s  plans=%s/min  geocode=%s/min  concurrent=%s  client_logs=%s/min",
+            "Cost:     profile=%s  plans=%s/min  geocode=%s/min  concurrent=%s  "
+            "client_logs=%s/min/ip global=%s/min",
             profile,
             PLAN_RATE_LIMIT,
             GEOCODE_RATE_LIMIT,
             MAX_CONCURRENT_PLANS,
             CLIENT_LOG_RATE_LIMIT,
+            CLIENT_LOG_GLOBAL_RATE_LIMIT,
         )
         _LOG.info(
-            "Proxy:    TRUST_PROXY=%s (rate-limit IP from X-Forwarded-For only when on)",
+            "Proxy:    TRUST_PROXY=%s hops=%s (XFF right-most untrusted when on)",
             proxy_mode,
+            trust_proxy_hops() if trust_proxy_enabled() else 0,
         )
         _LOG.info(
             "Logging:  stdout structured; static access sample 1/%s; POST /api/client-logs",

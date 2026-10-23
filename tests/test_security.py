@@ -118,14 +118,23 @@ class TestSecurityHardening(unittest.TestCase):
 
     def test_client_ip_honors_xff_when_trust_proxy_on(self):
         prev = os.environ.get("TRUST_PROXY")
+        prev_hops = os.environ.pop("TRUST_PROXY_HOPS", None)
         os.environ["TRUST_PROXY"] = "1"
         try:
             self.assertTrue(server.trust_proxy_enabled())
+            # hops=1 (default): right-most hop — client-prepended left values ignored
             ip = server.client_ip_from_headers(
-                {"X-Forwarded-For": "203.0.113.9, 10.0.0.1"},
+                {"X-Forwarded-For": "198.51.100.1, 203.0.113.9, 10.0.0.1"},
                 "127.0.0.1",
             )
-            self.assertEqual(ip, "203.0.113.9")
+            self.assertEqual(ip, "10.0.0.1")
+            os.environ["TRUST_PROXY_HOPS"] = "2"
+            ip2 = server.client_ip_from_headers(
+                {"X-Forwarded-For": "198.51.100.1, 203.0.113.9, 10.0.0.1"},
+                "127.0.0.1",
+            )
+            self.assertEqual(ip2, "203.0.113.9")
+            os.environ["TRUST_PROXY_HOPS"] = "1"
             ip6 = server.client_ip_from_headers(
                 {"Forwarded": 'for="[2001:db8::1]";proto=https'},
                 "127.0.0.1",
@@ -142,6 +151,10 @@ class TestSecurityHardening(unittest.TestCase):
                 os.environ.pop("TRUST_PROXY", None)
             else:
                 os.environ["TRUST_PROXY"] = prev
+            if prev_hops is None:
+                os.environ.pop("TRUST_PROXY_HOPS", None)
+            else:
+                os.environ["TRUST_PROXY_HOPS"] = prev_hops
 
     def test_options_rejects_cors_preflight(self):
         req = urllib.request.Request(
