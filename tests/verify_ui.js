@@ -506,9 +506,97 @@ async function runVerification() {
       };
     });
 
+    // Capture pre-locate origin so we can assert GPS overwrites a stale Starting Location.
+    const originBeforeLocate = await page.evaluate(() => ({
+      lat: window.appState.origin && window.appState.origin.lat,
+      lng: window.appState.origin && window.appState.origin.lng,
+      name: window.appState.origin && window.appState.origin.name,
+      planSeq: window.appState.planRouteSeq,
+    }));
+
     await page.locator('#btnLocateMe').click();
     await page.waitForSelector('#liveDriveHud:not([hidden])', { timeout: 5000 });
     await page.waitForSelector('.user-location-dot', { timeout: 5000 });
+    // Locate / first live fix must become trip origin and trigger replan (dest already set).
+    await waitUntil(
+      page,
+      () => {
+        const o = window.appState.origin;
+        const live = window.appState.liveLocation;
+        if (!o || !live) return false;
+        const near =
+          Math.abs(o.lat - 37.65) < 0.002 && Math.abs(o.lng - -122.38) < 0.002;
+        return near && live.lastReplanReason === 'first_fix';
+      },
+      { timeout: 8000, label: 'live GPS first fix sets origin + first_fix replan' }
+    );
+    const originAfterLocate = await page.evaluate(() => ({
+      lat: window.appState.origin && window.appState.origin.lat,
+      lng: window.appState.origin && window.appState.origin.lng,
+      name: window.appState.origin && window.appState.origin.name,
+      source: window.appState.origin && window.appState.origin.source,
+      planSeq: window.appState.planRouteSeq,
+      reason: window.appState.liveLocation && window.appState.liveLocation.lastReplanReason,
+      plannedLat: window.appState.liveLocation && window.appState.liveLocation.plannedOriginLat,
+    }));
+    console.log(
+      `  GPS origin: before=(${originBeforeLocate.lat},${originBeforeLocate.lng}) ` +
+        `after=(${originAfterLocate.lat},${originAfterLocate.lng}) reason=${originAfterLocate.reason}`
+    );
+    if (originAfterLocate.source !== 'geolocation') {
+      throw new Error(`Expected origin.source=geolocation, got ${originAfterLocate.source}`);
+    }
+    if (!(originAfterLocate.planSeq > originBeforeLocate.planSeq)) {
+      throw new Error(
+        `Expected planRouteSeq to advance on locate replan (${originBeforeLocate.planSeq} → ${originAfterLocate.planSeq})`
+      );
+    }
+    // Simulate a meaningful drive (~7 mi) after cooldown.
+    // Age lastFixAt past jumpGrace so the mock teleport is recovery, not a spike reject.
+    await page.evaluate(() => {
+      const live = window.appState.liveLocation;
+      live.lastAutoReplanAt = Date.now() - 60_000;
+      live.lastFixAt = Date.now() - 60_000;
+      window.appState.planInFlight = false;
+      const cb = window.__mockWatchCallbacks && window.__mockWatchCallbacks.success;
+      if (typeof cb === 'function') {
+        cb({
+          coords: {
+            latitude: 37.72,
+            longitude: -122.28,
+            accuracy: 20,
+            heading: 90,
+            speed: 29.0576,
+          },
+        });
+      }
+    });
+    await waitUntil(
+      page,
+      () => {
+        const o = window.appState.origin;
+        const live = window.appState.liveLocation;
+        return (
+          o &&
+          live &&
+          Math.abs(o.lat - 37.72) < 0.002 &&
+          live.lastReplanReason === 'origin_drift'
+        );
+      },
+      { timeout: 8000, label: 'origin_drift auto-replan after ~7 mi move' }
+    );
+    console.log('  Smart follow origin_drift replan OK');
+    // Let Maximize finish so later unified checks still have an active plan + elevation.
+    await waitUntil(
+      page,
+      () => {
+        const btn = document.getElementById('btnPlanRoute');
+        return !!(btn && !btn.disabled && !window.appState.planInFlight);
+      },
+      { timeout: 45000, label: 'plan idle after live GPS replan' }
+    );
+    await page.waitForTimeout(500);
+
     const hudCheck = await page.evaluate(() => ({
       speedText: document.getElementById('liveHudSpeed')?.textContent || '',
       nextText: document.getElementById('liveHudNextStop')?.textContent || '',
@@ -516,7 +604,7 @@ async function runVerification() {
       following: window.appState.liveLocation.follow,
     }));
     console.log(`  Live HUD: speed="${hudCheck.speedText}" next="${hudCheck.nextText}" wakeLocks=${hudCheck.wakeLocks}`);
-    if (!/65 mph/i.test(hudCheck.speedText) || !/SE 135/i.test(hudCheck.speedText)) {
+    if (!/65 mph/i.test(hudCheck.speedText) || !/(SE 135|E 90)/i.test(hudCheck.speedText)) {
       throw new Error(`Expected speed/heading in HUD, got: ${hudCheck.speedText}`);
     }
     if (!/mi/i.test(hudCheck.nextText)) {
@@ -547,6 +635,28 @@ async function runVerification() {
     // 8. Combined Unified Check: Route Planned + Live Drive HUD + Weather Radar + Elevation Strip simultaneously
     console.log('8. Verifying ALL 3 features simultaneously across Desktop (1440x900), Mobile (390x844), and Tesla (773x601)...');
     await page.setViewportSize({ width: 1440, height: 900 });
+    // Clear plan-route budget after locate/follow replans (when server opts in).
+    try {
+      const bypass = process.env.ALLOW_TEST_RATE_BYPASS || process.env.X_TEST_RATE_BYPASS || '';
+      if (bypass && bypass !== '0' && bypass.toLowerCase() !== 'false') {
+        await page.request.get('http://localhost:8080/api/health?reset_rate_limit=1', {
+          headers: { 'X-Test-Rate-Bypass': bypass },
+          timeout: 5000,
+        });
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    // Ensure we still have a planned route (live GPS may have replanned mid-suite).
+    const hasPlan = await page.evaluate(() => !!(window.appState && window.appState.activePlan));
+    if (!hasPlan) {
+      await page.locator('#btnPlanRoute').click();
+      await waitUntil(
+        page,
+        () => !!(window.appState && window.appState.activePlan && !window.appState.planInFlight),
+        { timeout: 45000, label: 'replan before unified check' }
+      );
+    }
     // Enable Live Drive HUD
     await page.locator('#btnLocateMe').click();
     await page.waitForSelector('#liveDriveHud:not([hidden])', { timeout: 5000 });
@@ -557,8 +667,8 @@ async function runVerification() {
     await page.waitForSelector('#weatherRadarPill.is-visible', { state: 'visible', timeout: 5000 });
     await page.locator('#btnToggleLayers').click();
     // Ensure Elevation Strip & Map Weather Pill are visible
-    await page.waitForSelector('#elevationStrip:not([hidden])', { state: 'visible', timeout: 10000 });
-    await page.waitForSelector('#mapWeatherPill:not([hidden])', { state: 'visible', timeout: 15000 });
+    await page.waitForSelector('#elevationStrip:not([hidden])', { state: 'visible', timeout: 25000 });
+    await page.waitForSelector('#mapWeatherPill:not([hidden])', { state: 'visible', timeout: 25000 });
 
     const rectsIntersect = (a, b) =>
       a && b && !(a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y);
