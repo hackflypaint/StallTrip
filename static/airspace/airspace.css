@@ -2,9 +2,9 @@
    Delete with static/airspace/ */
 
 /* Light basemap feel while Drone flight is on (Autopylot uses light streets).
-   Keeps existing OSM/topo tiles — only lifts the app dark filter. */
+   Opacity (not filter) — filter on the tile pane flickers during pinch/zoom. */
 #map.basemap-airspace-light .leaflet-tile-pane {
-  filter: brightness(1.08) contrast(0.95) saturate(0.75);
+  opacity: 1;
 }
 
 .airspace-slot {

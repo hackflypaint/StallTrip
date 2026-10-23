@@ -58,6 +58,8 @@ const state = {
   exploreFetchSeq: 0,
   exploreDebounceTimer: null,
   invalidateSizeTimer: null,
+  /** True while live-follow setView/panTo runs — zoomstart must not pause follow. */
+  livePanInProgress: false,
   /** Tesla landscape bottom-sheet mode (not phone /mobile). */
   carShell: false,
   /** peek | plan | itinerary — default peek so map dominates on load */
@@ -96,6 +98,9 @@ const state = {
     forceOriginOnNextFix: false,
   },
   userLocationLayer: null,
+  /** Reused blue-dot layers (avoid clearLayers every GPS tick — flicker). */
+  userLocationMarker: null,
+  userAccuracyCircle: null,
 };
 
 // Expose for Playwright / debugging (cloud verification)
@@ -336,6 +341,37 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+/** True while the user is pinching, scroll-zooming, or dragging the map. */
+function isMapUserGesturing() {
+  const map = state.map;
+  if (!map) return false;
+  if (map._animatingZoom) return true;
+  if (map.touchZoom && map.touchZoom._zooming) return true;
+  if (map.boxZoom && map.boxZoom._moved) return true;
+  if (map.dragging && typeof map.dragging.moving === "function" && map.dragging.moving()) {
+    return true;
+  }
+  return false;
+}
+
+window.isMapUserGesturing = isMapUserGesturing;
+
+/**
+ * Pause auto-follow on user pan/pinch/zoom so live GPS panTo cannot fight the gesture.
+ * Programmatic live pans set state.livePanInProgress and are ignored here.
+ */
+function pauseLiveFollowForUserGesture() {
+  if (state.livePanInProgress) return false;
+  const live = state.liveLocation;
+  if (!live.watching || !live.follow) return false;
+  live.follow = false;
+  syncLiveLocationUi();
+  showToast("Follow paused — tap locate to resume.", 2400);
+  return true;
+}
+
+window.pauseLiveFollowForUserGesture = pauseLiveFollowForUserGesture;
+
 /** Coalesce Leaflet invalidateSize — sheet toggles can fire back-to-back. */
 function scheduleMapInvalidate(delayMs) {
   if (!state.map) return;
@@ -343,7 +379,10 @@ function scheduleMapInvalidate(delayMs) {
   if (state.invalidateSizeTimer) clearTimeout(state.invalidateSizeTimer);
   state.invalidateSizeTimer = setTimeout(() => {
     state.invalidateSizeTimer = null;
-    if (state.map) state.map.invalidateSize();
+    if (!state.map) return;
+    // Never invalidate mid-pinch/zoom — resets tile transforms and looks like flicker.
+    if (isMapUserGesturing()) return;
+    state.map.invalidateSize({ animate: false });
   }, delay);
 }
 
@@ -687,9 +726,7 @@ function setCarChromeHidden(hidden) {
     if (state.carChromeHidden) fab.removeAttribute("hidden");
     else fab.setAttribute("hidden", "");
   }
-  requestAnimationFrame(() => {
-    if (state.map) state.map.invalidateSize({ animate: false });
-  });
+  scheduleMapInvalidate(80);
 }
 
 window.setCarChromeHidden = setCarChromeHidden;
@@ -759,9 +796,14 @@ function applyCarShell() {
       badge.hidden = true;
     }
   }
+  if (enable && was) {
+    // Already in car-shell: do not re-enter setCarSheet / force-unhide chrome.
+    // Spurious resize during pinch would invalidateSize and fight the gesture.
+    if (!isMapUserGesturing()) scheduleMapInvalidate(160);
+    return;
+  }
   if (enable) {
-    if (!was) setCarSheet("peek");
-    else setCarSheet(state.sheetMode || "peek");
+    setCarSheet("peek");
     syncCarPeekTabs("route-tab");
   } else {
     state.carChromeHidden = false;
@@ -774,7 +816,9 @@ function applyCarShell() {
   }
   syncCarTestHooks();
   requestAnimationFrame(() => {
-    if (state.map) state.map.invalidateSize({ animate: false });
+    if (state.map && !isMapUserGesturing()) {
+      state.map.invalidateSize({ animate: false });
+    }
   });
 }
 
@@ -808,9 +852,7 @@ function setCarSheet(mode) {
   }
   updateCarPeek();
   syncCarTestHooks();
-  requestAnimationFrame(() => {
-    if (state.map) state.map.invalidateSize({ animate: false });
-  });
+  scheduleMapInvalidate(80);
 }
 
 /** Always peek → half(plan) → nearly-full(itinerary) → peek. */
@@ -905,14 +947,10 @@ function initMap() {
   // Blue-dot / accuracy sit above route markers; never cleared by updateMapMarkers.
   state.userLocationLayer = L.featureGroup().addTo(state.map);
 
-  // Dragging the map pauses auto-follow (watch continues; tap locate to resume).
-  state.map.on("dragstart", () => {
-    if (state.liveLocation.watching && state.liveLocation.follow) {
-      state.liveLocation.follow = false;
-      syncLiveLocationUi();
-      showToast("Follow paused — tap locate to resume.", 2400);
-    }
-  });
+  // User pan / pinch / scroll-zoom pauses auto-follow (watch continues; tap locate to resume).
+  // zoomstart also covers two-finger pinch — dragstart alone does not.
+  state.map.on("dragstart", () => pauseLiveFollowForUserGesture());
+  state.map.on("zoomstart", () => pauseLiveFollowForUserGesture());
 
   // Desktop: mount optional overlays eagerly. Mobile: wait until Layers opens.
   if (!isMobileShell()) {
@@ -1650,11 +1688,19 @@ function updateMapLegendVisibility() {
   }
 }
 
-/** Drop stale itinerary / route geometry when endpoints are cleared (M6). */
-function clearActivePlan() {
+/**
+ * Drop stale itinerary when endpoints are cleared (M6) or before a live replan.
+ * @param {{ keepMapGeometry?: boolean }} [opts]
+ *   keepMapGeometry — leave route/corridor polylines on the map until the next
+ *   successful renderRoutePlan (live GPS replan: no blank → fitBounds flicker).
+ */
+function clearActivePlan(opts = {}) {
+  const keepMapGeometry = !!opts.keepMapGeometry;
   state.activePlan = null;
-  if (state.routeLayer) state.routeLayer.clearLayers();
-  if (state.corridorLayer) state.corridorLayer.clearLayers();
+  if (!keepMapGeometry) {
+    if (state.routeLayer) state.routeLayer.clearLayers();
+    if (state.corridorLayer) state.corridorLayer.clearLayers();
+  }
   const results = document.getElementById("routeResults");
   if (results) results.style.display = "none";
   const itinBtn = document.getElementById("btnCarSheetItinerary");
@@ -1670,6 +1716,14 @@ function clearActivePlan() {
     /* optional module */
   }
 }
+
+/** True when live follow owns the camera — skip fitBounds that fight panTo GPS. */
+function shouldSkipFitBoundsForLiveFollow() {
+  const live = state.liveLocation;
+  return !!(live && live.watching && live.follow);
+}
+
+window.shouldSkipFitBoundsForLiveFollow = shouldSkipFitBoundsForLiveFollow;
 
 function updateForcedChargersUI() {
   updateClearSelectionButton();
@@ -2198,35 +2252,10 @@ function syncLiveLocationUi() {
   }
 }
 
-/**
- * Update the blue-dot + accuracy ring. Pure client-side; coords never leave the browser
- * for this feature (routing still uses origin/dest only when the user plans).
- */
-function updateUserLocationMarker(lat, lng, accuracyM, heading) {
-  if (!state.userLocationLayer || !state.map) return;
-  state.userLocationLayer.clearLayers();
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-
-  const acc = Number.isFinite(accuracyM) && accuracyM > 0 ? Math.min(accuracyM, 500) : null;
-  if (acc != null) {
-    L.circle([lat, lng], {
-      radius: acc,
-      className: "user-location-accuracy",
-      color: "#38bdf8",
-      weight: 1,
-      opacity: 0.55,
-      fillColor: "#38bdf8",
-      fillOpacity: 0.12,
-      interactive: false,
-    }).addTo(state.userLocationLayer);
-  }
-
-  const headingDeg = Number.isFinite(heading) ? heading : null;
+function buildUserLocationIcon(headingDeg) {
   const rotate =
-    headingDeg != null
-      ? ` style="transform:rotate(${headingDeg}deg)"`
-      : "";
-  const icon = L.divIcon({
+    headingDeg != null ? ` style="transform:rotate(${headingDeg}deg)"` : "";
+  return L.divIcon({
     className: "user-location-icon",
     html:
       `<div class="user-location-pulse" aria-hidden="true"></div>` +
@@ -2238,22 +2267,88 @@ function updateUserLocationMarker(lat, lng, accuracyM, heading) {
     iconSize: [28, 28],
     iconAnchor: [14, 14],
   });
-  L.marker([lat, lng], {
-    icon,
-    zIndexOffset: 1200,
-    interactive: false,
-    keyboard: false,
-  }).addTo(state.userLocationLayer);
+}
+
+/**
+ * Update the blue-dot + accuracy ring in place (no clearLayers every GPS tick).
+ * Pure client-side; coords never leave the browser for this feature.
+ */
+function updateUserLocationMarker(lat, lng, accuracyM, heading) {
+  if (!state.userLocationLayer || !state.map) return;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+  const acc = Number.isFinite(accuracyM) && accuracyM > 0 ? Math.min(accuracyM, 500) : null;
+  const headingDeg = Number.isFinite(heading) ? heading : null;
+  const ll = L.latLng(lat, lng);
+
+  if (acc != null) {
+    if (state.userAccuracyCircle) {
+      state.userAccuracyCircle.setLatLng(ll);
+      state.userAccuracyCircle.setRadius(acc);
+    } else {
+      state.userAccuracyCircle = L.circle(ll, {
+        radius: acc,
+        className: "user-location-accuracy",
+        color: "#38bdf8",
+        weight: 1,
+        opacity: 0.55,
+        fillColor: "#38bdf8",
+        fillOpacity: 0.12,
+        interactive: false,
+      }).addTo(state.userLocationLayer);
+    }
+  } else if (state.userAccuracyCircle) {
+    state.userLocationLayer.removeLayer(state.userAccuracyCircle);
+    state.userAccuracyCircle = null;
+  }
+
+  if (state.userLocationMarker) {
+    state.userLocationMarker.setLatLng(ll);
+    // Heading / cone presence can change — cheap setIcon keeps pulse DOM stable otherwise.
+    const prevHeading = state.userLocationMarker._liveHeading;
+    const hadCone = Number.isFinite(prevHeading);
+    const wantCone = headingDeg != null;
+    if (hadCone !== wantCone || (wantCone && prevHeading !== headingDeg)) {
+      state.userLocationMarker.setIcon(buildUserLocationIcon(headingDeg));
+      state.userLocationMarker._liveHeading = headingDeg;
+    }
+  } else {
+    const marker = L.marker(ll, {
+      icon: buildUserLocationIcon(headingDeg),
+      zIndexOffset: 1200,
+      interactive: false,
+      keyboard: false,
+    });
+    marker._liveHeading = headingDeg;
+    marker.addTo(state.userLocationLayer);
+    state.userLocationMarker = marker;
+  }
+}
+
+function clearUserLocationMarker() {
+  if (state.userLocationLayer) state.userLocationLayer.clearLayers();
+  state.userLocationMarker = null;
+  state.userAccuracyCircle = null;
 }
 
 function panMapToLiveLocation(lat, lng, { initial } = {}) {
   if (!state.map || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  // Never fight an in-progress pinch / drag / scroll-zoom.
+  if (isMapUserGesturing()) return;
   const zoom = state.map.getZoom();
   const targetZoom = initial && zoom < 13 ? Math.max(zoom, 14) : zoom;
-  if (initial || targetZoom !== zoom) {
-    state.map.setView([lat, lng], targetZoom, { animate: true });
-  } else {
-    state.map.panTo([lat, lng], { animate: true, duration: 0.35 });
+  state.livePanInProgress = true;
+  try {
+    if (initial || targetZoom !== zoom) {
+      state.map.setView([lat, lng], targetZoom, { animate: true });
+    } else {
+      state.map.panTo([lat, lng], { animate: true, duration: 0.35 });
+    }
+  } finally {
+    // Keep flag through Leaflet zoom/pan animation so zoomstart does not pause follow.
+    window.setTimeout(() => {
+      state.livePanInProgress = false;
+    }, 450);
   }
 }
 
@@ -2318,9 +2413,9 @@ function markLivePlannedOrigin(lat, lng, reason) {
 
 /**
  * Commit GPS as trip origin; replan when destination exists.
- * Always overwrites a pre-set typed/geocoded/preset origin.
- * Clears any stale active plan immediately so itinerary "Starting Location"
- * / route geometry cannot keep coastal coords while LIVE GPS has moved.
+ * Always overwrites a pre-set typed/geocoded/preset origin (no stale coastal start).
+ * Soft-clears the itinerary identity but keeps prior polyline until the new plan
+ * paints — avoids blank→fitBounds→panTo flicker while live-following.
  * Preserves destination, strategy, max stops, forced chargers (via planRoute).
  */
 function commitGpsAsTripOrigin(lat, lng, { name, reason, toast } = {}) {
@@ -2337,9 +2432,9 @@ function commitGpsAsTripOrigin(lat, lng, { name, reason, toast } = {}) {
   if (typeof updateCarPeek === "function") updateCarPeek();
 
   const willReplan = !!state.destination;
-  // Drop stale route/itinerary before replan so origin marker and plan ORIGIN agree.
   if (state.activePlan) {
-    clearActivePlan();
+    // Drop coastal itinerary identity; keep map geometry while replan is in flight.
+    clearActivePlan({ keepMapGeometry: willReplan });
   }
   if (willReplan) {
     planRoute();
@@ -2576,7 +2671,7 @@ function stopLiveLocation({ silent } = {}) {
   state.liveLocation.passedStopIds = null;
   state.liveLocation.lastReplanReason = null;
   state.liveLocation.forceOriginOnNextFix = false;
-  if (state.userLocationLayer) state.userLocationLayer.clearLayers();
+  clearUserLocationMarker();
   releaseLiveWakeLock();
   setLocateBusy(false);
   syncLiveLocationUi();
@@ -2817,7 +2912,12 @@ function updateMapMarkers() {
     state.markersLayer.addLayer(marker);
   }
 
-  if (state.origin && state.destination && !state.activePlan) {
+  if (
+    state.origin &&
+    state.destination &&
+    !state.activePlan &&
+    !shouldSkipFitBoundsForLiveFollow()
+  ) {
     const bounds = L.latLngBounds([
       [state.origin.lat, state.origin.lng],
       [state.destination.lat, state.destination.lng],
@@ -2937,7 +3037,10 @@ function renderRoutePlan(plan) {
       },
     });
     state.routeLayer.addLayer(geojsonLayer);
-    state.map.fitBounds(geojsonLayer.getBounds(), { padding: [50, 50] });
+    // Live follow owns the camera (panTo GPS) — fitBounds full corridor fights it.
+    if (!shouldSkipFitBoundsForLiveFollow()) {
+      state.map.fitBounds(geojsonLayer.getBounds(), { padding: [50, 50] });
+    }
   }
 
   // 3. Render Corridor Chargers (Yellow dots) — capped/subsampled on mobile
