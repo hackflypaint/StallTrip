@@ -20,15 +20,15 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer">
   
   <!-- ?v= busts Tesla / Safari caches after shell deploys -->
-  <link rel="stylesheet" href="/style.css?v=car8">
+  <link rel="stylesheet" href="/style.css?v=car9">
   <!-- Removable foliage module CSS — delete with static/foliage/ -->
-  <link rel="stylesheet" href="/foliage/foliage.css?v=car8">
+  <link rel="stylesheet" href="/foliage/foliage.css?v=car9">
   <!-- Removable drone flight module CSS — delete with static/airspace/ -->
-  <link rel="stylesheet" href="/airspace/airspace.css?v=car8">
+  <link rel="stylesheet" href="/airspace/airspace.css?v=car9">
   <!-- Removable live weather radar & wind module CSS — delete with static/weather/ -->
-  <link rel="stylesheet" href="/weather/weather.css?v=car8">
+  <link rel="stylesheet" href="/weather/weather.css?v=car9">
   <!-- Removable elevation profile module CSS — delete with static/elevation/ -->
-  <link rel="stylesheet" href="/elevation/elevation.css?v=car8">
+  <link rel="stylesheet" href="/elevation/elevation.css?v=car9">
 </head>
 <body>
   <div class="app-container" id="appContainer">
@@ -385,36 +385,38 @@
       </button>
 
       <!-- Map Floating Controls & Overlays -->
-      <div class="map-floating-bar">
+      <div class="map-floating-bar" id="mapFloatingBar">
         <div class="map-area-tools" role="group" aria-label="Area selection tools">
-          <button type="button" class="map-btn area-mode-btn active" id="btnAreaModeBox"
+          <button type="button" class="map-btn area-mode-btn" id="btnAreaModeBox"
             title="Box area select — draw a rectangle to force-include Superchargers"
-            aria-pressed="true" aria-label="Box area select">
-            <i class="fa-solid fa-vector-square"></i>
+            aria-pressed="false" aria-label="Box area select">
+            <i class="fa-solid fa-vector-square" aria-hidden="true"></i>
           </button>
           <button type="button" class="map-btn area-mode-btn" id="btnAreaModeFreehand"
             title="Freehand area select — draw an outline to force-include Superchargers"
             aria-pressed="false" aria-label="Freehand area select">
-            <i class="fa-solid fa-draw-polygon"></i>
+            <i class="fa-solid fa-draw-polygon" aria-hidden="true"></i>
           </button>
           <button type="button" class="map-btn map-btn-danger" id="btnClearSelection" disabled
             title="No active area selection to clear"
             aria-label="Clear selection" aria-disabled="true">
-            <i class="fa-solid fa-eraser"></i>
+            <i class="fa-solid fa-eraser" aria-hidden="true"></i>
           </button>
         </div>
-        <button class="map-btn" id="btnMapReset" title="Reset View">
-          <i class="fa-solid fa-expand"></i>
-        </button>
-        <button type="button" class="map-btn" id="btnLocateMe"
-          title="Follow my location while driving"
-          aria-label="Follow my location while driving"
-          aria-pressed="false">
-          <i class="fa-solid fa-crosshairs" aria-hidden="true"></i>
-        </button>
-        <button class="map-btn" id="btnToggleLayers" title="Map Layers" aria-expanded="false" aria-controls="layersPanel">
-          <i class="fa-solid fa-layer-group"></i>
-        </button>
+        <div class="map-view-tools" role="group" aria-label="Map view tools">
+          <button type="button" class="map-btn" id="btnMapReset" title="Reset View" aria-label="Reset map view">
+            <i class="fa-solid fa-expand" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="map-btn" id="btnLocateMe"
+            title="Follow my location while driving"
+            aria-label="Follow my location while driving"
+            aria-pressed="false">
+            <i class="fa-solid fa-crosshairs" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="map-btn" id="btnToggleLayers" title="Map Layers" aria-expanded="false" aria-controls="layersPanel">
+            <i class="fa-solid fa-layer-group" aria-hidden="true"></i>
+          </button>
+        </div>
       </div>
 
       <!-- Layers panel (opened by the layers button) -->
@@ -451,12 +453,12 @@
         </button>
       </div>
 
-      <!-- Route Guidance Floating Legend -->
-      <div class="map-legend">
+      <!-- Route Guidance Floating Legend (Forced / Nearby rows toggle with state) -->
+      <div class="map-legend" id="mapLegend">
         <div class="legend-item"><span class="legend-color orig"></span> Origin</div>
-        <div class="legend-item"><span class="legend-color forced"></span> Forced Area Stop</div>
+        <div class="legend-item legend-forced" hidden><span class="legend-color forced"></span> Forced Area Stop</div>
         <div class="legend-item"><span class="legend-color stop"></span> Supercharger Stop</div>
-        <div class="legend-item"><span class="legend-color corridor"></span> Nearby Station</div>
+        <div class="legend-item legend-corridor"><span class="legend-color corridor"></span> Nearby Station</div>
         <div class="legend-item"><span class="legend-color dest"></span> Destination</div>
       </div>
 
@@ -506,13 +508,13 @@
   <div id="appToast" class="app-toast" role="status" aria-live="polite" hidden></div>
 
   <!-- Removable foliage module JS — delete with static/foliage/ -->
-  <script src="/foliage/foliage-overlay.js?v=car8"></script>
+  <script src="/foliage/foliage-overlay.js?v=car9"></script>
   <!-- Removable drone flight module JS — delete with static/airspace/ -->
-  <script src="/airspace/airspace-overlay.js?v=car8"></script>
+  <script src="/airspace/airspace-overlay.js?v=car9"></script>
   <!-- Removable live weather radar & wind module JS — delete with static/weather/ -->
-  <script src="/weather/weather-overlay.js?v=car8"></script>
+  <script src="/weather/weather-overlay.js?v=car9"></script>
   <!-- Removable elevation profile module JS — delete with static/elevation/ -->
-  <script src="/elevation/elevation-profile.js?v=car8"></script>
-  <script src="/app.js?v=car8"></script>
+  <script src="/elevation/elevation-profile.js?v=car9"></script>
+  <script src="/app.js?v=car9"></script>
 </body>
 </html>

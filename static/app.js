@@ -300,6 +300,8 @@ document.addEventListener("DOMContentLoaded", () => {
   setupEventListeners();
   setupCarShell();
   loadStats();
+  updateAreaToolDrawingState();
+  updateMapLegendVisibility();
   // Mobile: skip eager nearby list until Explore is opened (saves a boot fetch)
   if (!isMobileShell()) {
     loadNearbyChargers();
@@ -534,8 +536,9 @@ function applyCarShell() {
   const badge = document.getElementById("carModeBadge");
   if (badge) {
     if (enable) {
+      // Keep CAR MODE proof for Tesla G1 tests — no WxH clutter on the map.
       badge.hidden = false;
-      badge.textContent = `CAR MODE · ${window.innerWidth}×${window.innerHeight}`;
+      badge.textContent = "CAR MODE";
     } else {
       badge.hidden = true;
     }
@@ -825,6 +828,10 @@ function setupEventListeners() {
   });
   // Continuous follow-me while driving (map + car peek) — same SPA path everywhere.
   document.getElementById("btnLocateMe").addEventListener("click", () => {
+    if (state.areaSelectMode) {
+      clearSelectionShape();
+      deactivateAreaSelectMode();
+    }
     toggleLiveLocation();
   });
   document.getElementById("btnLiveRecenter")?.addEventListener("click", () => {
@@ -851,9 +858,21 @@ function setupEventListeners() {
     }
   });
 
-  // Clear buttons
-  setupClearBtn("clearOrigin", "originInput", () => { state.origin = null; updateMapMarkers(); });
-  setupClearBtn("clearDest", "destInput", () => { state.destination = null; updateMapMarkers(); });
+  // Clear buttons — also drop stale itinerary so empty inputs never show an old plan
+  setupClearBtn("clearOrigin", "originInput", () => {
+    state.origin = null;
+    clearActivePlan();
+    updateMapMarkers();
+  });
+  setupClearBtn("clearDest", "destInput", () => {
+    state.destination = null;
+    clearActivePlan();
+    updateMapMarkers();
+  });
+
+  document.getElementById("toggleNearbyStations")?.addEventListener("change", () => {
+    updateMapLegendVisibility();
+  });
 
   // Strategy Mode Toggles — always replan when origin/destination are set
   document.getElementById("btnModeMaximize").addEventListener("click", () => {
@@ -934,8 +953,12 @@ function setupEventListeners() {
     });
   });
 
-  // Map Controls
+  // Map Controls — leave area-draw mode first so the instruction banner never steals hits
   document.getElementById("btnMapReset").addEventListener("click", () => {
+    if (state.areaSelectMode) {
+      clearSelectionShape();
+      deactivateAreaSelectMode();
+    }
     if (state.routeLayer.getLayers().length > 0) {
       state.map.fitBounds(state.routeLayer.getBounds(), { padding: [50, 50] });
     } else if (state.markersLayer.getLayers().length > 0) {
@@ -946,6 +969,10 @@ function setupEventListeners() {
   });
 
   document.getElementById("btnToggleLayers").addEventListener("click", () => {
+    if (state.areaSelectMode) {
+      clearSelectionShape();
+      deactivateAreaSelectMode();
+    }
     toggleLayersPanel();
   });
 
@@ -1275,23 +1302,28 @@ function selectAreaTool(mode) {
 
 function setAreaDrawMode(mode) {
   state.areaDrawMode = mode === "freehand" ? "freehand" : "box";
-  const boxBtn = document.getElementById("btnAreaModeBox");
-  const freeBtn = document.getElementById("btnAreaModeFreehand");
-  boxBtn?.classList.toggle("active", state.areaDrawMode === "box");
-  freeBtn?.classList.toggle("active", state.areaDrawMode === "freehand");
-  boxBtn?.setAttribute("aria-pressed", state.areaDrawMode === "box" ? "true" : "false");
-  freeBtn?.setAttribute("aria-pressed", state.areaDrawMode === "freehand" ? "true" : "false");
   if (state.areaSelectMode) {
     updateAreaSelectActiveCopy();
   }
   updateAreaToolDrawingState();
 }
 
+/**
+ * Area tool chrome: quiet at rest. Only the tool currently drawing gets
+ * active/drawing — Box must not look "on" before the user taps it (m3).
+ */
 function updateAreaToolDrawingState() {
   const boxBtn = document.getElementById("btnAreaModeBox");
   const freeBtn = document.getElementById("btnAreaModeFreehand");
-  boxBtn?.classList.toggle("drawing", state.areaSelectMode && state.areaDrawMode === "box");
-  freeBtn?.classList.toggle("drawing", state.areaSelectMode && state.areaDrawMode === "freehand");
+  const drawing = !!state.areaSelectMode;
+  const boxOn = drawing && state.areaDrawMode === "box";
+  const freeOn = drawing && state.areaDrawMode === "freehand";
+  boxBtn?.classList.toggle("active", boxOn);
+  freeBtn?.classList.toggle("active", freeOn);
+  boxBtn?.classList.toggle("drawing", boxOn);
+  freeBtn?.classList.toggle("drawing", freeOn);
+  boxBtn?.setAttribute("aria-pressed", boxOn ? "true" : "false");
+  freeBtn?.setAttribute("aria-pressed", freeOn ? "true" : "false");
 }
 
 function updateAreaSelectActiveCopy() {
@@ -1321,10 +1353,10 @@ function updateAreaSelectActiveCopy() {
 function activateAreaSelectMode() {
   state.areaSelectMode = true;
   state.map.dragging.disable();
-  // Full map while drawing on mobile
+  // Full map while drawing on mobile; body class also drives Clear-btn visibility
+  document.body.classList.add("area-drawing");
   if (isMobileShell()) {
     closeMobileSheet();
-    document.body.classList.add("area-drawing");
   }
   document.getElementById("map").style.cursor = "crosshair";
   document.getElementById("mapModeBanner").style.display = "flex";
@@ -1390,8 +1422,42 @@ function updateClearSelectionButton() {
     : "No active area selection to clear";
 }
 
+function updateMapLegendVisibility() {
+  const forcedEl = document.querySelector("#mapLegend .legend-forced");
+  const corridorEl = document.querySelector("#mapLegend .legend-corridor");
+  if (forcedEl) {
+    forcedEl.hidden = state.forcedChargers.size === 0;
+  }
+  if (corridorEl) {
+    const nearbyOn = document.getElementById("toggleNearbyStations")?.checked !== false;
+    corridorEl.hidden = !nearbyOn;
+  }
+}
+
+/** Drop stale itinerary / route geometry when endpoints are cleared (M6). */
+function clearActivePlan() {
+  state.activePlan = null;
+  if (state.routeLayer) state.routeLayer.clearLayers();
+  if (state.corridorLayer) state.corridorLayer.clearLayers();
+  const results = document.getElementById("routeResults");
+  if (results) results.style.display = "none";
+  const itinBtn = document.getElementById("btnCarSheetItinerary");
+  if (itinBtn) itinBtn.hidden = true;
+  updateCarPeek();
+  syncCarTestHooks();
+  updateMapLegendVisibility();
+  try {
+    if (window.WeatherModule && typeof window.WeatherModule.analyzeRoutePlan === "function") {
+      window.WeatherModule.analyzeRoutePlan(null);
+    }
+  } catch (_) {
+    /* optional module */
+  }
+}
+
 function updateForcedChargersUI() {
   updateClearSelectionButton();
+  updateMapLegendVisibility();
 
   // Cyan map markers for force-included stops (sidebar chips removed)
   state.forcedMarkersLayer.clearLayers();
@@ -2302,6 +2368,7 @@ function renderRoutePlan(plan) {
   const stopLabel = stopCount === 1 ? "Supercharger" : "Superchargers";
   document.getElementById("corridorCountText").innerText =
     `Visited ${stopCount} ${stopLabel}${forcedNotice} • ${plan.summary.chargers_along_corridor_count} stations along corridor`;
+  updateMapLegendVisibility();
 
   // 2. Render Map Geometry
   state.routeLayer.clearLayers();
