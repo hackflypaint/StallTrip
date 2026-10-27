@@ -1,313 +1,110 @@
 /**
- * Pure helpers for client-side live location (watchPosition follow-me).
- * Mirrors static/app.js — run: node tests/test_live_location.js
+ * Live-location helpers — assert against real static/app.js (not local mirrors).
+ * Load pattern matches tests/test_release_prep_v106.js (vm + window export).
+ * Run: node tests/test_live_location.js
  */
+const fs = require("fs");
+const path = require("path");
+const vm = require("vm");
 
-function isSecureGeoContext(opts) {
-  const { isSecureContext, protocol, hostname } = opts;
-  if (typeof isSecureContext === "boolean") return isSecureContext;
-  const host = String(hostname || "").toLowerCase();
-  return protocol === "https:" || host === "localhost" || host === "127.0.0.1";
+function assert(cond, msg) {
+  if (!cond) throw new Error(msg);
 }
 
-function liveLocationWatchOptions() {
-  return {
-    enableHighAccuracy: true,
-    timeout: 12000,
-    maximumAge: 1500,
+function loadAppLiveHelpers() {
+  const src = fs.readFileSync(path.join(__dirname, "..", "static", "app.js"), "utf8");
+  const start = src.indexOf("function isSecureGeoContext");
+  assert(start >= 0, "missing isSecureGeoContext in app.js");
+  const end = src.indexOf("\nfunction setLocateBusy", start);
+  assert(end > start, "could not slice live helpers before setLocateBusy");
+  const snippet = src.slice(start, end);
+
+  const sandbox = {
+    console,
+    Set,
+    Map,
+    Number,
+    Math,
+    String,
+    Array,
+    Date,
+    parseInt,
+    isNaN,
+    JSON,
+    location: { protocol: "https:", hostname: "example.com" },
+    window: {},
   };
-}
+  sandbox.window = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(snippet, sandbox);
 
-function oneShotLocationOptions(mobileShell) {
-  return {
-    enableHighAccuracy: false,
-    timeout: 10000,
-    maximumAge: mobileShell ? 60_000 : 0,
-  };
-}
-
-function formatLiveLocationError(err) {
-  if (!err) return "Location unavailable.";
-  const code = err.code;
-  if (code === 1 || /denied/i.test(String(err.message || ""))) {
-    return "Location denied — allow location for this site, then tap locate again.";
+  const required = [
+    "isSecureGeoContext",
+    "liveLocationWatchOptions",
+    "oneShotLocationOptions",
+    "formatLiveLocationError",
+    "haversineDistanceMiles",
+    "headingToCardinal",
+    "formatLiveTelemetryLabel",
+    "computeNextPlannedStopTelemetry",
+    "isOffRouteCorridor",
+    "liveFollowReplanDefaults",
+    "shouldAcceptLiveFixForReplan",
+    "plannedStopKey",
+    "findNewlyPassedStop",
+    "shouldAutoReplanLiveMove",
+  ];
+  for (const name of required) {
+    assert(typeof sandbox[name] === "function", `app.js must define ${name}`);
+    assert(sandbox.window[name] === sandbox[name], `app.js must expose window.${name}`);
   }
-  if (code === 2) return "Location unavailable — GPS signal weak. Try again outdoors.";
-  if (code === 3) return "Location timed out — tap locate to retry.";
-  if (code === 0 || /unsupported/i.test(String(err.message || ""))) {
-    return "Location unsupported in this browser.";
-  }
-  return "Location unavailable — use a preset or type an address.";
+  return sandbox;
 }
 
-/** Next toggle action given live-location state (no DOM). */
+/** UI toggle helper (not exported from app.js — local for button state only). */
 function nextLiveLocationAction(live) {
   if (!live || !live.watching) return "start";
   if (!live.follow) return "resume";
   return "stop";
 }
 
-/** Drag should pause follow but keep watching. */
 function afterMapDragStart(live) {
   if (!live || !live.watching || !live.follow) return { ...live };
   return { ...live, follow: false };
 }
 
-function haversineDistanceMiles(lat1, lng1, lat2, lng2) {
-  if (
-    !Number.isFinite(lat1) ||
-    !Number.isFinite(lng1) ||
-    !Number.isFinite(lat2) ||
-    !Number.isFinite(lng2)
-  ) {
-    return null;
-  }
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const R_MILES = 3958.7613;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
-  return R_MILES * c;
-}
-
-function headingToCardinal(headingDeg) {
-  if (!Number.isFinite(headingDeg) || headingDeg < 0) return null;
-  const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
-  const normalized = ((headingDeg % 360) + 360) % 360;
-  return dirs[Math.round(normalized / 45) % 8];
-}
-
-function formatLiveTelemetryLabel(speedMps, headingDeg) {
-  const parts = [];
-  if (Number.isFinite(speedMps) && speedMps >= 0) {
-    const mph = Math.round(speedMps * 2.236936);
-    parts.push(`${mph} mph`);
-  }
-  const card = headingToCardinal(headingDeg);
-  if (card) {
-    parts.push(`${card} ${Math.round(((headingDeg % 360) + 360) % 360)}°`);
-  }
-  return parts.length > 0 ? parts.join(" · ") : "LIVE GPS";
-}
-
-function computeNextPlannedStopTelemetry(lat, lng, plan) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !plan || !Array.isArray(plan.stops)) {
-    return null;
-  }
-  let best = null;
-  for (const stop of plan.stops) {
-    if (!stop || (stop.type !== "SUPERCHARGER" && stop.type !== "DESTINATION")) continue;
-    const d = haversineDistanceMiles(lat, lng, Number(stop.lat), Number(stop.lng));
-    if (d == null) continue;
-    if (stop.type === "SUPERCHARGER") {
-      if (!best || best.type !== "SUPERCHARGER" || d < best.distanceMiles) {
-        best = {
-          name: stop.name || `Stop #${stop.stop_index || ""}`,
-          stopIndex: stop.stop_index || null,
-          type: "SUPERCHARGER",
-          distanceMiles: Math.round(d * 10) / 10,
-          lat: Number(stop.lat),
-          lng: Number(stop.lng),
-        };
-      }
-    } else if (!best) {
-      best = {
-        name: stop.name || "Destination",
-        stopIndex: null,
-        type: "DESTINATION",
-        distanceMiles: Math.round(d * 10) / 10,
-        lat: Number(stop.lat),
-        lng: Number(stop.lng),
-      };
-    }
-  }
-  return best;
-}
-
-function isOffRouteCorridor(lat, lng, plan, thresholdMiles = 25) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !plan) return false;
-  let minMiles = Infinity;
-  const geom = plan.geometry;
-  const coords =
-    geom && geom.type === "LineString" && Array.isArray(geom.coordinates)
-      ? geom.coordinates
-      : null;
-  if (coords && coords.length > 0) {
-    for (const pt of coords) {
-      const d = haversineDistanceMiles(lat, lng, Number(pt[1]), Number(pt[0]));
-      if (d != null && d < minMiles) minMiles = d;
-    }
-  } else if (Array.isArray(plan.stops)) {
-    for (const s of plan.stops) {
-      const d = haversineDistanceMiles(lat, lng, Number(s.lat), Number(s.lng));
-      if (d != null && d < minMiles) minMiles = d;
-    }
-  }
-  return Number.isFinite(minMiles) && minMiles > thresholdMiles;
-}
-
-function liveFollowReplanDefaults() {
-  return {
-    minOriginDriftMiles: 5,
-    passStopRadiusMiles: 0.6,
-    offCorridorAutoMiles: 12,
-    cooldownMs: 45_000,
-    maxAccuracyM: 100,
-    maxJumpMiles: 5,
-    jumpGraceMs: 30_000,
-  };
-}
-
-function shouldAcceptLiveFixForReplan(ctx) {
-  const opts = { ...liveFollowReplanDefaults(), ...(ctx && ctx.opts) };
-  const { firstFix, prevLat, prevLng, prevAt, lat, lng, accuracy, now } = ctx || {};
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
-  if (firstFix) return true;
-  if (Number.isFinite(accuracy) && accuracy > opts.maxAccuracyM) return false;
-  if (
-    Number.isFinite(prevLat) &&
-    Number.isFinite(prevLng) &&
-    Number.isFinite(prevAt) &&
-    Number.isFinite(now)
-  ) {
-    const jump = haversineDistanceMiles(prevLat, prevLng, lat, lng);
-    const dt = now - prevAt;
-    if (jump != null && jump > opts.maxJumpMiles && dt >= 0 && dt < opts.jumpGraceMs) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function plannedStopKey(stop) {
-  if (!stop) return null;
-  if (stop.id != null && stop.id !== "") return String(stop.id);
-  if (stop.stop_index != null) return `idx:${stop.stop_index}`;
-  if (Number.isFinite(stop.lat) && Number.isFinite(stop.lng)) {
-    return `ll:${Number(stop.lat).toFixed(4)},${Number(stop.lng).toFixed(4)}`;
-  }
-  return null;
-}
-
-function findNewlyPassedStop(lat, lng, plan, passedIds, radiusMiles) {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !plan || !Array.isArray(plan.stops)) {
-    return null;
-  }
-  const radius = Number.isFinite(radiusMiles) ? radiusMiles : liveFollowReplanDefaults().passStopRadiusMiles;
-  const seen = passedIds instanceof Set ? passedIds : new Set();
-  let best = null;
-  for (const stop of plan.stops) {
-    if (!stop || stop.type !== "SUPERCHARGER") continue;
-    const key = plannedStopKey(stop);
-    if (!key || seen.has(key)) continue;
-    const d = haversineDistanceMiles(lat, lng, Number(stop.lat), Number(stop.lng));
-    if (d == null || d > radius) continue;
-    if (
-      !best ||
-      (Number(stop.stop_index) || 0) < (Number(best.stop_index) || 0) ||
-      (stop.stop_index === best.stop_index && d < best.distanceMiles)
-    ) {
-      best = {
-        key,
-        name: stop.name || `Stop #${stop.stop_index || ""}`,
-        stop_index: stop.stop_index,
-        distanceMiles: d,
-      };
-    }
-  }
-  return best;
-}
-
-function shouldAutoReplanLiveMove(ctx) {
-  const opts = { ...liveFollowReplanDefaults(), ...(ctx && ctx.opts) };
-  const {
-    firstFix,
-    lat,
-    lng,
-    plannedOriginLat,
-    plannedOriginLng,
-    lastAutoReplanAt,
-    now,
-    plan,
-    hasDestination,
-    planInFlight,
-    accuracy,
-    passedStop,
-  } = ctx || {};
-
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return { replan: false, reason: null };
-  }
-
-  if (firstFix) {
-    return {
-      replan: !!hasDestination,
-      reason: hasDestination ? "first_fix" : "first_fix_origin_only",
-    };
-  }
-
-  if (!hasDestination) return { replan: false, reason: null };
-  if (planInFlight) return { replan: false, reason: null };
-  if (Number.isFinite(accuracy) && accuracy > opts.maxAccuracyM) {
-    return { replan: false, reason: null };
-  }
-
-  const since = Number.isFinite(lastAutoReplanAt) ? now - lastAutoReplanAt : Infinity;
-  if (Number.isFinite(since) && since < opts.cooldownMs) {
-    return { replan: false, reason: null };
-  }
-
-  if (passedStop) return { replan: true, reason: "passed_stop" };
-
-  if (Number.isFinite(plannedOriginLat) && Number.isFinite(plannedOriginLng)) {
-    const drift = haversineDistanceMiles(plannedOriginLat, plannedOriginLng, lat, lng);
-    if (drift != null && drift >= opts.minOriginDriftMiles) {
-      return { replan: true, reason: "origin_drift" };
-    }
-  }
-
-  if (plan && isOffRouteCorridor(lat, lng, plan, opts.offCorridorAutoMiles)) {
-    return { replan: true, reason: "off_corridor" };
-  }
-
-  return { replan: false, reason: null };
-}
-
-function assert(cond, msg) {
-  if (!cond) throw new Error(msg);
-}
-
 function run() {
-  const watch = liveLocationWatchOptions();
+  const h = loadAppLiveHelpers();
+
+  const watch = h.liveLocationWatchOptions();
   assert(watch.enableHighAccuracy === true, "driving uses high accuracy");
   assert(watch.timeout >= 8000, "timeout patient for Tesla Chromium");
   assert(watch.maximumAge > 0 && watch.maximumAge <= 5000, "short cache for drive updates");
 
-  const mobileShot = oneShotLocationOptions(true);
+  const mobileShot = h.oneShotLocationOptions(true);
   assert(mobileShot.maximumAge === 60_000, "mobile one-shot may use cached fix");
-  assert(oneShotLocationOptions(false).maximumAge === 0, "desktop one-shot fresh");
+  assert(h.oneShotLocationOptions(false).maximumAge === 0, "desktop one-shot fresh");
 
-  assert(isSecureGeoContext({ isSecureContext: true }) === true, "secure context ok");
-  assert(isSecureGeoContext({ isSecureContext: false }) === false, "insecure blocked");
-  assert(
-    isSecureGeoContext({ protocol: "https:", hostname: "example.com" }) === true,
-    "https ok"
-  );
-  assert(
-    isSecureGeoContext({ protocol: "http:", hostname: "localhost" }) === true,
-    "localhost ok"
-  );
-  assert(
-    isSecureGeoContext({ protocol: "http:", hostname: "192.168.1.5" }) === false,
-    "plain http LAN not secure"
-  );
+  h.window.isSecureContext = true;
+  assert(h.isSecureGeoContext() === true, "secure context ok");
+  h.window.isSecureContext = false;
+  assert(h.isSecureGeoContext() === false, "insecure blocked");
+  delete h.window.isSecureContext;
+  h.location.protocol = "https:";
+  h.location.hostname = "example.com";
+  assert(h.isSecureGeoContext() === true, "https ok");
+  h.location.protocol = "http:";
+  h.location.hostname = "localhost";
+  assert(h.isSecureGeoContext() === true, "localhost ok");
+  h.location.hostname = "192.168.1.5";
+  assert(h.isSecureGeoContext() === false, "plain http LAN not secure");
 
-  assert(/denied/i.test(formatLiveLocationError({ code: 1 })), "deny message");
-  assert(/timed out/i.test(formatLiveLocationError({ code: 3 })), "timeout message");
-  assert(/unsupported/i.test(formatLiveLocationError({ code: 0, message: "unsupported" })), "unsupported");
+  assert(/denied/i.test(h.formatLiveLocationError({ code: 1 })), "deny message");
+  assert(/timed out/i.test(h.formatLiveLocationError({ code: 3 })), "timeout message");
+  assert(
+    /unsupported/i.test(h.formatLiveLocationError({ code: 0, message: "unsupported" })),
+    "unsupported"
+  );
 
   assert(nextLiveLocationAction({ watching: false }) === "start", "idle → start");
   assert(nextLiveLocationAction({ watching: true, follow: false }) === "resume", "paused → resume");
@@ -317,13 +114,12 @@ function run() {
   assert(paused.watching === true && paused.follow === false, "drag pauses follow only");
   assert(afterMapDragStart({ watching: false, follow: false }).watching === false, "idle drag noop");
 
-  // Haversine & telemetry HUD checks
-  const sfToOakland = haversineDistanceMiles(37.7749, -122.4194, 37.8044, -122.2712);
+  const sfToOakland = h.haversineDistanceMiles(37.7749, -122.4194, 37.8044, -122.2712);
   assert(sfToOakland > 7 && sfToOakland < 10, `expected ~8.3 mi, got ${sfToOakland}`);
-  assert(headingToCardinal(0) === "N", "0 deg = N");
-  assert(headingToCardinal(135) === "SE", "135 deg = SE");
-  assert(formatLiveTelemetryLabel(29.0576, 135) === "65 mph · SE 135°", "telemetry label");
-  assert(formatLiveTelemetryLabel(null, null) === "LIVE GPS", "fallback telemetry label");
+  assert(h.headingToCardinal(0) === "N", "0 deg = N");
+  assert(h.headingToCardinal(135) === "SE", "135 deg = SE");
+  assert(h.formatLiveTelemetryLabel(29.0576, 135) === "65 mph · SE 135°", "telemetry label");
+  assert(h.formatLiveTelemetryLabel(null, null) === "LIVE GPS", "fallback telemetry label");
 
   const samplePlan = {
     stops: [
@@ -333,20 +129,19 @@ function run() {
       { type: "DESTINATION", name: "Los Angeles, CA", lat: 34.0522, lng: -118.2437 },
     ],
   };
-  const nextStop = computeNextPlannedStopTelemetry(37.65, -122.38, samplePlan);
+  const nextStop = h.computeNextPlannedStopTelemetry(37.65, -122.38, samplePlan);
   assert(nextStop && nextStop.name === "San Mateo, CA", "nearest planned Supercharger stop");
   assert(nextStop.distanceMiles > 4 && nextStop.distanceMiles < 10, "distance to next stop in miles");
-  assert(isOffRouteCorridor(37.65, -122.38, samplePlan, 25) === false, "on corridor");
-  assert(isOffRouteCorridor(39.0, -120.0, samplePlan, 25) === true, "off corridor (>25 mi)");
+  assert(h.isOffRouteCorridor(37.65, -122.38, samplePlan, 25) === false, "on corridor");
+  assert(h.isOffRouteCorridor(39.0, -120.0, samplePlan, 25) === true, "off corridor (>25 mi)");
 
-  // Smart follow / GPS-as-origin heuristics
-  const defs = liveFollowReplanDefaults();
+  const defs = h.liveFollowReplanDefaults();
   assert(defs.minOriginDriftMiles === 5, "5 mi drift before auto-replan");
   assert(defs.cooldownMs >= 30_000, "cooldown prevents thrash");
   assert(defs.offCorridorAutoMiles < 25, "auto off-corridor tighter than manual pill");
 
   assert(
-    shouldAcceptLiveFixForReplan({
+    h.shouldAcceptLiveFixForReplan({
       firstFix: true,
       lat: 41.5,
       lng: -83.3,
@@ -356,7 +151,7 @@ function run() {
     "first fix always accepted"
   );
   assert(
-    shouldAcceptLiveFixForReplan({
+    h.shouldAcceptLiveFixForReplan({
       firstFix: false,
       prevLat: 37.77,
       prevLng: -122.42,
@@ -369,7 +164,7 @@ function run() {
     "reject coastal→Ohio spike in 1s"
   );
   assert(
-    shouldAcceptLiveFixForReplan({
+    h.shouldAcceptLiveFixForReplan({
       firstFix: false,
       prevLat: 37.77,
       prevLng: -122.42,
@@ -382,7 +177,7 @@ function run() {
     "accept large jump after grace (GPS recovery)"
   );
   assert(
-    shouldAcceptLiveFixForReplan({
+    h.shouldAcceptLiveFixForReplan({
       firstFix: false,
       prevLat: 37.77,
       prevLng: -122.42,
@@ -395,7 +190,7 @@ function run() {
     "reject inaccurate fix for replan"
   );
 
-  const firstNoDest = shouldAutoReplanLiveMove({
+  const firstNoDest = h.shouldAutoReplanLiveMove({
     firstFix: true,
     lat: 41.5,
     lng: -83.3,
@@ -404,7 +199,7 @@ function run() {
   });
   assert(firstNoDest.reason === "first_fix_origin_only" && firstNoDest.replan === false, "first fix seeds origin only");
 
-  const firstWithDest = shouldAutoReplanLiveMove({
+  const firstWithDest = h.shouldAutoReplanLiveMove({
     firstFix: true,
     lat: 41.5,
     lng: -83.3,
@@ -413,7 +208,7 @@ function run() {
   });
   assert(firstWithDest.replan === true && firstWithDest.reason === "first_fix", "first fix replans when dest set");
 
-  const jitter = shouldAutoReplanLiveMove({
+  const jitter = h.shouldAutoReplanLiveMove({
     firstFix: false,
     lat: 37.775,
     lng: -122.419,
@@ -428,7 +223,7 @@ function run() {
   });
   assert(jitter.replan === false, "sub-mile jitter does not replan");
 
-  const drift = shouldAutoReplanLiveMove({
+  const drift = h.shouldAutoReplanLiveMove({
     firstFix: false,
     lat: 37.85,
     lng: -122.25,
@@ -443,7 +238,7 @@ function run() {
   });
   assert(drift.replan === true && drift.reason === "origin_drift", "≥5 mi drift replans");
 
-  const cooled = shouldAutoReplanLiveMove({
+  const cooled = h.shouldAutoReplanLiveMove({
     firstFix: false,
     lat: 37.85,
     lng: -122.25,
@@ -458,7 +253,7 @@ function run() {
   });
   assert(cooled.replan === false, "cooldown blocks rapid auto-replan");
 
-  const busy = shouldAutoReplanLiveMove({
+  const busy = h.shouldAutoReplanLiveMove({
     firstFix: false,
     lat: 37.85,
     lng: -122.25,
@@ -473,9 +268,9 @@ function run() {
   });
   assert(busy.replan === false, "Maximize mid-calc blocks auto-replan");
 
-  const nearStop = findNewlyPassedStop(37.563, -122.3255, samplePlan, new Set(), 0.6);
+  const nearStop = h.findNewlyPassedStop(37.563, -122.3255, samplePlan, new Set(), 0.6);
   assert(nearStop && nearStop.name === "San Mateo, CA", "detect passed Supercharger");
-  const passed = shouldAutoReplanLiveMove({
+  const passed = h.shouldAutoReplanLiveMove({
     firstFix: false,
     lat: 37.563,
     lng: -122.3255,
@@ -491,7 +286,7 @@ function run() {
   });
   assert(passed.replan === true && passed.reason === "passed_stop", "passing a stop replans");
 
-  const offAuto = shouldAutoReplanLiveMove({
+  const offAuto = h.shouldAutoReplanLiveMove({
     firstFix: false,
     lat: 39.0,
     lng: -120.0,
@@ -506,9 +301,8 @@ function run() {
   });
   assert(offAuto.replan === true && offAuto.reason === "off_corridor", "12 mi off-corridor auto-replans");
 
-  // Locate-with-origin-already-set must still force replan (same as firstFix).
-  const locateOverride = shouldAutoReplanLiveMove({
-    firstFix: true, // armLocate / forceOrigin treats locate like firstFix
+  const locateOverride = h.shouldAutoReplanLiveMove({
+    firstFix: true,
     lat: 41.45,
     lng: -83.36,
     plannedOriginLat: 37.7749,
@@ -516,7 +310,7 @@ function run() {
     lastAutoReplanAt: Date.now(),
     now: Date.now(),
     hasDestination: true,
-    planInFlight: true, // even mid-calc, locate/firstFix must win
+    planInFlight: true,
     accuracy: 15,
     plan: samplePlan,
   });
@@ -525,7 +319,7 @@ function run() {
     "locate/firstFix overrides pre-set origin even while planInFlight"
   );
 
-  // H1 camera: skip fitBounds while live follow owns panTo GPS.
+  // shouldSkipFitBoundsForLiveFollow in app.js reads state — assert pure contract here.
   function shouldSkipFitBoundsForLiveFollow(live) {
     return !!(live && live.watching && live.follow);
   }
@@ -542,14 +336,13 @@ function run() {
     "allow fitBounds when not watching"
   );
 
-  // Soft-clear keeps geometry flag for live replan paths.
   function clearActivePlanOpts(willReplan) {
     return { keepMapGeometry: !!willReplan };
   }
   assert(clearActivePlanOpts(true).keepMapGeometry === true, "replan keeps map geometry");
   assert(clearActivePlanOpts(false).keepMapGeometry === false, "no-dest clears geometry");
 
-  console.log("test_live_location.js: all checks passed");
+  console.log("test_live_location.js: all checks passed (app.js helpers)");
 }
 
 run();

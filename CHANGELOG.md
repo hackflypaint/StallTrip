@@ -3,6 +3,22 @@
 All notable StallTrip releases are listed here. Version strings are kept in sync
 across `VERSION`, `server.py` (`APP_VERSION`), Dockerfile labels, and compose image tags.
 
+## [1.0.7] — 2026-10-27
+
+### Security
+
+- `_read_json_body` catches `RecursionError` on pathologically nested JSON (400)
+- `sanitize_log_text` strips unsafe controls before secret/geo redaction; expands Auth (any scheme), Cookie/Set-Cookie, JSON secrets, and lat/lng; mirrored in client `redact()`
+- CSP `connect-src` narrowed to `leaflet@1.9.4/` and `font-awesome/6.5.1/` paths (no bare CDN hosts)
+- Nominatim User-Agent is `StallTrip/{version}` with optional `NOMINATIM_CONTACT` (CR/LF stripped)
+
+### Changed
+
+- Release identity normalized to **v1.0.7** / `stalltrip:1.0.7`
+- HI Python 3.12 builder/runtime digests refreshed; builder drops to `USER 65532` after `--chown`
+- Expanded `.dockerignore`; compose publishes `127.0.0.1:8080` with `BIND_ADDR` docs
+- Live-location unit tests assert against real `app.js` helpers
+
 ## [1.0.6] — 2026-10-27
 
 ### Fixed

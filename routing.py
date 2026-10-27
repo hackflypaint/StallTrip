@@ -20,6 +20,25 @@ DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "su
 OSRM_BASE_URL = os.environ.get("OSRM_BASE_URL", "https://router.project-osrm.org")
 PHOTON_BASE_URL = "https://photon.komoot.io/api"
 NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org"
+# Keep in sync with server.APP_VERSION / VERSION when env is unset (stdlib-only).
+_DEFAULT_APP_VERSION = "1.0.7"
+
+
+def _app_version() -> str:
+    raw = (os.environ.get("APP_VERSION") or "").replace("\r", "").replace("\n", "").strip()
+    return raw or _DEFAULT_APP_VERSION
+
+
+def nominatim_user_agent() -> str:
+    """Nominatim-compliant User-Agent: StallTrip/{version} (+ optional contact).
+
+    NOMINATIM_CONTACT may hold an email or URL; CR/LF are stripped to block header injection.
+    """
+    contact = (os.environ.get("NOMINATIM_CONTACT") or "").replace("\r", "").replace("\n", "").strip()
+    ua = f"StallTrip/{_app_version()}"
+    if contact:
+        ua = f"{ua} ({contact})"
+    return ua.replace("\r", "").replace("\n", "")
 
 MAX_GEOCODE_RESPONSE_BYTES = 1_000_000
 MAX_OSRM_RESPONSE_BYTES = 8_000_000
@@ -308,7 +327,7 @@ def geocode_address(query: str) -> List[Dict[str, Any]]:
     # 2. Fallback: Nominatim
     try:
         url = f"{NOMINATIM_BASE_URL}/search?format=json&q={encoded_q}&addressdetails=1&limit=5"
-        req = urllib.request.Request(url, headers={"User-Agent": "TeslaSuperchargerApp/1.0 (tester@example.com)"})
+        req = urllib.request.Request(url, headers={"User-Agent": nominatim_user_agent()})
         with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(_read_response_limited(resp, MAX_GEOCODE_RESPONSE_BYTES).decode("utf-8"))
         results = []

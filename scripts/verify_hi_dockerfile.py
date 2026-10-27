@@ -37,7 +37,17 @@ def main() -> None:
         DOCKERFILE,
     ):
         fail("runtime FROM must use PYTHON_HI_VERSION@PYTHON_HI_RUNTIME_DIGEST")
-    if "USER 65532" not in DOCKERFILE:
+    if DOCKERFILE.count("USER 65532") < 2:
+        fail("builder and runtime must both drop to UID 65532 (builder after chown)")
+    if "COPY --chown=65532:65532" not in DOCKERFILE:
+        fail("builder must COPY --chown=65532:65532 before USER 65532")
+    builder_stage = DOCKERFILE.split("AS builder", 1)[1].split("FROM ", 1)[0]
+    if "USER 65532" not in builder_stage:
+        fail("builder stage must USER 65532 after chown")
+    if builder_stage.find("COPY --chown=65532:65532") > builder_stage.find("USER 65532"):
+        fail("builder must chown COPY before USER 65532")
+    runtime_stage = DOCKERFILE.rsplit("FROM ", 1)[-1]
+    if "USER 65532" not in runtime_stage:
         fail("runtime must drop to UID 65532")
     if re.search(r"HEALTHCHECK.*\n.*CMD \[\"/bin/sh", DOCKERFILE):
         fail("HI runtime has no /bin/sh — healthcheck must be exec-form python")
@@ -63,12 +73,16 @@ def main() -> None:
         fail("compose should pin user 65532 to match HI runtime")
     if "PYTHON_HI_VERSION" not in COMPOSE:
         fail("compose should pass PYTHON_HI_VERSION build arg")
-    if "stalltrip:1.0.6" not in COMPOSE and 'image: stalltrip:' not in COMPOSE:
+    if "stalltrip:1.0.7" not in COMPOSE and 'image: stalltrip:' not in COMPOSE:
         fail("compose image must be stalltrip:<version> (not legacy local-dev names)")
     if "container_name: stalltrip" not in COMPOSE:
         fail("compose container_name must be stalltrip")
     if "org.opencontainers.image.version" not in DOCKERFILE:
         fail("Dockerfile should label org.opencontainers.image.version")
+    if "127.0.0.1:8080:8080" not in COMPOSE:
+        fail("compose should bind host port to 127.0.0.1:8080 (not 0.0.0.0)")
+    if "BIND_ADDR" not in COMPOSE:
+        fail("compose should document BIND_ADDR for in-container listen")
     print("verify_hi_dockerfile.py: OK")
 
 
