@@ -1338,11 +1338,7 @@ def run_server(port: int = PORT):
         ua_mode = "on" if platform_ua_redirect_enabled() else "off"
         proxy_mode = "on" if trust_proxy_enabled() else "off"
         _LOG.info("============================================================")
-<<<<<<< HEAD
-        _LOG.info("Tesla Supercharger Route Planner on port %s", port)
-=======
         _LOG.info("%s v%s on %s:%s", APP_NAME, APP_VERSION, bind_host, port)
->>>>>>> d0a763f (StallTrip v1.0.7: security scan hygiene and Docker hardening)
         _LOG.info("Desktop:  http://localhost:%s/", port)
         _LOG.info("Mobile:   http://localhost:%s/mobile", port)
         _LOG.info("Tesla:    http://localhost:%s/tesla", port)
