@@ -177,7 +177,11 @@ def _normalize_ip_token(raw: str) -> Optional[str]:
 
 
 def _pick_forwarded_ip(candidates: List[str], hops: int) -> Optional[str]:
-    """Pick client IP from a left→right hop list using trusted hops from the right."""
+    """Pick client IP from a left→right hop list using trusted hops from the right.
+
+    If the chain is shorter than ``hops``, return None so the caller falls back
+    to the TCP peer — never clamp to the left-most (spoofable) address.
+    """
     parsed: List[str] = []
     for raw in candidates:
         ip = _normalize_ip_token(raw)
@@ -188,7 +192,7 @@ def _pick_forwarded_ip(candidates: List[str], hops: int) -> Optional[str]:
     # hops=1 → right-most; hops=2 → second from right, etc.
     idx = len(parsed) - hops
     if idx < 0:
-        idx = 0
+        return None
     return parsed[idx]
 
 
