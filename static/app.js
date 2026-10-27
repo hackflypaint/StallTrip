@@ -1688,18 +1688,12 @@ function updateMapLegendVisibility() {
 
 /**
  * Drop stale itinerary when endpoints are cleared (M6) or before a live replan.
- * @param {{ keepMapGeometry?: boolean, snapshotForRestore?: boolean }} [opts]
+ * @param {{ keepMapGeometry?: boolean }} [opts]
  *   keepMapGeometry — leave route/corridor polylines on the map until the next
  *   successful renderRoutePlan (live GPS replan: no blank → fitBounds flicker).
- *   snapshotForRestore — stash prior plan so a failed replan can restore it.
  */
 function clearActivePlan(opts = {}) {
   const keepMapGeometry = !!opts.keepMapGeometry;
-  if (opts.snapshotForRestore && state.activePlan) {
-    state.planRestoreSnapshot = state.activePlan;
-  } else if (!opts.snapshotForRestore) {
-    state.planRestoreSnapshot = null;
-  }
   state.activePlan = null;
   if (!keepMapGeometry) {
     if (state.routeLayer) state.routeLayer.clearLayers();
@@ -1720,21 +1714,6 @@ function clearActivePlan(opts = {}) {
     /* optional module */
   }
 }
-
-/** Restore itinerary after a failed replan that cleared the active plan. */
-function restorePlanSnapshotIfNeeded() {
-  if (state.activePlan || !state.planRestoreSnapshot) return false;
-  state.activePlan = state.planRestoreSnapshot;
-  state.planRestoreSnapshot = null;
-  try {
-    renderRoutePlan(state.activePlan);
-  } catch (_) {
-    /* map may not be ready */
-  }
-  return true;
-}
-
-window.restorePlanSnapshotIfNeeded = restorePlanSnapshotIfNeeded;
 
 /** True when live follow owns the camera — skip fitBounds that fight panTo GPS. */
 function shouldSkipFitBoundsForLiveFollow() {
@@ -2453,8 +2432,7 @@ function commitGpsAsTripOrigin(lat, lng, { name, reason, toast } = {}) {
   const willReplan = !!state.destination;
   if (state.activePlan) {
     // Drop coastal itinerary identity; keep map geometry while replan is in flight.
-    // Snapshot so a failed plan can restore the prior itinerary (no empty UI).
-    clearActivePlan({ keepMapGeometry: willReplan, snapshotForRestore: willReplan });
+    clearActivePlan({ keepMapGeometry: willReplan });
   }
   if (willReplan) {
     planRoute();
@@ -2793,12 +2771,7 @@ function detectCurrentLocation() {
       // Also show a static blue-dot for this one-shot (no watch).
       updateUserLocationMarker(coords.lat, coords.lng, pos.coords.accuracy, pos.coords.heading);
       if (typeof updateCarPeek === "function") updateCarPeek();
-      if (state.activePlan) {
-        clearActivePlan({
-          keepMapGeometry: !!state.destination,
-          snapshotForRestore: !!state.destination,
-        });
-      }
+      if (state.activePlan) clearActivePlan();
       if (state.destination) {
         showToast("Updating route from your location…", 2800);
         planRoute();
@@ -2809,9 +2782,13 @@ function detectCurrentLocation() {
     (err) => {
       setLocateBusy(false);
       syncLiveLocationUi();
-      // Permission denied is expected — toast only; never silently seed SF as origin.
+      // Permission denied is expected — toast/mobile fallback only; avoid console noise.
       if (err && err.code !== 1) {
         console.warn("Geolocation denied or error:", err);
+      }
+      if (isMobileShell()) {
+        applyOriginFromGeolocation(resolveGeolocationPlace(null, err));
+        return;
       }
       showToast(formatLiveLocationError(err));
     },

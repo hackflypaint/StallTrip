@@ -23,13 +23,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import routing
 
 # ---------------------------------------------------------------------------
-# Release identity — keep in sync with Dockerfile labels, compose image tag,
-# VERSION, and CHANGELOG.md (next cut: v1.0.4).
-# ---------------------------------------------------------------------------
-APP_NAME = "StallTrip"
-APP_VERSION = "1.0.4"
-
-# ---------------------------------------------------------------------------
 # Structured stdout logging (Docker / Lightsail capture stdout+stderr for free)
 # ---------------------------------------------------------------------------
 _LOG = logging.getLogger("stalltrip")
@@ -177,11 +170,7 @@ def _normalize_ip_token(raw: str) -> Optional[str]:
 
 
 def _pick_forwarded_ip(candidates: List[str], hops: int) -> Optional[str]:
-    """Pick client IP from a left→right hop list using trusted hops from the right.
-
-    If the chain is shorter than ``hops``, return None so the caller falls back
-    to the TCP peer — never clamp to the left-most (spoofable) address.
-    """
+    """Pick client IP from a left→right hop list using trusted hops from the right."""
     parsed: List[str] = []
     for raw in candidates:
         ip = _normalize_ip_token(raw)
@@ -190,9 +179,9 @@ def _pick_forwarded_ip(candidates: List[str], hops: int) -> Optional[str]:
     if not parsed:
         return None
     # hops=1 → right-most; hops=2 → second from right, etc.
-    if len(parsed) < hops:
-        return None
     idx = len(parsed) - hops
+    if idx < 0:
+        idx = 0
     return parsed[idx]
 
 
@@ -490,6 +479,9 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             return
         if path == "/api/stats":
             self.handle_stats()
+            return
+        if path == "/health":
+            self.send_empty_ok()
             return
         if path == "/api/health":
             # E2E isolation: clear RL windows when secret header matches env.
@@ -1167,6 +1159,14 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             "geolocation=(self), camera=(), microphone=(), payment=()",
         )
 
+    def send_empty_ok(self):
+        """Bare probe: HTTP 200, empty body (status-code-only health checks)."""
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self._api_response = True
+        self.end_headers()
+
     def send_json_response(self, data: Any, status: int = 200):
         body = json.dumps(data).encode("utf-8")
         try:
@@ -1311,7 +1311,7 @@ def run_server(port: int = PORT):
         ua_mode = "on" if platform_ua_redirect_enabled() else "off"
         proxy_mode = "on" if trust_proxy_enabled() else "off"
         _LOG.info("============================================================")
-        _LOG.info("%s v%s on port %s", APP_NAME, APP_VERSION, port)
+        _LOG.info("Tesla Supercharger Route Planner on port %s", port)
         _LOG.info("Desktop:  http://localhost:%s/", port)
         _LOG.info("Mobile:   http://localhost:%s/mobile", port)
         _LOG.info("Tesla:    http://localhost:%s/tesla", port)
