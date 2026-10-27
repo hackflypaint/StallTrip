@@ -4,13 +4,13 @@
 #
 # Images are public (no Red Hat subscription required for HI pulls from registry.access.redhat.com).
 # Base images are pinned by digest (tag kept for humans). Refresh digests when bumping HI.
-# App version: keep LABEL / compose tag / server.APP_VERSION / VERSION in sync (v1.0.4).
+# App version: keep LABEL / compose tag / server.APP_VERSION / VERSION in sync (v1.0.6).
 
 ARG PYTHON_HI_VERSION=3.12
 # Digests resolved 2026-10-27 via crane digest registry.access.redhat.com/hi/python:…
 ARG PYTHON_HI_BUILDER_DIGEST=sha256:4616ad2ef27c0dd3238b3c2817281c367fe460b182c47607d6f65132b257aba9
 ARG PYTHON_HI_RUNTIME_DIGEST=sha256:14ce8115a8eb67f602070b85bee19e22856a760454e74afed17a23d41cc1ddc2
-ARG APP_VERSION=1.0.4
+ARG APP_VERSION=1.0.6
 
 # ---------------------------------------------------------------------------
 # Stage 1 — builder: stage app, byte-compile, import-check
@@ -33,7 +33,7 @@ RUN ["python3", "-c", "import routing; import server"]
 # ---------------------------------------------------------------------------
 FROM registry.access.redhat.com/hi/python:${PYTHON_HI_VERSION}@${PYTHON_HI_RUNTIME_DIGEST}
 
-ARG APP_VERSION=1.0.4
+ARG APP_VERSION=1.0.6
 
 USER 0
 WORKDIR /app

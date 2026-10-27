@@ -3,7 +3,7 @@
 All notable StallTrip releases are listed here. Version strings are kept in sync
 across `VERSION`, `server.py` (`APP_VERSION`), Dockerfile labels, and compose image tags.
 
-## [1.0.4] — 2026-10-27
+## [1.0.6] — 2026-10-27
 
 ### Fixed
 
@@ -17,6 +17,7 @@ across `VERSION`, `server.py` (`APP_VERSION`), Dockerfile labels, and compose im
 
 ### Changed
 
-- Docker image/container names aligned to `stalltrip:1.0.4`
+- Docker image/container names aligned to `stalltrip:1.0.6`
 - HI Python 3.12 builder/runtime digests refreshed to current registry tags
-- Health + `Server` header advertise `StallTrip` / `1.0.4`
+- Health + `Server` header advertise `StallTrip` / `1.0.6`
+- Release identity normalized to **v1.0.6** across VERSION, Dockerfile, compose, docs, and scripts
