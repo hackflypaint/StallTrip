@@ -29,6 +29,8 @@ const state = {
   origin: null,        // { name, lat, lng }
   destination: null,   // { name, lat, lng }
   activePlan: null,
+  /** Prior plan kept across clearActivePlan({ snapshotForRestore }) for failed replan restore. */
+  planRestoreSnapshot: null,
   map: null,
   markersLayer: null,
   corridorLayer: null,
@@ -436,8 +438,8 @@ function closeMobileSheet() {
 window.setMobileSheetOpen = setMobileSheetOpen;
 
 /**
- * Normalize geolocation success / error into an origin place.
- * On error (or missing coords), use the SF Ferry Building demo fallback.
+ * Normalize geolocation success into an origin place.
+ * On error / missing coords returns null (never silently seeds San Francisco).
  */
 function resolveGeolocationPlace(position, error) {
   if (!error && position && position.coords) {
@@ -451,12 +453,8 @@ function resolveGeolocationPlace(position, error) {
       };
     }
   }
-  return {
-    name: "San Francisco, CA (Default)",
-    lat: 37.7955,
-    lng: -122.3937,
-    source: "fallback",
-  };
+  // Never silently seed San Francisco — callers toast and let the user choose.
+  return null;
 }
 
 window.resolveGeolocationPlace = resolveGeolocationPlace;
@@ -2745,12 +2743,7 @@ function detectCurrentLocation() {
     return;
   }
   if (!navigator.geolocation) {
-    if (isMobileShell()) {
-      // Phone shell: keep demo fallback so trip UX stays testable without GPS
-      applyOriginFromGeolocation(resolveGeolocationPlace(null, { code: 0, message: "unsupported" }));
-    } else {
-      showToast("Location unavailable. Use a preset or Edit to type an address.");
-    }
+    showToast("Location unavailable. Use a preset or type a starting address.");
     return;
   }
 
@@ -2761,7 +2754,9 @@ function detectCurrentLocation() {
       setLocateBusy(false);
       syncLiveLocationUi();
       if (isMobileShell()) {
-        applyOriginFromGeolocation(resolveGeolocationPlace(pos, null));
+        const place = resolveGeolocationPlace(pos, null);
+        if (place) applyOriginFromGeolocation(place);
+        else showToast("Location unavailable. Use a preset or type a starting address.");
         return;
       }
       const coords = {
@@ -2824,10 +2819,28 @@ function setupAutocomplete(inputId, suggestionsId, onSelect) {
   const list = document.getElementById(suggestionsId);
   let timer = null;
   let geocodeSeq = 0;
+  const isOrigin = inputId === "originInput";
 
   input.addEventListener("input", () => {
     clearTimeout(timer);
     const query = input.value.trim();
+    // Typing away from a selected place invalidates coords so Plan cannot
+    // silently use stale geocoded/map-click state that no longer matches the field.
+    const selected = isOrigin ? state.origin : state.destination;
+    if (selected && selected.name && query !== String(selected.name).trim()) {
+      if (isOrigin) {
+        state.origin = null;
+        state.planRestoreSnapshot = null;
+        if (state.activePlan) clearActivePlan();
+      } else {
+        state.destination = null;
+        state.planRestoreSnapshot = null;
+        if (state.activePlan) clearActivePlan();
+      }
+      updateMapMarkers();
+      const clearBtn = document.getElementById(isOrigin ? "clearOrigin" : "clearDest");
+      if (clearBtn && !query) clearBtn.style.display = "none";
+    }
     if (query.length < 3) {
       list.style.display = "none";
       return;
@@ -2974,9 +2987,11 @@ async function planRoute() {
     }
     if (plan.error) {
       showToast(`Routing error: ${plan.error}`, 5600);
+      restorePlanSnapshotIfNeeded();
       return;
     }
 
+    state.planRestoreSnapshot = null;
     state.activePlan = plan;
     if (window.WeatherModule && !state.optionalOverlaysMounted) {
       mountOptionalOverlays();
@@ -2994,6 +3009,7 @@ async function planRoute() {
     if (seq !== state.planRouteSeq) return;
     console.error("Routing error:", err);
     showToast("Failed to compute route. Check network connection.", 5600);
+    restorePlanSnapshotIfNeeded();
   } finally {
     if (seq === state.planRouteSeq) {
       state.planInFlight = false;

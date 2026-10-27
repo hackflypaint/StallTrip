@@ -96,8 +96,8 @@ Prefer `git pull` then `docker compose up -d --build` so the HI image is rebuilt
 
 ### Sync with git (recommended)
 ```bash
-git clone <repository-url> tesla-supercharger-planner
-cd tesla-supercharger-planner
+git clone <repository-url> stalltrip
+cd stalltrip
 git pull --ff-only origin main
 docker compose up -d --build
 # → http://localhost:8080
@@ -128,20 +128,20 @@ docker compose down
 Build and run the standalone image:
 ```bash
 # Build the Docker image
-docker build -t tesla-supercharger-planner:hi-3.12 .
+docker build -t stalltrip:1.0.4 .
 
 # Run the container mapping port 8080
-docker run -d --name tesla-supercharger-planner -p 8080:8080 tesla-supercharger-planner:hi-3.12
+docker run -d --name stalltrip -p 8080:8080 stalltrip:1.0.4
 
 # Inspect logs
-docker logs -f tesla-supercharger-planner
+docker logs -f stalltrip
 
 # Smoke-test health check
 curl http://localhost:8080/api/health
 ```
 To stop and remove the container:
 ```bash
-docker rm -f tesla-supercharger-planner
+docker rm -f stalltrip
 ```
 
 ### Option 3: Local Python (No Docker Required)

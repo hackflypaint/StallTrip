@@ -167,5 +167,45 @@ class TestTeslaRouting(unittest.TestCase):
         # Maximizer with max_stops=20 typically packs many; min+forced should stay leaner
         self.assertLessEqual(len(sc_stops), 10)
 
+    def test_destination_soc_not_floored_when_negative(self):
+        """Insufficient range must report honest (negative) destination SOC, not 5%."""
+        # Forced Baker + short range: Baker→LA exceeds usable range after top-up.
+        plan = routing.plan_trip(
+            origin=(37.7749, -122.4194),
+            destination=(34.0522, -118.2437),
+            routing_mode="MIN_STOPS",
+            forced_charger_ids=[4298],
+            max_range_km=50.0,
+            initial_battery_pct=90.0,
+            target_arrival_pct=15.0,
+            max_stops=20,
+        )
+        dest = next(s for s in plan["stops"] if s["type"] == "DESTINATION")
+        self.assertLess(dest["battery_pct"], 0.0)
+        self.assertNotAlmostEqual(dest["battery_pct"], 5.0, places=1)
+        sc = [s for s in plan["stops"] if s["type"] == "SUPERCHARGER"]
+        self.assertTrue(sc)
+        # Stop arrivals may also go negative — never floored to 5%.
+        self.assertLess(sc[0]["arrival_battery_pct"], 5.0)
+
+    def test_min_stops_forced_detour_does_not_false_complete(self):
+        """Forced Baker + mid range must not pretend dest is reachable via OSRM/haversine mix."""
+        plan = routing.plan_trip(
+            origin=(37.7749, -122.4194),
+            destination=(34.0522, -118.2437),
+            routing_mode="MIN_STOPS",
+            forced_charger_ids=[4298],  # Baker (off direct corridor)
+            max_range_km=200.0,
+            initial_battery_pct=80.0,
+            target_arrival_pct=15.0,
+            max_stops=20,
+        )
+        sc_stops = [s for s in plan["stops"] if s["type"] == "SUPERCHARGER"]
+        self.assertTrue(any(s.get("id") == 4298 and s.get("forced") for s in sc_stops))
+        dest = next(s for s in plan["stops"] if s["type"] == "DESTINATION")
+        # Pre-fix bug: haversine progress vs OSRM total exited early and floored SOC to 5%.
+        self.assertLess(dest["battery_pct"], 15.0)
+        self.assertNotAlmostEqual(dest["battery_pct"], 5.0, places=1)
+
 if __name__ == "__main__":
     unittest.main()

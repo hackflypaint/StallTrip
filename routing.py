@@ -697,26 +697,31 @@ def select_min_stops_for_range(
 
     current_km = 0.0
     remaining_battery_km = current_range_km
-    # Advance along forced stops first so range checks continue past them
+    curr_lat, curr_lng = origin[0], origin[1]
+    # Advance along forced stops first so range checks continue past them.
+    # Use haversine for progress + remaining-to-dest (never mix with direct OSRM km).
     if simulated_stops:
-        curr_lat, curr_lng = origin
         for stop in simulated_stops:
             leg = haversine_km(curr_lat, curr_lng, stop["lat"], stop["lng"])
-            remaining_battery_km = max(0.05 * max_range_km, remaining_battery_km - leg)
+            remaining_battery_km = max(0.0, remaining_battery_km - leg)
             # Top-up at forced stop (same model as plan_trip quick charge)
             remaining_battery_km = max(remaining_battery_km, 0.8 * max_range_km)
             current_km += leg
             curr_lat, curr_lng = stop["lat"], stop["lng"]
 
     while True:
-        dist_to_dest = total_dist_km - current_km
+        # Remaining distance must share the same basis as forced-stop progress
+        # (haversine). Mixing OSRM total_dist_km - haversine current_km falsely
+        # exits after large forced detours (Baker/Seattle on SF→LA).
+        dist_to_dest = haversine_km(curr_lat, curr_lng, destination[0], destination[1])
         if remaining_battery_km - dist_to_dest >= reserve_range_km:
             break
 
         selected_ids = {
             s.get("id") for s in simulated_stops if s.get("id") is not None
         }
-        max_reachable_km = current_km + (remaining_battery_km - reserve_range_km)
+        usable_km = max(0.0, remaining_battery_km - reserve_range_km)
+        max_reachable_km = current_km + usable_km
         reachable = [
             c for c in eligible_chargers
             if current_km + 30.0 < c.get("route_progress_km", 0) <= max_reachable_km
@@ -724,12 +729,32 @@ def select_min_stops_for_range(
         ]
 
         if not reachable:
-            emergency_reachable_km = current_km + (remaining_battery_km - (0.08 * max_range_km))
+            emergency_reachable_km = current_km + max(
+                0.0, remaining_battery_km - (0.08 * max_range_km)
+            )
             reachable = [
                 c for c in eligible_chargers
                 if current_km + 15.0 < c.get("route_progress_km", 0) <= emergency_reachable_km
                 and c.get("id") not in selected_ids
             ]
+
+        # Off-corridor forced stops can push haversine current_km past every
+        # direct-corridor route_progress_km. Fall back to chargers within
+        # haversine range that still get closer to the destination.
+        if not reachable and usable_km > 15.0:
+            geo_reachable = []
+            for c in eligible_chargers:
+                if c.get("id") in selected_ids:
+                    continue
+                d = haversine_km(curr_lat, curr_lng, c["lat"], c["lng"])
+                if not (15.0 < d <= usable_km):
+                    continue
+                closer = haversine_km(c["lat"], c["lng"], destination[0], destination[1]) < (
+                    dist_to_dest - 5.0
+                )
+                if closer:
+                    geo_reachable.append(c)
+            reachable = geo_reachable
 
         if not reachable:
             future = [
@@ -737,13 +762,21 @@ def select_min_stops_for_range(
                 if c.get("route_progress_km", 0) > current_km + 10.0
                 and c.get("id") not in selected_ids
             ]
+            # Prefer nearest along corridor progress (stable vs list order)
             if future:
+                future.sort(key=lambda c: c.get("route_progress_km", 0))
                 reachable = [future[0]]
             else:
                 break
 
         def score_charger(c):
-            progress_ratio = (c.get("route_progress_km", 0) - current_km) / max_range_km
+            # Prefer corridor progress when present; else haversine advance
+            prog = c.get("route_progress_km")
+            if prog is not None and prog > current_km:
+                progress_ratio = (prog - current_km) / max_range_km
+            else:
+                d = haversine_km(curr_lat, curr_lng, c["lat"], c["lng"])
+                progress_ratio = d / max_range_km
             power_bonus = (c.get("power", 150) / 250.0) * 1.5
             detour_penalty = (c.get("detour_km", 0) / 10.0) * 2.0
             stalls_bonus = min(2.0, (c.get("stalls", 8) / 12.0))
@@ -754,7 +787,9 @@ def select_min_stops_for_range(
         entry["forced"] = False
         simulated_stops.append(entry)
 
-        current_km = best_charger.get("route_progress_km", current_km + 200)
+        leg = haversine_km(curr_lat, curr_lng, best_charger["lat"], best_charger["lng"])
+        current_km += leg
+        curr_lat, curr_lng = best_charger["lat"], best_charger["lng"]
         remaining_battery_km = (0.80) * max_range_km
 
         if len(simulated_stops) > 15:
@@ -873,17 +908,23 @@ def plan_trip(
 
     for idx, stop in enumerate(raw_stops):
         leg_dist = haversine_km(curr_point[0], curr_point[1], stop["lat"], stop["lng"])
-        current_battery_km = max(0.05 * max_range_km, current_battery_km - leg_dist)
+        # Do not floor remaining range — report true (possibly negative) arrival SOC
+        # so stranded legs are visible instead of a fake 5% floor.
+        current_battery_km = current_battery_km - leg_dist
         arrival_pct = round((current_battery_km / max_range_km) * 100.0, 1)
 
-        # In Visit Maximizer mode, quick top-ups (e.g. up to 75-80% or +15-20 min visit)
+        # Quick top-up model: never charge *down* if arrival is already high.
         target_pct = min(85.0, max(arrival_pct + 15.0, 75.0))
-        pct_to_add = max(10.0, target_pct - arrival_pct)
+        if arrival_pct > target_pct:
+            target_pct = arrival_pct
+        pct_to_add = max(0.0, target_pct - arrival_pct)
         try:
             charge_speed = max(100, int(float(stop.get("power") or 150)))
         except (TypeError, ValueError):
             charge_speed = 150
-        charge_duration_min = round(pct_to_add * 0.38 * (250.0 / charge_speed) + 4.0)
+        charge_duration_min = (
+            round(pct_to_add * 0.38 * (250.0 / charge_speed) + 4.0) if pct_to_add > 0 else 0.0
+        )
 
         current_battery_km = (target_pct / 100.0) * max_range_km
         curr_point = (stop["lat"], stop["lng"])
@@ -957,7 +998,8 @@ def plan_trip(
         })
     # Destination
     last_leg_dist = haversine_km(curr_point[0], curr_point[1], dest_lat, dest_lng)
-    dest_battery_pct = round(max(5.0, ((current_battery_km - last_leg_dist) / max_range_km) * 100.0), 1)
+    # Honest destination SOC (may be negative when range is insufficient).
+    dest_battery_pct = round(((current_battery_km - last_leg_dist) / max_range_km) * 100.0, 1)
     stops_summary.append({
         "type": "DESTINATION",
         "name": "Destination",

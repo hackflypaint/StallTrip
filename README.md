@@ -1,12 +1,14 @@
-# Tesla Supercharger Route Planner
+# StallTrip — Supercharger Route Planner
 
 Plan EV road trips that **maximize Supercharger visits** along a corridor (or minimize stops for range). Map area tools (box / freehand / clear) force-include stations. Dark Leaflet UI, bundled global Supercharger dataset, Docker on **Red Hat Hardened Images (HI)**.
+
+**Version:** v1.0.4
 
 ## Quick start (git)
 
 ```bash
-git clone <repository-url> tesla-supercharger-planner
-cd tesla-supercharger-planner
+git clone <repository-url> stalltrip
+cd stalltrip
 git checkout main
 git pull --ff-only origin main
 docker compose up -d --build
@@ -17,7 +19,7 @@ curl -fsS http://localhost:8080/api/health
 Everyday update:
 
 ```bash
-cd tesla-supercharger-planner
+cd stalltrip
 git pull --ff-only origin main
 docker compose up -d --build
 ```
@@ -69,7 +71,7 @@ COST_PROFILE=lean python3 server.py 8080
 
 ## Image tag
 
-`tesla-supercharger-planner:hi-3.12` — see [HI build process](./code-architecture.md#hi-build-process).
+`stalltrip:1.0.4` (compose service/container `stalltrip`) — see [HI build process](./code-architecture.md#hi-build-process).
 Dockerfile HI bases are **pinned by digest** (refresh digests when bumping the HI stream).
 
 ## License & attribution
@@ -82,9 +84,11 @@ Dockerfile HI bases are **pinned by digest** (refresh digests when bumping the H
 
 Geocode and plan-route limits key by client IP. Direct expose uses the TCP peer
 address only. If you terminate TLS or load-balance in front of the container, set
-`TRUST_PROXY=1` so limits honor `X-Forwarded-For` / `Forwarded` (left-most client).
-**Only enable when the proxy overwrites untrusted client forwarded headers** —
-otherwise clients can spoof IPs and evade or share buckets.
+`TRUST_PROXY=1` so limits honor `X-Forwarded-For` / `Forwarded` (right-most
+client as seen by the immediate proxy; `TRUST_PROXY_HOPS` peels further from
+the right). **Only enable when the proxy overwrites untrusted client forwarded
+headers** — otherwise clients can spoof IPs and evade or share buckets. If the
+forwarded chain is shorter than `TRUST_PROXY_HOPS`, the TCP peer is used.
 
 Tune with `PLAN_RATE_LIMIT`, `GEOCODE_RATE_LIMIT`, and `PLAN_RATE_WINDOW_SEC`.
 For local E2E only, set `ALLOW_TEST_RATE_BYPASS` to a shared secret and send the

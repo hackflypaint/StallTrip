@@ -445,7 +445,7 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
     """Handles static files and REST API endpoints for Tesla Supercharger planning."""
 
     # Do not leak Python version via the Server response header.
-    server_version = "SuperchargerPlanner"
+    server_version = f"{APP_NAME}/{APP_VERSION}"
     sys_version = ""
 
     def __init__(self, *args, **kwargs):
@@ -492,7 +492,8 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             redirect_on = platform_ua_redirect_enabled()
             self.send_json_response({
                 "status": "healthy",
-                "service": "Tesla Supercharger Route Planner",
+                "service": APP_NAME,
+                "version": APP_VERSION,
                 "mobile_shell": "/mobile",
                 "tesla_shell": "/tesla",
                 "cost_profile": "lean" if cost_profile_lean() else "default",
