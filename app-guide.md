@@ -128,10 +128,10 @@ docker compose down
 Build and run the standalone image:
 ```bash
 # Build the Docker image
-docker build -t stalltrip:1.0.6 .
+docker build -t stalltrip:1.0.7 .
 
 # Run the container mapping port 8080
-docker run -d --name stalltrip -p 8080:8080 stalltrip:1.0.6
+docker run -d --name stalltrip -p 8080:8080 stalltrip:1.0.7
 
 # Inspect logs
 docker logs -f stalltrip

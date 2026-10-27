@@ -16,7 +16,7 @@ Approximate sizes from the packaged app tree (~5k LOC excluding `data/` and foli
 | `routing.py` | ~850 | Core domain: load JSON, query, geocode, OSRM, corridor search, trip planning |
 | `main.py` | ~20 | Legacy SimpleSample clock script (not used by the planner) |
 | `Dockerfile` | ~49 | Multi-stage Red Hat HI Python 3.12 build |
-| `docker-compose.yml` | ~16 | Service `stalltrip`, HI build arg, image tag `stalltrip:1.0.6` |
+| `docker-compose.yml` | ~16 | Service `stalltrip`, HI build arg, image tag `stalltrip:1.0.7` |
 | `.dockerignore` | — | Drops `__pycache__`, `node_modules`, etc. |
 | `README.md` | — | Quick start: git clone/pull + Docker |
 
@@ -278,7 +278,7 @@ Important: HEALTHCHECK and ENTRYPOINT use **exec JSON form** because the HI runt
 build:
   args:
     PYTHON_HI_VERSION: "3.12"
-image: stalltrip:1.0.6
+image: stalltrip:1.0.7
 ```
 
 ### 6.4 Commands
@@ -288,12 +288,12 @@ image: stalltrip:1.0.6
 docker compose up --build -d
 
 # Equivalent CLI
-docker build -t stalltrip:1.0.6 .
+docker build -t stalltrip:1.0.7 .
 docker run -d --name stalltrip -p 8080:8080 \
-  stalltrip:1.0.6
+  stalltrip:1.0.7
 
 # Podman (cloud CI style)
-podman build --format docker -t stalltrip:1.0.6 .
+podman build --format docker -t stalltrip:1.0.7 .
 ```
 
 Expect on the order of ~100–120 MB image after a successful HI build (environment-dependent).

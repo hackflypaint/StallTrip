@@ -174,20 +174,25 @@ window.isTeslaPath = isTeslaPath;
   }
 
   function redact(text) {
-    return String(text || "")
-      .replace(
-        /authorization\s*[:=]\s*bearer\s+\S+/gi,
-        "[redacted]"
-      )
-      .replace(
-        /(authorization|api[_-]?key|token|password|secret)\s*[:=]\s*\S+/gi,
-        "$1=[redacted]"
-      )
-      .replace(/\bbearer\s+[A-Za-z0-9\-._~+/]+=*/gi, "bearer=[redacted]")
-      .replace(
-        /\b(lat(?:itude)?|lon(?:gitude)?|lng)\s*[:=]\s*-?\d+(?:\.\d+)?/gi,
-        "$1=[redacted]"
-      );
+    // Mirror server.sanitize_log_text: strip unsafe controls BEFORE secret/geo regex.
+    let s = String(text || "").replace(/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/g, " ");
+    s = s.replace(/ {2,}/g, " ").trim();
+    s = s.replace(/authorization\s*[:=]\s*\S+(?:\s+\S+)?/gi, "[redacted]");
+    s = s.replace(/(?:set-)?cookie\s*[:=]\s*\S+/gi, "[redacted]");
+    s = s.replace(
+      /"(api[_-]?key|token|password|secret|authorization)"\s*:\s*"[^"]*"/gi,
+      '"$1":"[redacted]"'
+    );
+    s = s.replace(
+      /(api[_-]?key|token|password|secret)\s*[:=]\s*\S+/gi,
+      "$1=[redacted]"
+    );
+    s = s.replace(/\bbearer\s+[A-Za-z0-9\-._~+/]+=*/gi, "[redacted]");
+    s = s.replace(
+      /\b(lat(?:itude)?|lon(?:gitude)?|lng)\s*[:=]\s*-?\d+(?:\.\d+)?/gi,
+      "$1=[redacted]"
+    );
+    return s;
   }
 
   function serializeArg(arg) {

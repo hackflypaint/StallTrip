@@ -94,9 +94,14 @@ class TestSecurityHardening(unittest.TestCase):
         self.assertIn("https://unpkg.com/leaflet@1.9.4/dist/leaflet.css", csp)
         self.assertNotIn("script-src 'self' https://unpkg.com;", csp)
         self.assertNotRegex(csp, r"script-src[^;]*https://unpkg.com[;\s]")
-        # Source maps (leaflet.js.map / FA) need host connect; not executable script hosts
-        self.assertRegex(csp, r"connect-src[^;]*https://unpkg.com[\s;]")
-        self.assertRegex(csp, r"connect-src[^;]*https://cdnjs.cloudflare.com[\s;]")
+        # connect-src path-pinned (no bare CDN hosts) for source maps / webfonts
+        self.assertRegex(csp, r"connect-src[^;]*https://unpkg\.com/leaflet@1\.9\.4/")
+        self.assertRegex(
+            csp,
+            r"connect-src[^;]*https://cdnjs\.cloudflare\.com/ajax/libs/font-awesome/6\.5\.1/",
+        )
+        self.assertNotRegex(csp, r"connect-src[^;]*https://unpkg\.com[\s;]")
+        self.assertNotRegex(csp, r"connect-src[^;]*https://cdnjs\.cloudflare\.com[\s;]")
         data = json.loads(body)
         self.assertEqual(data["status"], "healthy")
         limits = data.get("limits") or {}
@@ -267,6 +272,13 @@ class TestSecurityHardening(unittest.TestCase):
         status, _, body = self._post("/api/plan-route", huge)
         self.assertEqual(status, 413)
         self.assertIn(b"too large", body)
+
+    def test_plan_route_nested_json_returns_400(self):
+        """Pathologically nested arrays must not 500 (RecursionError → 400)."""
+        nested = ("[" * 2000 + "]" * 2000).encode("utf-8")
+        status, _, body = self._post("/api/plan-route", nested)
+        self.assertEqual(status, 400)
+        self.assertIn(b"JSON", body)
 
     def test_plan_route_rejects_bad_coords(self):
         status, _, body = self._post(

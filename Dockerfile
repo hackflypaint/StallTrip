@@ -4,13 +4,13 @@
 #
 # Images are public (no Red Hat subscription required for HI pulls from registry.access.redhat.com).
 # Base images are pinned by digest (tag kept for humans). Refresh digests when bumping HI.
-# App version: keep LABEL / compose tag / server.APP_VERSION / VERSION in sync (v1.0.6).
+# App version: keep LABEL / compose tag / server.APP_VERSION / VERSION in sync (v1.0.7).
 
 ARG PYTHON_HI_VERSION=3.12
 # Digests resolved 2026-10-27 via crane digest registry.access.redhat.com/hi/python:…
-ARG PYTHON_HI_BUILDER_DIGEST=sha256:4616ad2ef27c0dd3238b3c2817281c367fe460b182c47607d6f65132b257aba9
-ARG PYTHON_HI_RUNTIME_DIGEST=sha256:14ce8115a8eb67f602070b85bee19e22856a760454e74afed17a23d41cc1ddc2
-ARG APP_VERSION=1.0.6
+ARG PYTHON_HI_BUILDER_DIGEST=sha256:5d594c664934281bca4835c2f6129c56578f111ec7355eb9ff1fab99a4a90129
+ARG PYTHON_HI_RUNTIME_DIGEST=sha256:c0fe77230ba2380b1f4031c56186a2ee23ca1c6dc15137c571a69458ba482832
+ARG APP_VERSION=1.0.7
 
 # ---------------------------------------------------------------------------
 # Stage 1 — builder: stage app, byte-compile, import-check
@@ -19,10 +19,15 @@ FROM registry.access.redhat.com/hi/python:${PYTHON_HI_VERSION}-builder@${PYTHON_
 
 USER 0
 WORKDIR /build
+# Own the build tree so UID 65532 can write __pycache__ during compileall.
+RUN ["chown", "65532:65532", "/build"]
 
-COPY routing.py server.py ./
-COPY data/ ./data/
-COPY static/ ./static/
+COPY --chown=65532:65532 routing.py server.py ./
+COPY --chown=65532:65532 data/ ./data/
+COPY --chown=65532:65532 static/ ./static/
+
+# Drop privileges before compile/import smoke (matches runtime UID).
+USER 65532
 
 # Stdlib-only app: no pip install. Compile + import smoke to fail the build early.
 RUN ["python3", "-m", "compileall", "-q", "."]
@@ -33,7 +38,7 @@ RUN ["python3", "-c", "import routing; import server"]
 # ---------------------------------------------------------------------------
 FROM registry.access.redhat.com/hi/python:${PYTHON_HI_VERSION}@${PYTHON_HI_RUNTIME_DIGEST}
 
-ARG APP_VERSION=1.0.6
+ARG APP_VERSION=1.0.7
 
 USER 0
 WORKDIR /app

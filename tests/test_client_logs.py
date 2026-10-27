@@ -235,6 +235,17 @@ class TestClientLogs(unittest.TestCase):
         self.assertIn("ok", out)
         self.assertIn("end", out)
 
+    def test_sanitize_strips_before_secret_regex(self):
+        # NUL inside credentials would evade regex if redaction ran first.
+        out = server.sanitize_log_text(
+            "Authorization: Bearer\x00super-secret-token lat=37.7749",
+            200,
+        )
+        self.assertIn("[redacted]", out)
+        self.assertNotIn("super-secret-token", out)
+        self.assertNotIn("37.7749", out)
+        self.assertNotIn("\x00", out)
+
     def test_redacts_authorization_bearer_and_geo(self):
         accepted, rejected = server.validate_client_log_entries(
             {
@@ -259,6 +270,34 @@ class TestClientLogs(unittest.TestCase):
         self.assertNotIn("37.7749", msg)
         self.assertNotIn("-122.4194", msg)
         self.assertNotIn("eyJhbGciOiJIUzI1NiJ9", stack)
+
+    def test_redacts_auth_any_scheme_cookie_and_json_secrets(self):
+        samples = [
+            "Authorization: Basic dXNlcjpwYXNz",
+            "Authorization: Digest abcdef",
+            "Cookie: session=abc123; theme=dark",
+            "Set-Cookie: sid=xyz; HttpOnly",
+            '{"password":"hunter2","token":"tok_live_1","api_key":"k"}',
+            "lng=-122.4194 latitude=37.7749",
+        ]
+        for raw in samples:
+            out = server.sanitize_log_text(raw, 400)
+            self.assertIn("[redacted]", out, raw)
+            self.assertNotIn("dXNlcjpwYXNz", out)
+            self.assertNotIn("abcdef", out)
+            self.assertNotIn("abc123", out)
+            self.assertNotIn("xyz", out)
+            self.assertNotIn("hunter2", out)
+            self.assertNotIn("tok_live_1", out)
+            self.assertNotIn('"k"', out)
+            self.assertNotIn("-122.4194", out)
+            self.assertNotIn("37.7749", out)
+
+    def test_client_logs_nested_json_returns_400(self):
+        nested = ("[" * 2000 + "]" * 2000).encode("utf-8")
+        status, _, body = self._post("/api/client-logs", nested)
+        self.assertEqual(status, 400)
+        self.assertIn(b"JSON", body)
 
     def test_global_budget_returns_429(self):
         prev_global = server.CLIENT_LOG_GLOBAL_RATE_LIMIT

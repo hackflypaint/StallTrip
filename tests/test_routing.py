@@ -134,6 +134,34 @@ class TestTeslaRouting(unittest.TestCase):
         self.assertAlmostEqual(coords[0]["lat"], 37.7749)
         self.assertAlmostEqual(coords[0]["lng"], -122.4194)
 
+    def test_nominatim_user_agent_version_and_contact(self):
+        prev_v = os.environ.pop("APP_VERSION", None)
+        prev_c = os.environ.pop("NOMINATIM_CONTACT", None)
+        try:
+            os.environ["APP_VERSION"] = "1.0.7"
+            ua = routing.nominatim_user_agent()
+            self.assertEqual(ua, "StallTrip/1.0.7")
+            os.environ["NOMINATIM_CONTACT"] = "ops@example.com"
+            ua2 = routing.nominatim_user_agent()
+            self.assertEqual(ua2, "StallTrip/1.0.7 (ops@example.com)")
+            # CR/LF stripped (header-injection guard)
+            os.environ["NOMINATIM_CONTACT"] = "evil\r\nX-Injected: 1"
+            ua3 = routing.nominatim_user_agent()
+            self.assertNotIn("\r", ua3)
+            self.assertNotIn("\n", ua3)
+            self.assertIn("StallTrip/1.0.7", ua3)
+            self.assertIn("evil", ua3)
+            self.assertIn("X-Injected: 1", ua3)  # text may remain, but not as a new header line
+        finally:
+            if prev_v is None:
+                os.environ.pop("APP_VERSION", None)
+            else:
+                os.environ["APP_VERSION"] = prev_v
+            if prev_c is None:
+                os.environ.pop("NOMINATIM_CONTACT", None)
+            else:
+                os.environ["NOMINATIM_CONTACT"] = prev_c
+
     def test_max_stops_clamped_to_fifty(self):
         """max_stops above UI/backend ceiling (50) must clamp without error."""
         plan = routing.plan_trip(

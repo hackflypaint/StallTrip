@@ -24,10 +24,10 @@ import routing
 
 # ---------------------------------------------------------------------------
 # Release identity — keep in sync with Dockerfile labels, compose image tag,
-# VERSION, and CHANGELOG.md (current cut: v1.0.6).
+# VERSION, and CHANGELOG.md (current cut: v1.0.7).
 # ---------------------------------------------------------------------------
 APP_NAME = "StallTrip"
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
 
 # ---------------------------------------------------------------------------
 # Structured stdout logging (Docker / Lightsail capture stdout+stderr for free)
@@ -64,6 +64,11 @@ def configure_logging() -> None:
 configure_logging()
 
 PORT = int(os.environ.get("PORT", 8080))
+# Listen address inside the process (compose publishes 127.0.0.1:8080 on the host by default).
+BIND_ADDR = (
+    (os.environ.get("BIND_ADDR") or "0.0.0.0").replace("\r", "").replace("\n", "").strip()
+    or "0.0.0.0"
+)
 STATIC_DIR = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"))
 
 # Platform UA redirect on GET/HEAD `/` (ON by default):
@@ -265,11 +270,12 @@ CLIENT_LOG_MAX_MESSAGE_LEN = 500
 CLIENT_LOG_MAX_STACK_LEN = 1500
 CLIENT_LOG_MAX_URL_LEN = 300
 CLIENT_LOG_ALLOWED_LEVELS = frozenset({"error", "warn", "info"})
-# Prefer Authorization: Bearer <token> before bare authorization=/bearer= forms.
+# Prefer Authorization <any-scheme>, Cookie/Set-Cookie, JSON secrets, then bare key= forms.
 _CLIENT_SECRETISH_RE = re.compile(
     r"(?i)("
-    r"authorization\s*[:=]\s*bearer\s+\S+"
-    r"|authorization\s*[:=]\s*\S+"
+    r"authorization\s*[:=]\s*\S+(?:\s+\S+)?"
+    r"|(?:set-)?cookie\s*[:=]\s*\S+"
+    r"|\"(?:api[_-]?key|token|password|secret|authorization)\"\s*:\s*\"[^\"]*\""
     r"|bearer\s+[A-Za-z0-9\-._~+/]+=*"
     r"|api[_-]?key\s*[:=]\s*\S+"
     r"|token\s*[:=]\s*\S+"
@@ -370,14 +376,18 @@ def _unsafe_log_char(ch: str) -> bool:
 
 
 def sanitize_log_text(value: Any, max_len: int) -> str:
-    """Truncate and strip C*/U+2028/2029 / secretish pairs / lat-lon for safe logging."""
+    """Truncate and strip C*/U+2028/2029 / secretish pairs / lat-lon for safe logging.
+
+    Control/separator chars are removed *before* secret/geo regex so embedded NULs
+    or newlines cannot evade Authorization / Cookie / JSON redaction.
+    """
     if value is None:
         return ""
     text = str(value)
-    text = _CLIENT_SECRETISH_RE.sub("[redacted]", text)
-    text = _CLIENT_GEO_RE.sub(r"\1=[redacted]", text)
     text = "".join(" " if _unsafe_log_char(ch) else ch for ch in text)
     text = re.sub(r" {2,}", " ", text).strip()
+    text = _CLIENT_SECRETISH_RE.sub("[redacted]", text)
+    text = _CLIENT_GEO_RE.sub(r"\1=[redacted]", text)
     if len(text) > max_len:
         return text[: max_len - 1] + "…"
     return text
@@ -662,6 +672,10 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             return None
         try:
             data = json.loads(raw.decode("utf-8"))
+        except RecursionError:
+            # Pathologically nested JSON (e.g. '[' * 2000) can blow the decoder stack.
+            self.send_json_response({"error": "Invalid JSON body"}, status=400)
+            return None
         except (UnicodeDecodeError, json.JSONDecodeError):
             self.send_json_response({"error": "Invalid JSON body"}, status=400)
             return None
@@ -1142,8 +1156,8 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
         # Removable modules: foliage (Explore Fall) + airspace (FAA/NPS ArcGIS).
         # Same-origin UI — no Access-Control-Allow-Origin (prevents cross-site OSRM proxying).
         # CDN allowlists pin exact Leaflet / Font Awesome paths (SRI in index.html).
-        # script-src stays path-pinned (no bare unpkg host). connect-src allows https://unpkg.com
-        # so DevTools can fetch leaflet.js.map without widening executable script hosts.
+        # script-src stays path-pinned (no bare unpkg host). connect-src is path-pinned too
+        # (leaflet@1.9.4 / font-awesome/6.5.1) so DevTools .map fetches stay narrow.
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; "
@@ -1158,7 +1172,8 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             "https://*.tile.opentopomap.org https://unpkg.com/leaflet@1.9.4/dist/images/ "
             "https://www.explorefall.com "
             "https://tilecache.rainviewer.com https://*.rainviewer.com; "
-            "connect-src 'self' https://unpkg.com https://cdnjs.cloudflare.com "
+            "connect-src 'self' https://unpkg.com/leaflet@1.9.4/ "
+            "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/ "
             "https://services6.arcgis.com https://services1.arcgis.com https://*.arcgis.com "
             "https://api.rainviewer.com https://api.open-meteo.com; "
             "frame-ancestors 'none'; "
@@ -1317,12 +1332,17 @@ def run_server(port: int = PORT):
         request_queue_size = 32
         timeout = REQUEST_SOCKET_TIMEOUT_SEC
 
-    with ThreadedReusableServer(("", port), SuperchargerRequestHandler) as httpd:
+    bind_host = BIND_ADDR
+    with ThreadedReusableServer((bind_host, port), SuperchargerRequestHandler) as httpd:
         profile = "lean" if cost_profile_lean() else "default"
         ua_mode = "on" if platform_ua_redirect_enabled() else "off"
         proxy_mode = "on" if trust_proxy_enabled() else "off"
         _LOG.info("============================================================")
+<<<<<<< HEAD
         _LOG.info("Tesla Supercharger Route Planner on port %s", port)
+=======
+        _LOG.info("%s v%s on %s:%s", APP_NAME, APP_VERSION, bind_host, port)
+>>>>>>> d0a763f (StallTrip v1.0.7: security scan hygiene and Docker hardening)
         _LOG.info("Desktop:  http://localhost:%s/", port)
         _LOG.info("Mobile:   http://localhost:%s/mobile", port)
         _LOG.info("Tesla:    http://localhost:%s/tesla", port)
