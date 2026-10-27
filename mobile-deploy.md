@@ -41,13 +41,13 @@ curl -fsS http://localhost:8080/api/health | python3 -m json.tool
 Podman-style:
 
 ```bash
-podman build --format docker -t stalltrip:1.0.4 .
+podman build --format docker -t stalltrip:1.0.6 .
 podman run -d --name stalltrip -p 8080:8080 \
   -e COST_PROFILE=lean \
   --read-only --tmpfs /tmp:size=16m \
   --user 65532:65532 \
   --memory 512m --pids-limit 256 \
-  stalltrip:1.0.4
+  stalltrip:1.0.6
 ```
 
 ## What burns money / quota (and how we limit it)

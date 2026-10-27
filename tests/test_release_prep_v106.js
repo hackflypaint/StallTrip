@@ -1,6 +1,6 @@
 /**
- * Minimal regression coverage for v1.0.4 usability fixes (pure / sliced).
- * Run: node tests/test_release_prep_v104.js
+ * Minimal regression coverage for v1.0.6 usability fixes (pure / sliced).
+ * Run: node tests/test_release_prep_v106.js
  */
 const fs = require("fs");
 const path = require("path");
@@ -79,7 +79,7 @@ function run() {
   testInputMismatchInvalidatesState();
   testAirspaceKeepsLastGoodNofly();
   testDestinationToneDangerForNegative();
-  console.log("test_release_prep_v104.js: ALL PASSED");
+  console.log("test_release_prep_v106.js: ALL PASSED");
 }
 
 run();

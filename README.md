@@ -2,7 +2,7 @@
 
 Plan EV road trips that **maximize Supercharger visits** along a corridor (or minimize stops for range). Map area tools (box / freehand / clear) force-include stations. Dark Leaflet UI, bundled global Supercharger dataset, Docker on **Red Hat Hardened Images (HI)**.
 
-**Version:** v1.0.4
+**Version:** v1.0.6
 
 ## Quick start (git)
 
@@ -71,7 +71,7 @@ COST_PROFILE=lean python3 server.py 8080
 
 ## Image tag
 
-`stalltrip:1.0.4` (compose service/container `stalltrip`) — see [HI build process](./code-architecture.md#hi-build-process).
+`stalltrip:1.0.6` (compose service/container `stalltrip`) — see [HI build process](./code-architecture.md#hi-build-process).
 Dockerfile HI bases are **pinned by digest** (refresh digests when bumping the HI stream).
 
 ## License & attribution

@@ -63,7 +63,7 @@ def main() -> None:
         fail("compose should pin user 65532 to match HI runtime")
     if "PYTHON_HI_VERSION" not in COMPOSE:
         fail("compose should pass PYTHON_HI_VERSION build arg")
-    if "stalltrip:1.0.4" not in COMPOSE and 'image: stalltrip:' not in COMPOSE:
+    if "stalltrip:1.0.6" not in COMPOSE and 'image: stalltrip:' not in COMPOSE:
         fail("compose image must be stalltrip:<version> (not legacy local-dev names)")
     if "container_name: stalltrip" not in COMPOSE:
         fail("compose container_name must be stalltrip")

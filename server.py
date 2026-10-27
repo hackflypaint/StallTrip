@@ -23,6 +23,13 @@ from typing import Any, Dict, List, Optional, Tuple
 import routing
 
 # ---------------------------------------------------------------------------
+# Release identity — keep in sync with Dockerfile labels, compose image tag,
+# VERSION, and CHANGELOG.md (current cut: v1.0.6).
+# ---------------------------------------------------------------------------
+APP_NAME = "StallTrip"
+APP_VERSION = "1.0.6"
+
+# ---------------------------------------------------------------------------
 # Structured stdout logging (Docker / Lightsail capture stdout+stderr for free)
 # ---------------------------------------------------------------------------
 _LOG = logging.getLogger("stalltrip")

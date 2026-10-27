@@ -6,8 +6,8 @@ services:
       # Red Hat Hardened Images Python stream (builder + runtime multi-stage)
       args:
         PYTHON_HI_VERSION: "3.12"
-        APP_VERSION: "1.0.4"
-    image: stalltrip:1.0.4
+        APP_VERSION: "1.0.6"
+    image: stalltrip:1.0.6
     container_name: stalltrip
     ports:
       - "8080:8080"
