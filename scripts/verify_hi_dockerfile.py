@@ -59,6 +59,12 @@ def main() -> None:
         fail("compose should pin user 65532 to match HI runtime")
     if "PYTHON_HI_VERSION" not in COMPOSE:
         fail("compose should pass PYTHON_HI_VERSION build arg")
+    if "stalltrip:1.0.4" not in COMPOSE and 'image: stalltrip:' not in COMPOSE:
+        fail("compose image must be stalltrip:<version> (not legacy local-dev names)")
+    if "container_name: stalltrip" not in COMPOSE:
+        fail("compose container_name must be stalltrip")
+    if "org.opencontainers.image.version" not in DOCKERFILE:
+        fail("Dockerfile should label org.opencontainers.image.version")
     print("verify_hi_dockerfile.py: OK")
 
 

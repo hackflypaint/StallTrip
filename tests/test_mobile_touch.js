@@ -15,12 +15,8 @@ function resolveGeolocationPlace(position, error) {
       };
     }
   }
-  return {
-    name: "San Francisco, CA (Default)",
-    lat: 37.7955,
-    lng: -122.3937,
-    source: "fallback",
-  };
+  // Deny / unsupported / bad coords → null (do not silently seed SF).
+  return null;
 }
 
 function exploreFetchLimit(mobileShell) {
@@ -41,11 +37,10 @@ function run() {
   assert(ok.lat === 40.7 && ok.lng === -74.0, "coords copied");
 
   const denied = resolveGeolocationPlace(null, { code: 1, message: "denied" });
-  assert(denied.source === "fallback", "error uses fallback");
-  assert(denied.lat === 37.7955, "SF ferry fallback lat");
+  assert(denied === null, "permission deny must not seed SF fallback");
 
   const bad = resolveGeolocationPlace({ coords: { latitude: NaN, longitude: 0 } }, null);
-  assert(bad.source === "fallback", "NaN coords fall back");
+  assert(bad === null, "NaN coords must not seed SF fallback");
 
   assert(exploreFetchLimit(true) === 60, "mobile explore limit");
   assert(exploreFetchLimit(false) === 120, "desktop explore limit");

@@ -146,6 +146,13 @@ class TestSecurityHardening(unittest.TestCase):
                 "10.1.2.3",
             )
             self.assertEqual(bad, "10.1.2.3")
+            # hops longer than chain → peer (never clamp to spoofable left-most)
+            os.environ["TRUST_PROXY_HOPS"] = "5"
+            short = server.client_ip_from_headers(
+                {"X-Forwarded-For": "198.51.100.99, 10.0.0.1"},
+                "127.0.0.1",
+            )
+            self.assertEqual(short, "127.0.0.1")
         finally:
             if prev is None:
                 os.environ.pop("TRUST_PROXY", None)

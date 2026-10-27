@@ -41,13 +41,13 @@ curl -fsS http://localhost:8080/api/health | python3 -m json.tool
 Podman-style:
 
 ```bash
-podman build --format docker -t tesla-supercharger-planner:hi-3.12 .
-podman run -d --name tesla-supercharger-planner -p 8080:8080 \
+podman build --format docker -t stalltrip:1.0.4 .
+podman run -d --name stalltrip -p 8080:8080 \
   -e COST_PROFILE=lean \
   --read-only --tmpfs /tmp:size=16m \
   --user 65532:65532 \
   --memory 512m --pids-limit 256 \
-  tesla-supercharger-planner:hi-3.12
+  stalltrip:1.0.4
 ```
 
 ## What burns money / quota (and how we limit it)

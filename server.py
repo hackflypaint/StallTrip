@@ -23,6 +23,13 @@ from typing import Any, Dict, List, Optional, Tuple
 import routing
 
 # ---------------------------------------------------------------------------
+# Release identity — keep in sync with Dockerfile labels, compose image tag,
+# VERSION, and CHANGELOG.md (next cut: v1.0.4).
+# ---------------------------------------------------------------------------
+APP_NAME = "StallTrip"
+APP_VERSION = "1.0.4"
+
+# ---------------------------------------------------------------------------
 # Structured stdout logging (Docker / Lightsail capture stdout+stderr for free)
 # ---------------------------------------------------------------------------
 _LOG = logging.getLogger("stalltrip")
@@ -170,7 +177,11 @@ def _normalize_ip_token(raw: str) -> Optional[str]:
 
 
 def _pick_forwarded_ip(candidates: List[str], hops: int) -> Optional[str]:
-    """Pick client IP from a left→right hop list using trusted hops from the right."""
+    """Pick client IP from a left→right hop list using trusted hops from the right.
+
+    If the chain is shorter than ``hops``, return None so the caller falls back
+    to the TCP peer — never clamp to the left-most (spoofable) address.
+    """
     parsed: List[str] = []
     for raw in candidates:
         ip = _normalize_ip_token(raw)
@@ -179,9 +190,9 @@ def _pick_forwarded_ip(candidates: List[str], hops: int) -> Optional[str]:
     if not parsed:
         return None
     # hops=1 → right-most; hops=2 → second from right, etc.
+    if len(parsed) < hops:
+        return None
     idx = len(parsed) - hops
-    if idx < 0:
-        idx = 0
     return parsed[idx]
 
 
@@ -445,7 +456,7 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
     """Handles static files and REST API endpoints for Tesla Supercharger planning."""
 
     # Do not leak Python version via the Server response header.
-    server_version = "SuperchargerPlanner"
+    server_version = f"{APP_NAME}/{APP_VERSION}"
     sys_version = ""
 
     def __init__(self, *args, **kwargs):
@@ -489,7 +500,8 @@ class SuperchargerRequestHandler(http.server.SimpleHTTPRequestHandler):
             redirect_on = platform_ua_redirect_enabled()
             self.send_json_response({
                 "status": "healthy",
-                "service": "Tesla Supercharger Route Planner",
+                "service": APP_NAME,
+                "version": APP_VERSION,
                 "mobile_shell": "/mobile",
                 "tesla_shell": "/tesla",
                 "cost_profile": "lean" if cost_profile_lean() else "default",
@@ -1299,7 +1311,7 @@ def run_server(port: int = PORT):
         ua_mode = "on" if platform_ua_redirect_enabled() else "off"
         proxy_mode = "on" if trust_proxy_enabled() else "off"
         _LOG.info("============================================================")
-        _LOG.info("Tesla Supercharger Route Planner on port %s", port)
+        _LOG.info("%s v%s on port %s", APP_NAME, APP_VERSION, port)
         _LOG.info("Desktop:  http://localhost:%s/", port)
         _LOG.info("Mobile:   http://localhost:%s/mobile", port)
         _LOG.info("Tesla:    http://localhost:%s/tesla", port)

@@ -847,6 +847,9 @@
       if (this._layers.uasfmAuth) this._layers.uasfmAuth.clearLayers();
       if (this._layers.uasfmLabels) this._layers.uasfmLabels.clearLayers();
       if (this._layers.points) this._layers.points.clearLayers();
+      // Intentional full clear (overlay off / zoom-out) — drop last-good caches too.
+      this._lastSuaFeatures = [];
+      this._lastTfrFeatures = [];
     },
 
     _setStatus(text) {
@@ -952,8 +955,11 @@
         let uasAuthN = 0;
         let stadiumN = 0;
         let failedLayers = 0;
-        const suaFc = { type: "FeatureCollection", features: [] };
-        const tfrFc = { type: "FeatureCollection", features: [] };
+        // Keep last-good SUA/TFR so a partial fetch failure cannot false-clear no-fly.
+        if (!Array.isArray(this._lastSuaFeatures)) this._lastSuaFeatures = [];
+        if (!Array.isArray(this._lastTfrFeatures)) this._lastTfrFeatures = [];
+        let suaUpdated = false;
+        let tfrUpdated = false;
 
         for (const outcome of settled) {
           if (outcome.status !== "fulfilled") {
@@ -967,9 +973,11 @@
             this._layers.parks.addData(r.gj);
             parkN = (r.gj.features || []).length;
           } else if (r.key === "sua") {
-            suaFc.features = r.gj.features || [];
+            this._lastSuaFeatures = r.gj.features || [];
+            suaUpdated = true;
           } else if (r.key === "defenseTfr") {
-            tfrFc.features = r.gj.features || [];
+            this._lastTfrFeatures = r.gj.features || [];
+            tfrUpdated = true;
           } else if (r.key === "class") {
             this._layers.authPoly.clearLayers();
             this._layers.authPoly.addData(r.gj);
@@ -989,15 +997,18 @@
           }
         }
 
-        this._layers.noFlyPoly.clearLayers();
-        this._layers.noFlyPoly.addData({
-          type: "FeatureCollection",
-          features: [...suaFc.features, ...tfrFc.features],
-        });
+        // Rebuild no-fly from last-known-good caches only (failed job keeps prior).
+        if (suaUpdated || tfrUpdated || this._lastSuaFeatures.length || this._lastTfrFeatures.length) {
+          this._layers.noFlyPoly.clearLayers();
+          this._layers.noFlyPoly.addData({
+            type: "FeatureCollection",
+            features: [...this._lastSuaFeatures, ...this._lastTfrFeatures],
+          });
+        }
         // Restyle parks for Autopylot purple→red zoom step
         if (this._layers.parks) this._layers.parks.setStyle(() => this._parkStyle());
         noFlyN =
-          suaFc.features.length + tfrFc.features.length + stadiumN + uasZeroN;
+          this._lastSuaFeatures.length + this._lastTfrFeatures.length + stadiumN + uasZeroN;
         authN += uasAuthN;
 
         if (zoom < MIN_ZOOM_POINTS && this._layers.points) {

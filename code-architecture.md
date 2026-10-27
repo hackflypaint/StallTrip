@@ -278,7 +278,7 @@ Important: HEALTHCHECK and ENTRYPOINT use **exec JSON form** because the HI runt
 build:
   args:
     PYTHON_HI_VERSION: "3.12"
-image: tesla-supercharger-planner:hi-3.12
+image: stalltrip:1.0.4
 ```
 
 ### 6.4 Commands
@@ -288,12 +288,12 @@ image: tesla-supercharger-planner:hi-3.12
 docker compose up --build -d
 
 # Equivalent CLI
-docker build -t tesla-supercharger-planner:hi-3.12 .
-docker run -d --name tesla-supercharger-planner -p 8080:8080 \
-  tesla-supercharger-planner:hi-3.12
+docker build -t stalltrip:1.0.4 .
+docker run -d --name stalltrip -p 8080:8080 \
+  stalltrip:1.0.4
 
 # Podman (cloud CI style)
-podman build --format docker -t tesla-supercharger-planner:hi-3.12 .
+podman build --format docker -t stalltrip:1.0.4 .
 ```
 
 Expect on the order of ~100–120 MB image after a successful HI build (environment-dependent).

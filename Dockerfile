@@ -4,11 +4,13 @@
 #
 # Images are public (no Red Hat subscription required for HI pulls from registry.access.redhat.com).
 # Base images are pinned by digest (tag kept for humans). Refresh digests when bumping HI.
+# App version: keep LABEL / compose tag / server.APP_VERSION / VERSION in sync (v1.0.4).
 
 ARG PYTHON_HI_VERSION=3.12
-# Digests resolved 2026-10-22 via crane digest registry.access.redhat.com/hi/python:…
-ARG PYTHON_HI_BUILDER_DIGEST=sha256:09959a4cca4236bd065e0fd7fb59b08daa491e9879e423901c20fd670ffcff3c
-ARG PYTHON_HI_RUNTIME_DIGEST=sha256:2764c1d9a5e45115f42b334e3c3dc1b501f18eaf09550ff345f81a564f3b3f49
+# Digests resolved 2026-10-27 via crane digest registry.access.redhat.com/hi/python:…
+ARG PYTHON_HI_BUILDER_DIGEST=sha256:4616ad2ef27c0dd3238b3c2817281c367fe460b182c47607d6f65132b257aba9
+ARG PYTHON_HI_RUNTIME_DIGEST=sha256:14ce8115a8eb67f602070b85bee19e22856a760454e74afed17a23d41cc1ddc2
+ARG APP_VERSION=1.0.4
 
 # ---------------------------------------------------------------------------
 # Stage 1 — builder: stage app, byte-compile, import-check
@@ -31,13 +33,21 @@ RUN ["python3", "-c", "import routing; import server"]
 # ---------------------------------------------------------------------------
 FROM registry.access.redhat.com/hi/python:${PYTHON_HI_VERSION}@${PYTHON_HI_RUNTIME_DIGEST}
 
+ARG APP_VERSION=1.0.4
+
 USER 0
 WORKDIR /app
+
+LABEL org.opencontainers.image.title="StallTrip" \
+      org.opencontainers.image.description="Supercharger Route Planner" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.source="https://github.com/hackflypaint/StallTrip"
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8080 \
-    COST_PROFILE=lean
+    COST_PROFILE=lean \
+    APP_VERSION=${APP_VERSION}
 
 COPY --from=builder --chown=65532:65532 /build/ /app/
 

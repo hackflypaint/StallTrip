@@ -14,8 +14,8 @@ Public GitHub (or your fork) — work from `main`. Clone URL is whatever remote 
 ## Sync with git
 
 ```bash
-git clone <repository-url> tesla-supercharger-planner
-cd tesla-supercharger-planner
+git clone <repository-url> stalltrip
+cd stalltrip
 git checkout main
 git pull --ff-only origin main
 docker compose up -d --build
@@ -25,7 +25,7 @@ docker compose up -d --build
 Everyday update:
 
 ```bash
-cd tesla-supercharger-planner
+cd stalltrip
 git pull --ff-only origin main
 docker compose up -d --build
 ```
